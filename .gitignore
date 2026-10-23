@@ -21,6 +21,8 @@ backend/.env.production
 # Large / licensed binaries — do not commit
 nwrfcsdk/
 nwrfcsdk-linux/
+# SDK archive manifest, left behind when the SDK is unpacked into the repo root
+SIGNATURE.SMF
 mobile.zip
 *.zip
 
