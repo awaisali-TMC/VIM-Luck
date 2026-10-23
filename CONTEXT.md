@@ -19,8 +19,8 @@ for codebase conventions. Last updated: 2026-10-23.
   backend image, the "Purchaser" role rename and line-selection parking, and it has
   **no Non-PO lane** (removed on `DEMO`; ignore Non-PO references in inherited docs).
 - Re-branded to "Lucky Cement Limited" (browser titles + demo invoice bill-to).
-- **Local git only**: `main` is the only branch, there is no remote and no CI trigger.
-  Deploys are manual (§3).
+- **Git**: `main` is the only branch, pushed to the private GitHub repo
+  `awaisali-TMC/VIM-Luck` (`origin`). There is no CI trigger; deploys are manual (§3).
 - **Isolation rule**: Lucky Cement-specific code stays HERE. Porting from VIM-Demo or
   the other customer repos is manual and on demand; nothing flows back.
 
