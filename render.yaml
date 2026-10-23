@@ -1,0 +1,31 @@
+services:
+  - type: web
+    name: einv-api
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+        value: sqlite+aiosqlite:///./invoices.db
+      - key: UPLOAD_DIR
+        value: /tmp/uploads
+      - key: MAX_FILE_SIZE_MB
+        value: "20"
+      - key: GCP_LOCATION
+        value: us
+      # CORS: add your Vercel frontend URL here after deploying frontend
+      # Example: '["https://your-app.vercel.app", "http://localhost:5173"]'
+      - key: CORS_ORIGINS
+        value: '["http://localhost:5173", "http://localhost:8081"]'
+      # Set these in the Render dashboard (Environment tab) — do NOT put real values here
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GCP_PROJECT_ID
+        sync: false
+      - key: DOCAI_PROCESSOR_ID
+        sync: false
+      # Paste base64-encoded service-account-key.json content here
+      # Generate with: base64 -i service-account-key.json (Mac/Linux)
+      # or: [Convert]::ToBase64String([IO.File]::ReadAllBytes("service-account-key.json")) (PowerShell)
+      - key: GCP_CREDENTIALS_JSON
+        sync: false

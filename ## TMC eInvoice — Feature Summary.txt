@@ -1,0 +1,61 @@
+## TMC eInvoice — Feature Summary
+
+### BUILT (All Working)
+
+**Invoice Processing**
+- Upload PDF/JPEG/PNG/TIFF → Google Document AI OCR → Gemini tax detection → Gemini line items → auto product matching
+- Full edit, save, status transitions (draft → processing → validated → approval → posted)
+
+**FBR Compliance**
+- Live NTN/CNIC verification via FBR IRIS 2.0 API
+- WHT compliance checking, auto-verify on save
+- Configurable tax rules engine (GST/WHT/SED/FED) with 10 default Pakistan rules
+
+**Purchase Order Matching**
+- PO create/list/detail with Gemini PDF extraction
+- 2-way (PO ↔ Invoice) and 3-way (PO ↔ GRN/SES ↔ Invoice) matching
+
+**RBAC & Auth**
+- Internal users: email/password login, 8 roles, token sessions, admin user management
+- Suppliers: real OTP login, 4-step self-signup, admin approve/reject
+
+**Multi-Level Approval Workflow**
+- Configurable templates with priority matching, role-based steps, SLA hours
+- Approval queue, approve/reject/delegate actions, progress tracking on invoices
+
+**Audit Trail** — Full entity audit logging with timeline display
+
+**Duplicate Detection** — 3-strategy (exact, probable, possible) with warning banners
+
+**GL Account Coding** — Assign GL codes to invoice headers or individual line items
+
+**Credit/Debit Notes** — Link credit/debit notes to original invoices, net effect calculation
+
+**Multi-Currency** — Exchange rate management, auto-conversion to base currency (PKR)
+
+**Comments & Collaboration** — Threaded comments, resolve/unresolve, internal-only flag
+
+**Auto-Classification** — Rule-based classifier into 8 types (PO material, PO service, non-PO, import, credit note, debit note, utility, expense)
+
+**Analytics Dashboard** — Real-data KPIs, volume trends, top suppliers, tax summary, FBR compliance stats, invoice aging, intake source breakdown
+
+**Email Inbox** — Gmail IMAP fetch, process email attachments directly into invoice pipeline
+
+**Supplier Portal** — Dashboard, upload, invoice history, status tracker, profile page
+
+**Branding** — TMC logo, project name across sidebar, titles, favicon
+
+---
+
+### LEFT TO BUILD
+
+1. **ERP Integration** — SAP/Oracle real-time posting, journal entries, master data sync
+2. **Data Encryption** — Encrypt stored files and sensitive DB fields at rest
+3. **Audit-Grade Storage** — Immutable document storage with versioning and retention
+4. **Live Dashboard Data** — Wire AP/Tax/Auditor dashboards to real analytics (currently mock data)
+5. **Notifications** — Email/SMS alerts for status changes and approvals
+6. **Bulk Processing** — Upload and process multiple invoices at once
+7. **Report Export** — Download dashboards and invoice lists as PDF/Excel
+8. **Real SMS OTP** — Replace dev-mode OTP with SMS gateway (Twilio etc.)
+9. **Supplier Document Upload** — NTN/STRN certificates, bank letter for verification
+10. **Production Deployment** — Docker, HTTPS, secrets management

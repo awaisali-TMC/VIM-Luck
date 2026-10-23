@@ -1,0 +1,50 @@
+Setup Instructions for MEIn Invoice Management App
+Prerequisites
+Python 3.11+
+Node.js 18+ and npm
+Google Cloud service account JSON key with Document AI API enabled
+1. Backend Setup
+cd backend
+
+# Create virtual environment
+python -m venv venv
+
+# Activate it
+# Windows:
+venv\Scripts\activate
+# Mac/Linux:
+source venv/bin/activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Configure environment
+copy .env.example .env
+# Then edit .env and fill in:
+#   GCP_PROJECT_ID=your-gcp-project-id
+#   DOCAI_PROCESSOR_ID=your-processor-id
+#   GOOGLE_APPLICATION_CREDENTIALS=C:\path\to\your-service-account-key.json
+
+# Start the backend server
+uvicorn app.main:app --reload
+
+Backend runs at http://localhost:8000
+
+2. Frontend Setup
+cd frontend
+
+# Install dependencies
+npm install
+
+# Start the dev server
+npm run dev
+
+Frontend runs at http://localhost:5173
+
+3. Usage
+Open http://localhost:5173 in your browser
+Upload Invoice — drag/drop a PDF or image, Document AI extracts all fields
+Save — persists to SQLite database
+Invoice List — click any row to view full details
+Edit — modify fields and line items, Amount auto-calculates from Qty × Rate
+Status Workflow — Draft → Pending Processing → Validated → Posted

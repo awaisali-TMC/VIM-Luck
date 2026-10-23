@@ -1,0 +1,14 @@
+1. List down - features - done sent
+
+2. Tag other users in comments - developed
+
+3. PO receive in supplier portal and flip it to create Invoice - Spendconsole -developed
+
+4. Import PO conditions apply in SAP - R&D
+
+5. SAP - API - Integration - Access Received 
+
+6. Annexure c - validation from portal - fbr - draft or submitted (another meeting required to decide next step)
+
+7. Bestway Cement
+Buy - Coal - PO rate according to Quality - Invoice should be according to inspection report

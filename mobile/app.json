@@ -1,0 +1,46 @@
+{
+  "expo": {
+    "name": "Cognivend",
+    "slug": "cognivend",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "scheme": "cognivend",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0A1628"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.tmc.cognivend",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Cognivend needs camera access to scan invoice pages for data extraction."
+      }
+    },
+    "android": {
+      "package": "com.tmc.cognivend",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0A1628"
+      },
+      "edgeToEdgeEnabled": true
+    },
+    "web": {
+      "bundler": "metro",
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-document-picker",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Cognivend needs camera access to scan invoice pages."
+        }
+      ]
+    ]
+  }
+}

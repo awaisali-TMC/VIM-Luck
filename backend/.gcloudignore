@@ -1,0 +1,22 @@
+# Never upload secrets or local state to Cloud Build
+.env
+.env2
+*.env
+service-account-key.json
+*service-account*.json
+
+# Local data / artifacts
+invoices.db
+*.db
+*.sqlite
+*.sqlite3
+uploads/
+venv/
+__pycache__/
+*.pyc
+*.log
+*.trc
+
+# Local test/probe scripts (not needed in the image)
+test_*.py
+seed_test_data.py

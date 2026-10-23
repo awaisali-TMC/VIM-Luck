@@ -1,0 +1,87 @@
+frontend/node_modules/
+__pycache__/
+frontend/.env
+backend/.env
+backend/venv/
+dist/
+build/
+*.pyc
+.DS_Store
+backend/service-account-key.json
+backend/uploads/
+/tmp/service-account-key.json
+
+frontend/.env
+frontend/.env.local
+frontend/.env.production
+backend/.env
+backend/.env.local
+backend/.env.production
+
+# Large / licensed binaries — do not commit
+nwrfcsdk/
+nwrfcsdk-linux/
+mobile.zip
+*.zip
+
+# Databases & secrets
+*.db
+*.sqlite
+*.sqlite3
+# extra env variants (e.g. backend/.env2) — never commit secrets
+.env2
+*.env2
+backend/.env2
+service-account-key.json
+backend/service-account-key.json
+*service-account*.json
+
+# Python venvs / caches
+venv/
+backend/venv/
+.venv/
+*.egg-info/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+
+# Claude Code internal state (worktrees, settings, session data)
+.claude/
+
+# Vite cache
+.vite/
+frontend/.vite/
+
+# node_modules / build output anywhere in the monorepo
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+build/
+**/build/
+
+# logs & traces
+*.log
+*.trc
+
+# Expo / mobile
+.expo/
+**/.expo/
+# active mobile env (copied from .env.vim / .env.martindow) — keep those + .env.example
+mobile/.env
+mobile/.env.local
+# FBR ATL source files (large, licensed — imported into atl_taxpayers, not committed)
+ATL_IT.xlsx
+ATL_ST.xlsx
+*.xlsx
+
+# Local credentials sheet — NEVER commit (see CONTEXT.md §2)
+content/VIM-PRD-CREDENTIALS*
+
+# Demo invoice PDFs — regenerate with `py -3 backend/generate_demo_invoices.py`
+backend/demo_invoices/
+
+# Fake SAP fixture database (SAP_FAKE_DB_PATH) — generated, delete to reset
+backend/sap_fake.db
+backend/sap_fake.db-journal

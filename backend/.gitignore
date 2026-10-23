@@ -1,0 +1,9 @@
+venv/
+__pycache__/
+*.pyc
+.env
+invoices.db
+service-account-key.json
+uploads/
+=1.0.0
+*.egg-info/

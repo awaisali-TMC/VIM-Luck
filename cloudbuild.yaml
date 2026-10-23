@@ -1,0 +1,40 @@
+# Image build for the Lucky Cement presales instance (manual, no trigger).
+#
+# Runs in the shared presales project tmc-presales-pocs as its default Cloud
+# Build identity, which can push to Artifact Registry but NOT deploy to Cloud
+# Run, so this file only builds and pushes. Rolling the services out is a
+# separate `gcloud run deploy --image` run as you (CONTEXT.md §3):
+#
+#   gcloud builds submit --config=cloudbuild.yaml --project=tmc-presales-pocs \
+#     --substitutions=_TAG=$(git rev-parse --short HEAD)
+#
+# The backend is built with SAP_SDK=off: this instance runs the fixture SAP
+# connector (SAP_MODE=fake), so it needs neither the licensed NW RFC SDK nor
+# PyRFC. Such an image cannot talk to a real SAP system.
+
+substitutions:
+  _TAG: manual
+  _REPO: us-central1-docker.pkg.dev/tmc-presales-pocs/presales-lucky-cement-vim
+  # Backend URL baked into the frontend bundle at build time (Cloud Run's
+  # deterministic <service>-<project-number>.<region>.run.app address).
+  _API_BASE_URL: https://lucky-cement-vim-api-527930147362.us-central1.run.app
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+steps:
+  # BuildKit is required: the legacy builder builds every stage, including the
+  # unused sap-on stage, whose COPY of the absent SDK then fails.
+  - id: build-backend
+    name: gcr.io/cloud-builders/docker
+    env: ['DOCKER_BUILDKIT=1']
+    args: ['build', '--build-arg', 'SAP_SDK=off', '-t', '${_REPO}/lucky-cement-vim-api:${_TAG}', 'backend']
+    waitFor: ['-']
+  - id: build-frontend
+    name: gcr.io/cloud-builders/docker
+    args: ['build', '--build-arg', 'API_BASE_URL=${_API_BASE_URL}', '-t', '${_REPO}/lucky-cement-vim-web:${_TAG}', 'frontend']
+    waitFor: ['-']
+
+images:
+  - '${_REPO}/lucky-cement-vim-api:${_TAG}'
+  - '${_REPO}/lucky-cement-vim-web:${_TAG}'

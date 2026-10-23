@@ -1,0 +1,150 @@
+@import "tailwindcss";
+
+@theme {
+  /* Brand Colors */
+  --color-brand-50: #EEF2FF;
+  --color-brand-100: #D6DFFE;
+  --color-brand-200: #BCCBFD;
+  --color-brand-300: #93A9FB;
+  --color-brand-400: #6B82F8;
+  --color-brand-500: #4F62F2;
+  --color-brand-600: #3B45E5;
+  --color-brand-700: #2F35CC;
+  --color-brand-800: #2A30A5;
+  --color-brand-900: #282E82;
+
+  /* Neutral Colors */
+  --color-neutral-0: #FFFFFF;
+  --color-neutral-25: #FAFAFA;
+  --color-neutral-50: #F5F6F8;
+  --color-neutral-100: #ECEEF2;
+  --color-neutral-200: #D5D9E2;
+  --color-neutral-300: #B1B8C9;
+  --color-neutral-400: #8B95AB;
+  --color-neutral-500: #6B7590;
+  --color-neutral-600: #545D73;
+  --color-neutral-700: #434A5C;
+  --color-neutral-800: #2E3340;
+  --color-neutral-900: #1A1D27;
+
+  /* Status: Success */
+  --color-success-bg: #ECFDF5;
+  --color-success-light: #A7F3D0;
+  --color-success-base: #10B981;
+  --color-success-dark: #047857;
+  --color-success-text: #064E3B;
+
+  /* Status: Warning */
+  --color-warning-bg: #FFFBEB;
+  --color-warning-light: #FDE68A;
+  --color-warning-base: #F59E0B;
+  --color-warning-dark: #B45309;
+  --color-warning-text: #78350F;
+
+  /* Status: Danger */
+  --color-danger-bg: #FEF2F2;
+  --color-danger-light: #FECACA;
+  --color-danger-base: #EF4444;
+  --color-danger-dark: #B91C1C;
+  --color-danger-text: #7F1D1D;
+
+  /* Status: Info */
+  --color-info-bg: #EFF6FF;
+  --color-info-light: #BFDBFE;
+  --color-info-base: #3B82F6;
+  --color-info-dark: #1D4ED8;
+  --color-info-text: #1E3A5F;
+
+  /* Status: Pending */
+  --color-pending-bg: #F5F3FF;
+  --color-pending-light: #DDD6FE;
+  --color-pending-base: #8B5CF6;
+  --color-pending-dark: #6D28D9;
+  --color-pending-text: #4C1D95;
+
+  /* Status: Posted */
+  --color-posted-bg: #F0FDFA;
+  --color-posted-light: #99F6E4;
+  --color-posted-base: #14B8A6;
+  --color-posted-dark: #0F766E;
+  --color-posted-text: #134E4A;
+
+  /* Typography */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+  --text-2xs: 11px;
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 14px;
+  --text-lg: 16px;
+  --text-xl: 18px;
+  --text-2xl: 22px;
+  --text-3xl: 28px;
+  --text-4xl: 36px;
+
+  /* Shadows */
+  --shadow-xs: 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.06), 0 2px 4px -2px rgba(0,0,0,0.04);
+  --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.06), 0 4px 6px -4px rgba(0,0,0,0.04);
+  --shadow-xl: 0 20px 25px -5px rgba(0,0,0,0.08), 0 8px 10px -6px rgba(0,0,0,0.04);
+
+  /* Border Radius */
+  --radius-sm: 4px;
+  --radius-base: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  /* Chart Palette */
+  --color-chart-0: #4F62F2;
+  --color-chart-1: #10B981;
+  --color-chart-2: #F59E0B;
+  --color-chart-3: #EF4444;
+  --color-chart-4: #8B5CF6;
+  --color-chart-5: #14B8A6;
+  --color-chart-6: #EC4899;
+  --color-chart-7: #F97316;
+}
+
+@layer base {
+  *, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  html {
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--color-neutral-900);
+    background-color: var(--color-neutral-50);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    min-height: 100vh;
+  }
+
+  #root {
+    min-height: 100vh;
+  }
+}
+
+/* Animations */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes ping {
+  75%, 100% { transform: scale(1.6); opacity: 0; }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}

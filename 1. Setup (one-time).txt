@@ -1,0 +1,29 @@
+1. Setup (one-time)
+
+cd d:/Anas-sb-Project/FBR-Scrapping/fbr_atl_project
+
+python -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
+cp .env.example .env
+2. Available Commands
+
+# Fetch individual NTN(s) from FBR API
+python main.py --fetch 0614230
+python main.py --fetch 0614230 0000001 1234567
+
+# Bulk import from a local Excel file
+python main.py --sync-excel ATL_IT.xlsx
+
+# Download Excel from FBR + auto-import
+python main.py --download-excel income_tax
+python main.py --download-excel sales_tax
+
+# Look up a taxpayer in local DB
+python main.py --lookup 4220156111589
+
+# Show total records
+python main.py --count
+
+# Run background scheduler (refreshes every 24h)
+python main.py --schedule

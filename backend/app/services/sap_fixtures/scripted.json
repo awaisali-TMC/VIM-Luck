@@ -1,0 +1,32 @@
+{
+  "_comment": [
+    "Rules rather than rows, so they live here instead of in data.sql.",
+    "RETURN rows use the repo's normalized shape {TYPE, ID, NUMBER, MESSAGE} —",
+    "the same one test_po_regression.py writes to REG_TRANSCRIPT_OUT, so a",
+    "transcript captured from a real SAP run can be pasted straight in."
+  ],
+
+  "system_info": {
+    "RFCSYSID": "FAK",
+    "RFCDBHOST": "fixture",
+    "RFCDBSYS": "SQLITE",
+    "RFCSAPRL": "754",
+    "RFCMACH": "FAKE",
+    "RFCOPSYS": "in-process",
+    "RFCIPADDR": "127.0.0.1",
+    "RFCHOST": "sap-fake"
+  },
+
+  "park_errors": {
+    "4500009002": [
+      {
+        "TYPE": "E",
+        "ID": "M8",
+        "NUMBER": "534",
+        "MESSAGE": "Vendor 0002000104 is blocked for posting in company code 1100",
+        "MESSAGE_V1": "0002000104",
+        "MESSAGE_V2": "1100"
+      }
+    ]
+  }
+}

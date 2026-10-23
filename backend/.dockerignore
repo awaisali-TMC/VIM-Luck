@@ -1,0 +1,28 @@
+# Python virtual env & caches
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Local data / uploads (ephemeral on Cloud Run anyway)
+uploads/
+*.db
+*.sqlite
+*.sqlite3
+
+# Secrets & local config (passed via Cloud Run env vars instead)
+.env
+.env.*
+service-account-key.json
+
+# SAP / misc local artifacts
+*.trc
+dev_rfc.log
+nwrfcsdk/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
