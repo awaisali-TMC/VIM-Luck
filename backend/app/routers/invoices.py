@@ -5,6 +5,7 @@ import re
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,7 +33,12 @@ from app.schemas.invoice import (
 from app.models.product import Product
 from app.services.gemini_extract import extract_invoice
 from app.services.gemini_product_match import match_products
-from app.services.file_storage import save_uploaded_file, content_matches_type
+from app.services.file_storage import (
+    save_uploaded_file,
+    content_matches_type,
+    resolve_stored_file,
+    sniff_inline_type,
+)
 from app.services.duplicate_detection import check_duplicates
 from app.services.invoice_classifier import classify_invoice
 
@@ -197,6 +203,7 @@ def _build_detail_response(invoice: Invoice) -> InvoiceDetailResponse:
         mime_type=invoice.mime_type,
         file_size_bytes=invoice.file_size_bytes,
         page_count=invoice.page_count,
+        document_available=resolve_stored_file(invoice.stored_filepath) is not None,
         invoice_number=invoice.invoice_number,
         invoice_date=invoice.invoice_date,
         due_date=invoice.due_date,
@@ -911,6 +918,56 @@ async def get_invoice(
         raise HTTPException(status_code=404, detail="Invoice not found")
     _assert_can_access(invoice, principal)
     return _build_detail_response(invoice)
+
+
+def _document_download_name(original: str | None, invoice_id: int, path) -> str:
+    """A safe save-as name: the uploader's file name, with its real extension."""
+    name = re.split(r"[\\/]", (original or "").strip())[-1]
+    name = re.sub(r"[\x00-\x1f\x7f\"]", "", name)[:150]
+    if not name or name.lower() == "unknown":
+        name = f"invoice-{invoice_id}"
+    if path.suffix and not name.lower().endswith(path.suffix.lower()):
+        name += path.suffix
+    return name
+
+
+@router.get("/{invoice_id}/document")
+async def get_invoice_document(
+    invoice_id: int,
+    download: bool = False,
+    db: AsyncSession = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+):
+    """Return the originally uploaded invoice file.
+
+    Shown inline (PDF/image) by default; ?download=true asks the browser to
+    save it. Suppliers only reach their own invoices (404 otherwise, as for
+    every other invoice route). Only files the app stored itself are served:
+    see resolve_stored_file(), since stored_filepath is client-supplied.
+    """
+    result = await db.execute(
+        select(Invoice).where(Invoice.id == invoice_id, Invoice.is_deleted == 0)
+    )
+    invoice = result.scalar_one_or_none()
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    _assert_can_access(invoice, principal)
+
+    path = resolve_stored_file(invoice.stored_filepath)
+    if path is None:
+        raise HTTPException(
+            status_code=404,
+            detail="The original document for this invoice is not available.",
+        )
+    # Trust the file's bytes, not the client-supplied mime_type column.
+    inline_type = sniff_inline_type(path)
+    return FileResponse(
+        path=str(path),
+        media_type=inline_type or "application/octet-stream",
+        filename=_document_download_name(invoice.original_filename, invoice_id, path),
+        content_disposition_type="inline" if inline_type and not download else "attachment",
+        headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store"},
+    )
 
 
 @router.put("/{invoice_id}", response_model=InvoiceDetailResponse)

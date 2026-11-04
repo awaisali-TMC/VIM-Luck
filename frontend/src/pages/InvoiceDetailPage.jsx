@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { usePermissions } from "../context/PermissionsContext";
 import useInvoiceDetail from "../hooks/useInvoiceDetail";
-import { updateInvoice, deleteInvoice, deleteInvoiceLineItem, patchInvoiceLineItem, addInvoiceLineItem, setParkingSelection, matchProducts } from "../services/invoiceService";
+import { updateInvoice, deleteInvoice, deleteInvoiceLineItem, patchInvoiceLineItem, addInvoiceLineItem, setParkingSelection, matchProducts, fetchInvoiceDocument } from "../services/invoiceService";
 import { getInvoiceMatches } from "../services/purchaseOrderService";
 import { verifyNTN } from "../services/fbrService";
 import useFBRVerification from "../hooks/useFBRVerification";
@@ -603,6 +603,38 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
     }
   };
 
+  // ── Original uploaded document: view in a new tab / download ──
+  const [docBusy, setDocBusy] = useState(null); // "view" | "download" | null
+
+  const handleDocument = async (mode) => {
+    // Open the tab synchronously, inside the click, so popup blockers allow it;
+    // it is pointed at the file once the fetch completes.
+    const tab = mode === "view" ? window.open("", "_blank") : null;
+    setDocBusy(mode);
+    setActionError(null);
+    try {
+      const blob = await fetchInvoiceDocument(invoice.id, { download: mode === "download" });
+      const url = URL.createObjectURL(blob);
+      if (tab) {
+        tab.location.href = url;
+      } else {
+        // Download, or the popup was blocked: save the file instead.
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = invoice.original_filename || `invoice-${invoice.id}`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      }
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (err) {
+      if (tab) tab.close();
+      setActionError(err.message || "Could not open the invoice document.");
+    } finally {
+      setDocBusy(null);
+    }
+  };
+
   const handleDelete = async () => {
     if (!window.confirm("Delete this invoice? It will be removed from your list.")) return;
     setActionBusy(true);
@@ -780,6 +812,30 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
               {invoice.original_filename}
               {invoice.created_at && (
                 <> &middot; {new Date(invoice.created_at).toLocaleDateString()}</>
+              )}
+              {invoice.document_available && (
+                <>
+                  {" "}&middot;{" "}
+                  <button
+                    type="button"
+                    className="text-brand-600 hover:text-brand-800 hover:underline bg-transparent border-none p-0 cursor-pointer disabled:opacity-50 disabled:cursor-wait"
+                    onClick={() => handleDocument("view")}
+                    disabled={!!docBusy}
+                    title="Open the uploaded invoice in a new tab"
+                  >
+                    {docBusy === "view" ? "Opening…" : "View"}
+                  </button>
+                  {" "}&middot;{" "}
+                  <button
+                    type="button"
+                    className="text-brand-600 hover:text-brand-800 hover:underline bg-transparent border-none p-0 cursor-pointer disabled:opacity-50 disabled:cursor-wait"
+                    onClick={() => handleDocument("download")}
+                    disabled={!!docBusy}
+                    title="Download the uploaded invoice file"
+                  >
+                    {docBusy === "download" ? "Downloading…" : "Download"}
+                  </button>
+                </>
               )}
             </span>
           </div>

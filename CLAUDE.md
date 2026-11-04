@@ -57,6 +57,7 @@ py -3 backend/test_supplier_vendor_gate.py  # supplier vendor-name gate
 py -3 backend/test_sap_fake.py              # fixture SAP connector: contract + demo path, offline (forces DEBUG/SAP_MODE=fake itself)
 py -3 backend/test_line_item_guards.py      # zero-quantity goods lines must not reach SAP, offline
 py -3 backend/test_role_labels.py           # role display-name renames, offline; own throwaway DB
+py -3 backend/test_invoice_document.py      # original invoice file view/download + path guard, offline; own temp DB + upload dir
 py -3 backend/test_po_regression.py         # PO-lane BASELINE: live SAP validate dry-run (needs SAP env)
 ```
 

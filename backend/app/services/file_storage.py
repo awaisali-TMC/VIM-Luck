@@ -1,5 +1,7 @@
+import re
 import uuid
 from pathlib import Path
+from typing import Optional
 
 from app.config import settings
 
@@ -48,3 +50,45 @@ def save_uploaded_file(file_content: bytes, original_filename: str) -> str:
         f.write(file_content)
 
     return str(stored_path)
+
+
+# ── Serving stored files back ─────────────────────────────────────────────────
+# Exactly the names save_uploaded_file() generates: 32 hex chars + an optional
+# short extension. Nothing else is ever served.
+_STORED_NAME = re.compile(r"^[0-9a-f]{32}(\.[A-Za-z0-9]{1,10})?$")
+
+# Types that may be shown inline in the browser. Anything else goes out as a
+# plain download, so a stored file can never render as HTML on the API origin.
+_INLINE_TYPES = ("application/pdf", "image/jpeg", "image/png", "image/tiff")
+
+
+def resolve_stored_file(stored_filepath: Optional[str]) -> Optional[Path]:
+    """Return the file behind a stored path, or None if it can't be served.
+
+    Invoice.stored_filepath is CLIENT-SUPPLIED on /api/invoices/save, so it is
+    never used as a path. Only its final name is kept, and only if it is one
+    save_uploaded_file() could have produced; that name is looked up inside
+    UPLOAD_DIR. Absolute paths, "../", placeholders such as "po-flip", and
+    files that no longer exist (e.g. lost on a container restart) give None.
+    Looking up by name also keeps old rows working if UPLOAD_DIR moves.
+    """
+    if not stored_filepath:
+        return None
+    name = re.split(r"[\\/]", stored_filepath.strip())[-1]
+    if not _STORED_NAME.match(name):
+        return None
+    root = Path(settings.UPLOAD_DIR).resolve()
+    path = (root / name).resolve()
+    if not path.is_relative_to(root) or not path.is_file():
+        return None
+    return path
+
+
+def sniff_inline_type(path: Path) -> Optional[str]:
+    """The file's real type if it's safe to show inline, judged by its bytes."""
+    with open(path, "rb") as f:
+        head = f.read(16)
+    for content_type in _INLINE_TYPES:
+        if any(head.startswith(sig) for sig in _MAGIC_SIGNATURES[content_type]):
+            return content_type
+    return None

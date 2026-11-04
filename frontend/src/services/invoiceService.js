@@ -43,6 +43,28 @@ export async function getInvoice(id) {
   return response.data;
 }
 
+// The originally uploaded invoice file, as a Blob. Fetched through `api` (not a
+// plain link) so the session token travels in the Authorization header and
+// never lands in a URL, history or server logs.
+export async function fetchInvoiceDocument(id, { download = false } = {}) {
+  try {
+    const response = await api.get(`/api/invoices/${id}/document`, {
+      params: download ? { download: true } : undefined,
+      responseType: "blob",
+    });
+    return response.data;
+  } catch (err) {
+    // With responseType "blob" the error body is a Blob too; surface its detail.
+    const body = err.response?.data;
+    if (body instanceof Blob) {
+      try {
+        err.message = JSON.parse(await body.text()).detail || err.message;
+      } catch { /* not JSON: keep the axios message */ }
+    }
+    throw err;
+  }
+}
+
 export async function updateInvoice(id, data) {
   const response = await api.put(`/api/invoices/${id}`, data);
   return response.data;

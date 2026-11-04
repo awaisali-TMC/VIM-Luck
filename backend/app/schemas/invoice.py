@@ -252,6 +252,9 @@ class InvoiceDetailResponse(BaseModel):
     mime_type: str
     file_size_bytes: Optional[int] = None
     page_count: Optional[int] = None
+    # True when the originally uploaded file can be fetched from
+    # GET /api/invoices/{id}/document (False for PO-flip and lost files).
+    document_available: bool = False
     # Header fields
     invoice_number: Optional[str] = None
     invoice_date: Optional[str] = None
