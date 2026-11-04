@@ -166,12 +166,16 @@ export default function InvoiceListPage({ onViewInvoice, onUpload }) {
               title="Just uploaded"
             />
           )}
-          <span
-            className="text-brand-600 font-semibold cursor-pointer hover:underline"
+          {/* A real button, so the invoice can still be opened from the
+              keyboard now that the row click replaced the eye icon. */}
+          <button
+            type="button"
+            className="text-brand-600 font-semibold cursor-pointer hover:underline bg-transparent border-none p-0"
             onClick={(e) => { e.stopPropagation(); onViewInvoice?.(row.id); }}
+            title="Open invoice"
           >
             #{v}
-          </span>
+          </button>
         </span>
       ),
     },
@@ -269,23 +273,6 @@ export default function InvoiceListPage({ onViewInvoice, onUpload }) {
           </span>
         );
       },
-    },
-    {
-      key: "_actions", label: "",
-      render: (_, row) => (
-        <button
-          type="button"
-          title="View invoice"
-          aria-label="View invoice"
-          onClick={(e) => { e.stopPropagation(); onViewInvoice?.(row.id); }}
-          className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-transparent border border-transparent text-brand-600 hover:bg-brand-50 hover:border-brand-200 cursor-pointer transition-colors"
-        >
-          <svg className="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" />
-            <circle cx="12" cy="12" r="3" />
-          </svg>
-        </button>
-      ),
     },
   ];
 

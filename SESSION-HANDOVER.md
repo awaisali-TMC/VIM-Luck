@@ -73,6 +73,9 @@ renders, and the click opens a `blob:` URL holding the exact PDF. Lint and build
 - `test_invoice_document.py` has 7 more list checks (46 total, all pass). Verified in the pane:
   the column renders; View and Download fetch 200 without opening the row; a cell click opens
   `/invoices/1`; the detail-page and review-page links still work.
+- **Eye icon removed** (client request, after the deploy below): the last "View invoice" column
+  is gone, since the row click does the same. The `#id` link is now a real `<button>`, so an
+  invoice can still be opened from the keyboard (Tab, then Enter: checked).
 - **Not covered:** the supplier portal's own list (`HistoryView` in `SupplierPortal.jsx`) is a
   separate component and does not have the column.
 - **Deployed 2026-11-04** together with the review-page View File (images `:74ad257`, build
