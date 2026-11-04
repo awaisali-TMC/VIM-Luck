@@ -7,8 +7,31 @@ Newest session first; §1–§5 below are from session 1 and are still accurate.
 
 ## 0. Session 2 — 2026-11-04 (onboarding review: run, test, risk scan)
 
-No code changed. The only file changed is this one. The Analytics title fix from
-session 1 is still uncommitted and not deployed.
+No new code was written. The Analytics title fix from session 1 was committed, pushed
+and deployed to **this repo's own server** (decision: `lucky-cement-vim-web`, not
+vim-internal-web):
+
+| | |
+|---|---|
+| Commits on `origin/main` | `a5ddde0` title fix, `205c020` this handover (author `ai.engineers1`, set for these commits only; this machine has **no git identity configured**) |
+| Cloud Build | `1efb4b6d-6808-4689-b994-004a6c957e81`, SUCCESS in 1m8s. Both images pushed as `:205c020` |
+| Rolled out | **web only**: `lucky-cement-vim-web` revision `lucky-cement-vim-web-00002-tfv`, 100% traffic. The backend `lucky-cement-vim-api` was **not** redeployed (no backend change) |
+| Rollback | `gcloud run services update-traffic lucky-cement-vim-web --to-revisions=lucky-cement-vim-web-00001-4q6=100 --region=us-central1 --project=tmc-presales-pocs` (previous image `:9f3c063`) |
+| Verified | Portal and `/supplier/dashboard` return 200; login page renders, no console errors; live bundle bakes in the `lucky-cement-vim-api-527930147362` URL; "Analytics & Insights" appears once in the bundle (top-bar title only). The signed-in Analytics page was **not** viewed on the live site (needs a real login) |
+| Note | The first `/health` call returned 500: Cloud Run said "aborted after waiting too long for an available instance". That was the single API instance cold-starting; the next calls returned 200. Expect it on the first hit after idle |
+
+**gcloud on this machine:** Google Cloud SDK 592.0.0, unpacked (no admin) to
+`%LOCALAPPDATA%\Programs\google-cloud-sdk`. It is **not on PATH**, so call
+`& "$env:LOCALAPPDATA\Programs\google-cloud-sdk\bin\gcloud.cmd" …`. It is signed in as
+`shahzaib.moin@tmcltd.com`. Six symlinked gsutil docs/test-cert files could not be unpacked
+(Windows symlink rights); gcloud doesn't use them. Claude Code's own shell does **not** see
+this login (it reports "No credentialed accounts"), so run gcloud from the app's Terminal
+panel or your own PowerShell.
+
+**Upload check:** the repo root has no `.gcloudignore`, so `gcloud builds submit` falls back
+to `.gitignore`. `gcloud meta list-files-for-upload .` lists 322 files, with no `.env`,
+database, venv, `node_modules`, uploads or credentials sheet among them. Re-run it if the
+ignore files change.
 
 **What was checked (all on this laptop, against the local SQLite DB):**
 
@@ -97,7 +120,9 @@ title in the top bar, and the page added its own `<h2>`. The `<h2>` is removed a
 7D/30D/90D selector is right-aligned. Verified locally: one heading. This is the
 **only** change in the working tree. It is not committed and not deployed.
 
-## 3. Deploy: NOT done, blocked
+## 3. Deploy: resolved in session 2 (deployed to `lucky-cement-vim-web`, see §0)
+
+Session 1's notes, kept for the record:
 
 - The user asked to deploy to **https://vim-internal-web-297345409494.asia-south1.run.app/**.
   That is **not** this repo's instance. Inspecting its live bundle showed: brand "TMC eInvoice",
@@ -149,10 +174,9 @@ Not attempted: "Total Value" sums mixed currencies under a PKR label; Badge give
    calls in `anyio.to_thread.run_sync`, set an explicit client timeout, and log
    `usage_metadata` token counts per call.
 3. **Fix the 90D analytics on Postgres** (§4 #1): the cloud dashboard shows all zeros.
-4. **Deploy the title fix.** Decide the target: vim-internal-web's own repo (preferred) or
-   `lucky-cement-vim-web`. Install the Google Cloud CLI (`winget install Google.CloudSDK`,
-   needs admin) and run `gcloud auth login`. Commit, then build and deploy following that
-   instance's deploy steps.
+4. **Title fix: done** for `lucky-cement-vim-web` (§0). If vim-internal-web needs the same
+   fix, it has to go in that app's own repo (location still unknown).
+   Optionally view the signed-in Analytics page on the live site to confirm by eye.
 5. **Extraction quality baseline.** Build a small golden set from `generate_demo_invoices.py`
    PDFs, and store the model id and prompt version with each extraction.
 
