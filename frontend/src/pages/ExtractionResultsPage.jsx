@@ -214,6 +214,35 @@ export default function ExtractionResultsPage({
           <Badge status="info" label="Extraction Complete" size="xs" />
         </div>
         <div className="flex items-center gap-2">
+          {/* The uploaded file is still in browser memory, so show it from
+              there. Email-inbox reviews only carry a {name, size} stand-in. */}
+          {file instanceof Blob && (
+            <button
+              onClick={() => {
+                const url = URL.createObjectURL(file);
+                if (!window.open(url, "_blank")) {
+                  // Popup blocked: save the file instead.
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download = file.name || "invoice";
+                  document.body.appendChild(a);
+                  a.click();
+                  a.remove();
+                }
+                setTimeout(() => URL.revokeObjectURL(url), 60_000);
+              }}
+              className="flex items-center gap-1.5 text-2xs font-medium text-neutral-500 hover:text-brand-600
+                         bg-transparent border border-neutral-200 hover:border-brand-300 rounded px-2.5 py-1.5
+                         cursor-pointer transition-colors"
+              title="Open the uploaded file in a new tab to check it against the extracted fields"
+            >
+              <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
+                <path d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8s-2.5 4.5-6.5 4.5S1.5 8 1.5 8z" strokeLinejoin="round" />
+                <circle cx="8" cy="8" r="2" />
+              </svg>
+              View File
+            </button>
+          )}
           <button
             onClick={() => setRawDrawerOpen(true)}
             className="flex items-center gap-1.5 text-2xs font-medium text-neutral-500 hover:text-brand-600
