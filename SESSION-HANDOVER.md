@@ -75,7 +75,10 @@ renders, and the click opens a `blob:` URL holding the exact PDF. Lint and build
   `/invoices/1`; the detail-page and review-page links still work.
 - **Eye icon removed** (client request, after the deploy below): the last "View invoice" column
   is gone, since the row click does the same. The `#id` link is now a real `<button>`, so an
-  invoice can still be opened from the keyboard (Tab, then Enter: checked).
+  invoice can still be opened from the keyboard (Tab, then Enter: checked). **Deployed**: build
+  `9dc785b9`, web `lucky-cement-vim-web-00005-thp` (`:845cbd2`); rollback target `00004-j5s`.
+  The API was not redeployed. Eye icons still exist on the **Reports** page (`ReportsPage.jsx`)
+  and the supplier **My Invoices** list (`SupplierPortal.jsx`, `HistoryView`); they were not part of this request.
 - **Not covered:** the supplier portal's own list (`HistoryView` in `SupplierPortal.jsx`) is a
   separate component and does not have the column.
 - **Deployed 2026-11-04** together with the review-page View File (images `:74ad257`, build
