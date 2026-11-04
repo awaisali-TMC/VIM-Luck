@@ -59,6 +59,23 @@ reviews, which only carry a `{name, size}` stand-in. If a popup is blocked, it d
 Checked in the pane with a stubbed upload response (the local Gemini key is empty): the button
 renders, and the click opens a `blob:` URL holding the exact PDF. Lint and build unchanged.
 
+**Follow-up 2: Invoice Inbox rows** (internal `InvoiceListPage.jsx`):
+- Clicking anywhere on a row opens the invoice. This is skipped while text is selected, so an
+  invoice number can still be copied.
+- A new **Document** column shows "View · Download", or "—" when there is no file. The two
+  buttons stop the click from also opening the row.
+- The list API now sets `document_available` per row. `stored_files_available()` checks a page
+  of rows with 8 threads, inside `asyncio.to_thread`: on Cloud Run each check is a Cloud Storage
+  metadata call, and the event loop must not wait on it. Rows without a valid stored name (e.g.
+  PO-flip) skip the check.
+- View/Download logic now lives in one helper, `frontend/src/utils/invoiceDocument.js`, used by
+  the inbox, the detail page and the review page.
+- `test_invoice_document.py` has 7 more list checks (46 total, all pass). Verified in the pane:
+  the column renders; View and Download fetch 200 without opening the row; a cell click opens
+  `/invoices/1`; the detail-page and review-page links still work.
+- **Not covered:** the supplier portal's own list (`HistoryView` in `SupplierPortal.jsx`) is a
+  separate component and does not have the column.
+
 **Why the path guard matters:** `/api/invoices/save` stores whatever `stored_filepath` the
 client sends. Without the guard, any logged-in user (a supplier included) could point an
 invoice at `/proc/self/environ` (the DB URL and API keys live in env vars on Cloud Run) and download it.
