@@ -5,6 +5,65 @@ Handover from Claude Code sessions on this machine (`D:\VIM\VIM-Luck`). Read
 what is still open. (`HANDOFF.md` is the separate product feature-status doc.)
 Newest session first; §1–§5 below are from session 1 and are still accurate.
 
+## Pulled 2026-11-04: supplier demo OTP moved into the database
+
+`git pull --ff-only --autostash` brought in `9ae16b0` (supplier demo OTP now lives in the
+`app_settings` table and is set under **Admin → Suppliers**) and `61d06b2` (`start-lan.sh`).
+The uncommitted View/Download work below re-applied cleanly. After the pull, all 6 offline
+suites still pass.
+
+- **Local `.env` fixed:** the new config rejects unknown keys, so the old `SUPPLIER_DEMO_OTP=`
+  line made the backend fail at startup. It is now **commented out**, keeping its old value in
+  the comment. A copy of the pre-pull `.env` is in the session scratchpad only.
+- **Local supplier login needs the OTP set once:** `app_settings` is empty, so sign in as admin
+  and set it under Admin → Suppliers.
+- **On the next deploy:** the cloud DB has no OTP row either, so **supplier login on the demo
+  stops working until an admin sets it** there. The `SUPPLIER_DEMO_OTP` env var on
+  `lucky-cement-vim-api` is ignored by the new code; it does no harm but could be removed later.
+- Local AI extraction still needs `GEMINI_API_KEY` in `backend\.env` (it is empty).
+
+## Latest: invoice document View / Download (client requirement, 2026-11-04)
+
+**Requirement (from the client):** after a user uploads an invoice, they can view and
+download that file. **Status: built and tested locally; NOT committed, NOT deployed.**
+
+Before this, the original upload was saved (`Invoice.stored_filepath`) but nothing served
+it: the detail page only showed the file name as text. (Supporting documents already had
+their own download in `AttachmentsCard` / `routers/attachments.py`.)
+
+| File | Change |
+|---|---|
+| `backend/app/services/file_storage.py` | `resolve_stored_file()`: only names `save_uploaded_file()` generates (32 hex chars + extension), looked up inside `UPLOAD_DIR`. `sniff_inline_type()`: type from the file's bytes |
+| `backend/app/routers/invoices.py` | `GET /api/invoices/{id}/document` (inline; `?download=true` = attachment), `nosniff`, `no-store`; `document_available` in the detail response |
+| `backend/app/schemas/invoice.py` | `document_available: bool` on `InvoiceDetailResponse` |
+| `frontend/src/services/invoiceService.js` | `fetchInvoiceDocument()`: fetches as a Blob with the normal auth header (no `?token=` in URLs) |
+| `frontend/src/pages/InvoiceDetailPage.jsx` | "View · Download" after the file name in the header, shown only when `document_available`. Errors go to the existing action-error banner. The supplier portal reuses this page |
+| `backend/test_invoice_document.py` | New, offline, own temp DB + upload folder: **39/39 pass** |
+
+**Why the path guard matters:** `/api/invoices/save` stores whatever `stored_filepath` the
+client sends. Without the guard, any logged-in user (a supplier included) could point an
+invoice at `/proc/self/environ` (the DB URL and API keys live in env vars on Cloud Run) and download it.
+The test covers absolute paths, `../`, backslashes, the DB file, `/proc/self/environ`,
+`po-flip`, missing files, HTML bytes behind a `.pdf` name, supplier A vs B, and no token (401).
+
+**Checked locally:** the existing 5 offline suites still pass; `npm run build` OK; lint
+unchanged (20 old errors, 0 new). In the app: the buttons render and `GET …/document` returns
+the exact PDF (`application/pdf`). The Claude browser pane blocks new tabs and won't render
+PDFs, so the "View" tab itself was not seen. Check it in Chrome/Edge. The supplier portal
+was covered by the test, not clicked through.
+
+**Local test data left behind:** invoice #1 `INV-DOC-0001` (draft) in `backend\invoices.db`,
+and its PDF in `backend\uploads\`. Delete it in the app if unwanted.
+
+**Server storage, decided: Cloud Storage bucket.** Uploads currently go to the API container's
+disk, which Cloud Run wipes on every restart/new revision, so on the live demo the file
+would usually be gone. Plan for the deploy (not run yet):
+1. Create a private bucket, e.g. `lucky-cement-vim-uploads` (us-central1, uniform access, public access prevention).
+2. Grant `lucky-cement-vim-sa@tmc-presales-pocs.iam.gserviceaccount.com` `roles/storage.objectUser` on it.
+3. Commit, build with `cloudbuild.yaml`, deploy **both** services. The API deploy adds a Cloud Storage
+   volume mounted at `/mnt/uploads` and sets `UPLOAD_DIR=/mnt/uploads` (may need `--execution-environment=gen2`).
+Files uploaded before this are already gone from the server, so older invoices will show no View/Download.
+
 ## 0. Session 2 — 2026-11-04 (onboarding review: run, test, risk scan)
 
 No new code was written. The Analytics title fix from session 1 was committed, pushed
@@ -19,6 +78,17 @@ vim-internal-web):
 | Rollback | `gcloud run services update-traffic lucky-cement-vim-web --to-revisions=lucky-cement-vim-web-00001-4q6=100 --region=us-central1 --project=tmc-presales-pocs` (previous image `:9f3c063`) |
 | Verified | Portal and `/supplier/dashboard` return 200; login page renders, no console errors; live bundle bakes in the `lucky-cement-vim-api-527930147362` URL; "Analytics & Insights" appears once in the bundle (top-bar title only). The signed-in Analytics page was **not** viewed on the live site (needs a real login) |
 | Note | The first `/health` call returned 500: Cloud Run said "aborted after waiting too long for an available instance". That was the single API instance cold-starting; the next calls returned 200. Expect it on the first hit after idle |
+
+**"I don't see any changes on Server" (raised after the deploy).** The fix is live on
+`lucky-cement-vim-web` (index.html last-modified 2026-11-04 11:33 GMT, `cache-control: no-cache`,
+no duplicate `<h2>` in the bundle). **vim-internal-web is untouched**: its index.html is from
+2026-10-05 and its bundle still has the duplicate `<h2>`. A fix there is blocked on two things:
+- **Source:** there's no local clone, and `awaisali-TMC/VIM-Demo` (the likely source: same
+  "TMC eInvoice" brand and the same 2026-10-05 date as `DEMO` @ `ec9d7f3`) returns "Repository
+  not found" with this machine's GitHub credentials.
+- **GCP:** `shahzaib.moin@tmcltd.com` has no permission on project `297345409494`.
+Deploying *this* repo there is still not recommended: it would replace that app with Lucky
+Cement code and branding.
 
 **gcloud on this machine:** Google Cloud SDK 592.0.0, unpacked (no admin) to
 `%LOCALAPPDATA%\Programs\google-cloud-sdk`. It is **not on PATH**, so call
