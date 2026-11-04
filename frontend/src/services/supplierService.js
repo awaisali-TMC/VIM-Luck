@@ -102,6 +102,21 @@ export async function updateSupplierDetails(supplierId, patch) {
 }
 
 /**
+ * Fixed supplier demo OTP (admin). Stored in the app database, not .env.
+ * Returns { otp, enabled, updated_by, updated_at }.
+ */
+export async function getSupplierDemoOtp() {
+  const res = await api.get("/api/admin/settings/supplier-demo-otp");
+  return res.data;
+}
+
+/** Set the demo OTP (4–10 digits), or pass null / "" to disable it. */
+export async function setSupplierDemoOtp(otp) {
+  const res = await api.put("/api/admin/settings/supplier-demo-otp", { otp: otp || null });
+  return res.data;
+}
+
+/**
  * Approve or reject a supplier.
  * status: "verified" | "rejected"
  */

@@ -28,6 +28,7 @@ from app.models.notification import Notification  # noqa: F401 — register tabl
 from app.models.role_permission import RolePermission  # noqa: F401 — register tables
 from app.models.role import Role  # noqa: F401 — register tables
 from app.models.atl_taxpayer import AtlTaxpayer  # noqa: F401 — register tables
+from app.models.app_setting import AppSetting  # noqa: F401 — register tables
 
 engine = create_async_engine(settings.DATABASE_URL, echo=False)
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)

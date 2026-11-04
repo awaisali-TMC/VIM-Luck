@@ -5,6 +5,8 @@ import {
   updateSupplierStatus,
   searchSAPVendors,
   updateSupplierDetails,
+  getSupplierDemoOtp,
+  setSupplierDemoOtp,
 } from "../services/supplierService";
 import KpiCard from "../components/common/KpiCard";
 import Badge from "../components/common/Badge";
@@ -377,6 +379,94 @@ function RejectModal({ open, supplier, onClose, onRejected }) {
   );
 }
 
+/* ── Supplier demo OTP (stored in the app DB, admin-editable) ────────────── */
+function DemoOtpCard() {
+  const [current, setCurrent] = useState(null); // server response, null while loading
+  const [value, setValue] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState(null); // { kind: "ok" | "error", text }
+
+  useEffect(() => {
+    let cancelled = false;
+    getSupplierDemoOtp()
+      .then((d) => { if (!cancelled) { setCurrent(d); setValue(d.otp || ""); } })
+      .catch(() => { if (!cancelled) setMessage({ kind: "error", text: "Could not load the demo OTP." }); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const save = async (otp) => {
+    if (otp && !/^\d{4,10}$/.test(otp)) {
+      setMessage({ kind: "error", text: "Use 4 to 10 digits." });
+      return;
+    }
+    setSaving(true);
+    setMessage(null);
+    try {
+      const d = await setSupplierDemoOtp(otp);
+      setCurrent(d);
+      setValue(d.otp || "");
+      setMessage({ kind: "ok", text: d.enabled ? "Demo OTP saved." : "Demo OTP disabled." });
+    } catch (err) {
+      setMessage({ kind: "error", text: err.response?.data?.detail || "Could not save the demo OTP." });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const unchanged = current && value === (current.otp || "");
+
+  return (
+    <div className="bg-neutral-0 border border-neutral-100 rounded-lg shadow-xs px-5 py-4 mb-6">
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-semibold text-neutral-900">Supplier Demo OTP</h3>
+            {current && (
+              <span className={`text-2xs px-2 py-0.5 rounded-full ${current.enabled ? "bg-success-bg text-success-dark" : "bg-neutral-100 text-neutral-500"}`}>
+                {current.enabled ? "Enabled" : "Disabled"}
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-neutral-500 mt-1 max-w-xl">
+            A fixed code any verified supplier can use to log in, since no SMS gateway is connected.
+            It never expires. Disable it when real OTP delivery is in place.
+          </p>
+          {current?.updated_by && (
+            <p className="text-2xs text-neutral-400 mt-1">
+              Last changed by {current.updated_by}
+              {current.updated_at ? ` on ${new Date(current.updated_at).toLocaleString()}` : ""}
+            </p>
+          )}
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <input
+            type="text"
+            inputMode="numeric"
+            autoComplete="off"
+            maxLength={10}
+            placeholder="e.g. 246810"
+            value={value}
+            onChange={(e) => { setValue(e.target.value.replace(/\D/g, "")); setMessage(null); }}
+            onKeyDown={(e) => { if (e.key === "Enter" && !unchanged) save(value); }}
+            disabled={!current || saving}
+            aria-label="Supplier demo OTP"
+            style={{ ...fieldStyle, width: 140, fontFamily: "monospace", letterSpacing: "0.1em" }}
+          />
+          <Button onClick={() => save(value)} disabled={!current || saving || unchanged || !value}>
+            {saving ? "Saving…" : "Save"}
+          </Button>
+          <Button variant="secondary" onClick={() => save(null)} disabled={!current?.enabled || saving}>
+            Disable
+          </Button>
+        </div>
+      </div>
+      {message && (
+        <p className={`text-xs mt-2 ${message.kind === "ok" ? "text-success-dark" : "text-danger-base"}`}>{message.text}</p>
+      )}
+    </div>
+  );
+}
+
 /* ── Main Page ───────────────────────────────────────────────────────────── */
 export default function AdminSuppliersPage() {
   const [suppliers, setSuppliers] = useState([]);
@@ -465,6 +555,8 @@ export default function AdminSuppliersPage() {
         <KpiCard size="lg" label="Verified" value={String(counts.verified)} sub="Active accounts" accentColor={tokens.color.status.success.base} icon="✓" />
         <KpiCard size="lg" label="Rejected" value={String(counts.rejected)} sub="Denied accounts" accentColor={tokens.color.status.danger.base} icon="✗" />
       </div>
+
+      <DemoOtpCard />
 
       {/* Table card */}
       <div className="bg-neutral-0 border border-neutral-100 rounded-lg shadow-xs">

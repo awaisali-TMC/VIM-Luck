@@ -12,6 +12,7 @@ from app.database import get_db
 from app.security import _extract_token, _token_expired
 from app.services.passwords import hash_password, verify_password, needs_rehash
 from app.models.supplier import SupplierUser, OTPRecord, SupplierStatus
+from app.routers.app_settings import get_supplier_demo_otp
 from app.schemas.supplier import OTPRequest, SupplierSignup, SupplierLogin
 
 logger = logging.getLogger(__name__)
@@ -186,11 +187,14 @@ async def supplier_login(data: SupplierLogin, db: AsyncSession = Depends(get_db)
     """Verify OTP and issue a session token for a verified supplier."""
     mobile = _normalize_mobile(data.mobile)
 
-    # Demo convenience: a configured fixed OTP always works — not looked up in
-    # otp_records, never consumed, never expired. Empty in real deployments, so
-    # only genuine single-use OTPs are accepted there.
-    demo_otp = (settings.SUPPLIER_DEMO_OTP or "").strip()
-    demo_ok = bool(demo_otp) and data.otp_code.strip() == demo_otp
+    # Demo convenience: a fixed OTP, set by an admin in the portal and stored in
+    # app_settings, always works — not looked up in otp_records, never consumed,
+    # never expired. Unset in real deployments, so only genuine single-use OTPs
+    # are accepted there.
+    demo_otp = await get_supplier_demo_otp(db)
+    demo_ok = bool(demo_otp) and secrets.compare_digest(
+        data.otp_code.strip().encode(), demo_otp.encode()
+    )
 
     otp = None
     if not demo_ok:

@@ -32,6 +32,7 @@ from app.routers import attachments as attachments_router
 from app.routers import agent_invoices as agent_invoices_router
 from app.routers import po_flip as po_flip_router
 from app.routers import reports as reports_router
+from app.routers import app_settings as app_settings_router
 from app.models.product import Product  # noqa: F401 - ensure Product table is created
 
 logger = logging.getLogger(__name__)
@@ -236,6 +237,7 @@ app.include_router(internal_auth_router)                # internal login / me / 
 app.include_router(admin.router, dependencies=admin_dep)            # supplier admin
 app.include_router(admin_users_router, dependencies=admin_dep)      # internal user admin
 app.include_router(inbox.router, dependencies=admin_dep)            # email inbox admin
+app.include_router(app_settings_router.router, dependencies=admin_dep)  # runtime settings (supplier demo OTP)
 
 # Authenticated business endpoints (internal users or suppliers)
 app.include_router(invoices.router, dependencies=auth_dep)

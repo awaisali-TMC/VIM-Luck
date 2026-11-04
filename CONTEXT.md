@@ -117,8 +117,12 @@ with a message naming the build arg.
   this public URL: `/docs`, `/redoc` and `/openapi.json` are served, and dev-only
   detail such as supplier OTP codes is returned in API responses. Acceptable for a
   presales demo with invented data; **never** load real Lucky Cement data here.
-- **Supplier login**: no SMS gateway; the `lucky-cement-vim-supplier-demo-otp` secret
-  is a fixed, always-valid OTP for any verified supplier mobile.
+- **Supplier login**: no SMS gateway; a fixed, always-valid OTP for any verified supplier
+  mobile is stored in the app database (`app_settings.supplier_demo_otp`) and set by an
+  admin under **Admin → Suppliers → Supplier Demo OTP** (2026-11-04). It is no longer read
+  from the environment: the `SUPPLIER_DEMO_OTP` env var / `lucky-cement-vim-supplier-demo-otp`
+  secret is ignored, so after deploying this change an admin must set the code once in the
+  cloud database, or supplier login stops working.
 
 ## 6. Application knowledge (digest — details in CLAUDE.md)
 

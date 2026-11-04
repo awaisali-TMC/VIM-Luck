@@ -112,12 +112,9 @@ class Settings(BaseSettings):
     INITIAL_ADMIN_EMAIL: str = "admin@tmcltd.com"
     INITIAL_ADMIN_PASSWORD: str = ""
 
-    # Demo convenience: a fixed supplier login OTP that ALWAYS works — never
-    # consumed, never expires — so the supplier portal can be demoed without an
-    # SMS gateway. Empty in real deployments (then only real, single-use OTPs
-    # from otp_records are accepted). Set e.g. SUPPLIER_DEMO_OTP=246810 on demo
-    # instances.
-    SUPPLIER_DEMO_OTP: str = ""
+    # The fixed supplier demo OTP is NOT an env setting: it lives in the app DB
+    # (app_settings.supplier_demo_otp) and admins set it under Admin → Suppliers.
+    # See routers/app_settings.py.
 
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
