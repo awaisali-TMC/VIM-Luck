@@ -25,7 +25,18 @@ suites still pass.
 ## Latest: invoice document View / Download (client requirement, 2026-11-04)
 
 **Requirement (from the client):** after a user uploads an invoice, they can view and
-download that file. **Status: built and tested locally; NOT committed, NOT deployed.**
+download that file. **Status: DEPLOYED 2026-11-04** (commit `88504a1`, images `:33e20f0`).
+
+| Deploy record | |
+|---|---|
+| Bucket | `gs://lucky-cement-vim-uploads` (us-central1, uniform access, public access prevention). `lucky-cement-vim-sa` has `roles/storage.objectUser` on it |
+| Cloud Build | `51c22ee0-8b72-4121-89fd-ebc07c721e6d`, SUCCESS in 1m27s |
+| API | `lucky-cement-vim-api-00002-wrv`, 100%. Cloud Storage volume `uploads` mounted at `/mnt/uploads`, `UPLOAD_DIR=/mnt/uploads`. Default (gen1) execution environment worked; the log shows "File system has been successfully mounted." |
+| Web | `lucky-cement-vim-web-00003-m2m`, 100% |
+| Rollback | `gcloud run services update-traffic lucky-cement-vim-api --to-revisions=lucky-cement-vim-api-00001-x8n=100 --region=us-central1 --project=tmc-presales-pocs` and the same for `lucky-cement-vim-web` with `lucky-cement-vim-web-00002-tfv` |
+| Verified from outside | `/health` 200; `GET /api/invoices/1/document` with no token → 401; route listed in `/openapi.json`; buttons present in the live bundle |
+| **Not yet verified** | A real upload → View/Download on the live site (needs a login), and the file appearing in the bucket: `gcloud storage ls gs://lucky-cement-vim-uploads` |
+| Side effects | The pulled OTP change is live too: **supplier login fails until an admin sets the OTP under Admin → Suppliers**. As with every new API revision, the fixture SAP store reset |
 
 Before this, the original upload was saved (`Invoice.stored_filepath`) but nothing served
 it: the detail page only showed the file name as text. (Supporting documents already had
@@ -55,9 +66,9 @@ was covered by the test, not clicked through.
 **Local test data left behind:** invoice #1 `INV-DOC-0001` (draft) in `backend\invoices.db`,
 and its PDF in `backend\uploads\`. Delete it in the app if unwanted.
 
-**Server storage, decided: Cloud Storage bucket.** Uploads currently go to the API container's
-disk, which Cloud Run wipes on every restart/new revision, so on the live demo the file
-would usually be gone. Plan for the deploy (not run yet):
+**Server storage: Cloud Storage bucket (done, see the deploy record above).** Uploads used to go
+to the API container's disk, which Cloud Run wipes on every restart or new revision. The steps
+that were run:
 1. Create a private bucket, e.g. `lucky-cement-vim-uploads` (us-central1, uniform access, public access prevention).
 2. Grant `lucky-cement-vim-sa@tmc-presales-pocs.iam.gserviceaccount.com` `roles/storage.objectUser` on it.
 3. Commit, build with `cloudbuild.yaml`, deploy **both** services. The API deploy adds a Cloud Storage
