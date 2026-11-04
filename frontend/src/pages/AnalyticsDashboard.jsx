@@ -102,9 +102,8 @@ export default function AnalyticsDashboard() {
 
   return (
     <div className="flex flex-col gap-5">
-      {/* Period Selector */}
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold text-neutral-800 m-0">Analytics & Insights</h2>
+      {/* Period Selector — the page title is already in the Layout top bar */}
+      <div className="flex items-center justify-end">
         <div className="flex items-center gap-1 bg-neutral-100 rounded-base p-0.5">
           {[7, 30, 90].map((d) => (
             <button
