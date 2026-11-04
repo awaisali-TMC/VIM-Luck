@@ -75,6 +75,14 @@ renders, and the click opens a `blob:` URL holding the exact PDF. Lint and build
   `/invoices/1`; the detail-page and review-page links still work.
 - **Not covered:** the supplier portal's own list (`HistoryView` in `SupplierPortal.jsx`) is a
   separate component and does not have the column.
+- **Deployed 2026-11-04** together with the review-page View File (images `:74ad257`, build
+  `1aa8dafe-8222-4026-a197-bf7830014c2f`):
+  - API `lucky-cement-vim-api-00003-8kn`. This was an image-only deploy, and the bucket mount at
+    `/mnt/uploads` was kept (checked with `describe`).
+  - Web `lucky-cement-vim-web-00004-j5s`.
+  - Live checks: `/health` 200; list and document routes return 401 without a token;
+    `document_available` is in `/openapi.json`; all three UI pieces are in the live bundle.
+  - Rollback targets: API `lucky-cement-vim-api-00002-wrv`, web `lucky-cement-vim-web-00003-m2m`.
 
 **Why the path guard matters:** `/api/invoices/save` stores whatever `stored_filepath` the
 client sends. Without the guard, any logged-in user (a supplier included) could point an
