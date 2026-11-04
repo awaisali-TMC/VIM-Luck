@@ -51,6 +51,14 @@ their own download in `AttachmentsCard` / `routers/attachments.py`.)
 | `frontend/src/pages/InvoiceDetailPage.jsx` | "View · Download" after the file name in the header, shown only when `document_available`. Errors go to the existing action-error banner. The supplier portal reuses this page |
 | `backend/test_invoice_document.py` | New, offline, own temp DB + upload folder: **39/39 pass** |
 
+**Follow-up: "View File" on the review page** (`/results`, and `/supplier/upload/review`, which
+uses the same `ExtractionResultsPage.jsx`). A button next to "Raw Output" opens the uploaded file
+from browser memory (`URL.createObjectURL` on the dropped `File`), with no server request, so users can
+check the extracted fields against the document before saving. It is hidden for email-inbox
+reviews, which only carry a `{name, size}` stand-in. If a popup is blocked, it downloads instead.
+Checked in the pane with a stubbed upload response (the local Gemini key is empty): the button
+renders, and the click opens a `blob:` URL holding the exact PDF. Lint and build unchanged.
+
 **Why the path guard matters:** `/api/invoices/save` stores whatever `stored_filepath` the
 client sends. Without the guard, any logged-in user (a supplier included) could point an
 invoice at `/proc/self/environ` (the DB URL and API keys live in env vars on Cloud Run) and download it.
