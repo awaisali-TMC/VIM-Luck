@@ -12,6 +12,7 @@ import RawOutputViewer from "../components/upload/RawOutputViewer";
 import SalesTaxCard from "../components/upload/SalesTaxCard";
 import { verifyNTN } from "../services/fbrService";
 import { lookupSAPVendor } from "../services/sapService";
+import { showOrSaveBlob } from "../utils/invoiceDocument";
 
 // Field names that belong to the Supplier Information section
 const SUPPLIER_FIELD_NAMES = new Set([
@@ -218,19 +219,7 @@ export default function ExtractionResultsPage({
               there. Email-inbox reviews only carry a {name, size} stand-in. */}
           {file instanceof Blob && (
             <button
-              onClick={() => {
-                const url = URL.createObjectURL(file);
-                if (!window.open(url, "_blank")) {
-                  // Popup blocked: save the file instead.
-                  const a = document.createElement("a");
-                  a.href = url;
-                  a.download = file.name || "invoice";
-                  document.body.appendChild(a);
-                  a.click();
-                  a.remove();
-                }
-                setTimeout(() => URL.revokeObjectURL(url), 60_000);
-              }}
+              onClick={() => showOrSaveBlob(file, file.name, window.open("", "_blank"))}
               className="flex items-center gap-1.5 text-2xs font-medium text-neutral-500 hover:text-brand-600
                          bg-transparent border border-neutral-200 hover:border-brand-300 rounded px-2.5 py-1.5
                          cursor-pointer transition-colors"

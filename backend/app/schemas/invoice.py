@@ -236,6 +236,9 @@ class InvoiceResponse(BaseModel):
     original_filename: str
     created_at: datetime
     line_items: list[InvoiceLineItemResponse] = []
+    # Set by the list endpoint only (None elsewhere): True when the uploaded
+    # file can be fetched from GET /api/invoices/{id}/document.
+    document_available: Optional[bool] = None
     source_type: Optional[str] = "upload"
     source_email_from: Optional[str] = None
     fbr_verification_status: Optional[str] = "not_verified"

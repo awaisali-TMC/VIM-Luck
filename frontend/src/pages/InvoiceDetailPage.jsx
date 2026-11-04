@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { usePermissions } from "../context/PermissionsContext";
 import useInvoiceDetail from "../hooks/useInvoiceDetail";
-import { updateInvoice, deleteInvoice, deleteInvoiceLineItem, patchInvoiceLineItem, addInvoiceLineItem, setParkingSelection, matchProducts, fetchInvoiceDocument } from "../services/invoiceService";
+import { updateInvoice, deleteInvoice, deleteInvoiceLineItem, patchInvoiceLineItem, addInvoiceLineItem, setParkingSelection, matchProducts } from "../services/invoiceService";
+import { openInvoiceDocument } from "../utils/invoiceDocument";
 import { getInvoiceMatches } from "../services/purchaseOrderService";
 import { verifyNTN } from "../services/fbrService";
 import useFBRVerification from "../hooks/useFBRVerification";
@@ -607,28 +608,11 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
   const [docBusy, setDocBusy] = useState(null); // "view" | "download" | null
 
   const handleDocument = async (mode) => {
-    // Open the tab synchronously, inside the click, so popup blockers allow it;
-    // it is pointed at the file once the fetch completes.
-    const tab = mode === "view" ? window.open("", "_blank") : null;
     setDocBusy(mode);
     setActionError(null);
     try {
-      const blob = await fetchInvoiceDocument(invoice.id, { download: mode === "download" });
-      const url = URL.createObjectURL(blob);
-      if (tab) {
-        tab.location.href = url;
-      } else {
-        // Download, or the popup was blocked: save the file instead.
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = invoice.original_filename || `invoice-${invoice.id}`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-      }
-      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      await openInvoiceDocument(invoice, mode);
     } catch (err) {
-      if (tab) tab.close();
       setActionError(err.message || "Could not open the invoice document.");
     } finally {
       setDocBusy(null);

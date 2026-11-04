@@ -1,5 +1,6 @@
 import re
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
@@ -82,6 +83,19 @@ def resolve_stored_file(stored_filepath: Optional[str]) -> Optional[Path]:
     if not path.is_relative_to(root) or not path.is_file():
         return None
     return path
+
+
+def stored_files_available(stored_filepaths: list[Optional[str]]) -> list[bool]:
+    """resolve_stored_file() for a page of rows, checked in parallel.
+
+    On Cloud Run UPLOAD_DIR is a Cloud Storage mount, so each check is a
+    metadata round trip; a small pool keeps a 100-row page fast. Blocking:
+    call it via asyncio.to_thread from async code.
+    """
+    if not stored_filepaths:
+        return []
+    with ThreadPoolExecutor(max_workers=min(8, len(stored_filepaths))) as pool:
+        return list(pool.map(lambda p: resolve_stored_file(p) is not None, stored_filepaths))
 
 
 def sniff_inline_type(path: Path) -> Optional[str]:

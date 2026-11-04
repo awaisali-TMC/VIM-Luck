@@ -142,13 +142,32 @@ if __name__ == "__main__":
         # /save itself rejects an empty path (NOT NULL), so check the helper directly.
         expect("empty stored path resolves to nothing",
                resolve_stored_file("") is None and resolve_stored_file(None) is None)
+        bad_ids = []
         for label, stored in attempts.items():
             bad = save(client, SUPPLIER_A, stored)
+            bad_ids.append(bad)
             r = fetch(client, SUPPLIER_A, bad)
             expect(f"{label} -> 404 (got {r.status_code})", r.status_code == 404)
             expect(f"{label} -> document_available=False", available(client, SUPPLIER_A, bad) == (200, False))
         expect("404 says the document is unavailable",
                "not available" in fetch(client, SUPPLIER_A, bad).json().get("detail", ""))
+
+        print("\nLIST: per-row document_available (Invoice Inbox View/Download)")
+        def listed(who):
+            _as["p"] = who
+            r = client.get("/api/invoices/", params={"limit": 100})
+            return r.status_code, {row["id"]: row for row in r.json().get("invoices", [])}
+        st, staff_rows = listed(STAFF)
+        expect(f"staff list -> 200 (got {st})", st == 200)
+        expect("staff list: PDF row available", staff_rows.get(inv, {}).get("document_available") is True)
+        expect("staff list: image row available", staff_rows.get(inv_png, {}).get("document_available") is True)
+        st, a_rows = listed(SUPPLIER_A)
+        expect("supplier list: own row available", a_rows.get(own, {}).get("document_available") is True)
+        expect("supplier list: every bad-path row unavailable",
+               all(a_rows.get(i, {}).get("document_available") is False for i in bad_ids))
+        expect("supplier list: no staff invoices", inv not in a_rows and inv_png not in a_rows)
+        _, b_rows = listed(SUPPLIER_B)
+        expect("supplier B list: none of supplier A's rows", own not in b_rows and not set(bad_ids) & set(b_rows))
 
         print("\nTYPE COMES FROM THE BYTES, NOT THE CLAIM")
         spoof = save(client, STAFF, html_path, filename="evil.pdf", mime="text/html")

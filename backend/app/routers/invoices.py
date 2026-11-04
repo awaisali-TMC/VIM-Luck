@@ -38,6 +38,7 @@ from app.services.file_storage import (
     content_matches_type,
     resolve_stored_file,
     sniff_inline_type,
+    stored_files_available,
 )
 from app.services.duplicate_detection import check_duplicates
 from app.services.invoice_classifier import classify_invoice
@@ -824,7 +825,15 @@ async def list_invoices(
     count_result = await db.execute(count_query)
     total = count_result.scalar()
 
-    return InvoiceListResponse(invoices=invoices, total=total)
+    # Per-row View/Download in the inbox: which rows still have their file.
+    available = await asyncio.to_thread(
+        stored_files_available, [inv.stored_filepath for inv in invoices]
+    )
+    items = [
+        InvoiceResponse.model_validate(inv).model_copy(update={"document_available": ok})
+        for inv, ok in zip(invoices, available)
+    ]
+    return InvoiceListResponse(invoices=items, total=total)
 
 
 async def _run_product_matching(invoice_id: int) -> None:

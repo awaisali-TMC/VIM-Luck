@@ -12,11 +12,30 @@ import DataTable from "../components/common/DataTable";
 import ConfidenceMeter from "../components/common/ConfidenceMeter";
 import Modal from "../components/common/Modal";
 import { tokens } from "../styles/tokens";
+import { openInvoiceDocument } from "../utils/invoiceDocument";
+
+const DOC_LINK =
+  "text-brand-600 hover:text-brand-800 hover:underline bg-transparent border-none p-0 cursor-pointer disabled:opacity-50 disabled:cursor-wait";
 
 export default function InvoiceListPage({ onViewInvoice, onUpload }) {
   // Freshly uploaded drafts (batch upload) arrive via router state — highlight them.
   const location = useLocation();
   const [newIds, setNewIds] = useState(() => new Set(location.state?.newInvoiceIds || []));
+
+  // Per-row View / Download of the uploaded file.
+  const [docBusy, setDocBusy] = useState(null); // { id, mode } while a fetch runs
+  const [docError, setDocError] = useState(null);
+  const handleDocument = async (row, mode) => {
+    setDocBusy({ id: row.id, mode });
+    setDocError(null);
+    try {
+      await openInvoiceDocument(row, mode);
+    } catch (err) {
+      setDocError(`${row.invoice_number || `Invoice #${row.id}`}: ${err.message || "could not open the document."}`);
+    } finally {
+      setDocBusy(null);
+    }
+  };
   const uploadErrors = location.state?.uploadErrors || [];
   const [invoices, setInvoices] = useState([]);
   const [, setTotal] = useState(0);
@@ -219,6 +238,39 @@ export default function InvoiceListPage({ onViewInvoice, onUpload }) {
       render: (v) => <span className="text-neutral-500 whitespace-nowrap">{v ? new Date(v).toLocaleDateString() : "—"}</span>,
     },
     {
+      key: "document_available", label: "Document",
+      render: (available, row) => {
+        if (!available) {
+          return <span className="text-neutral-400" title="No uploaded file for this invoice">—</span>;
+        }
+        const busy = docBusy?.id === row.id ? docBusy.mode : null;
+        // stopPropagation: these act on the file, not the row (which opens the invoice).
+        return (
+          <span className="whitespace-nowrap text-2xs" onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              className={DOC_LINK}
+              disabled={!!busy}
+              onClick={() => handleDocument(row, "view")}
+              title="Open the uploaded invoice in a new tab"
+            >
+              {busy === "view" ? "Opening…" : "View"}
+            </button>
+            <span className="text-neutral-300 mx-1.5">&middot;</span>
+            <button
+              type="button"
+              className={DOC_LINK}
+              disabled={!!busy}
+              onClick={() => handleDocument(row, "download")}
+              title="Download the uploaded invoice file"
+            >
+              {busy === "download" ? "Downloading…" : "Download"}
+            </button>
+          </span>
+        );
+      },
+    },
+    {
       key: "_actions", label: "",
       render: (_, row) => (
         <button
@@ -294,9 +346,21 @@ export default function InvoiceListPage({ onViewInvoice, onUpload }) {
             ]}
           />
         </div>
+        {docError && (
+          <div className="mx-5 mb-3 bg-danger-bg border border-danger-base rounded-base px-4 py-2.5 flex items-center justify-between">
+            <span className="text-2xs text-danger-dark font-medium">{docError}</span>
+            <button className="text-neutral-400 hover:text-neutral-600 bg-transparent border-none cursor-pointer text-sm" onClick={() => setDocError(null)}>&times;</button>
+          </div>
+        )}
         <DataTable
           columns={columns}
           data={paginated}
+          // Clicking anywhere on a row opens the invoice, unless the user is
+          // selecting text (e.g. copying an invoice number).
+          onRowClick={(row) => {
+            if (window.getSelection()?.toString()) return;
+            onViewInvoice?.(row.id);
+          }}
           rowClassName={(row) => (newIds.has(row.id) ? "bg-success-bg/60" : null)}
         />
         <div className="flex items-center justify-between px-5 py-3 text-2xs text-neutral-500">
