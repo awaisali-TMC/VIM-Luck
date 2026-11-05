@@ -290,7 +290,7 @@ INVOICES = [
             ("10", "Split AC Unit 1.5 Ton Inverter", 20, "ST", 185000),
             ("20", "Deep Freezer 500L", 5, "ST", 240000),
         ],
-        "note": "DUPLICATE — Haier re-sends HP-2026-0417. Upload the original first; this copy should be flagged.",
+        "note": "DUPLICATE — Haier re-sends HP-2026-0417. Upload the original first; once this copy is matched to the PO it is blocked from approval and SAP.",
     },
     {
         **_HAIER,

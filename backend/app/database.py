@@ -104,6 +104,8 @@ async def run_migrations():
         "CREATE INDEX IF NOT EXISTS ix_purchase_orders_sap_vendor_number ON purchase_orders (sap_vendor_number)",
         # Resolved SAP vendor, set on PO sync (routers/sap.py) and read by PO-flip.
         "ALTER TABLE invoices ADD COLUMN sap_vendor_number VARCHAR(20)",
+        # SAP company code on the PO — part of the duplicate-invoice key.
+        "ALTER TABLE purchase_orders ADD COLUMN company_code VARCHAR(10)",
         # Repair POs synced while the header total read EKKO RLWRT (0 for POs
         # without a release strategy): recompute from line values. Idempotent —
         # only touches rows whose stored total is still 0.

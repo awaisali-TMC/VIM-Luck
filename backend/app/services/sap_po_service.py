@@ -853,6 +853,7 @@ def sync_po_to_db(po_data: dict, db_session) -> dict:
         "po_number": po_data["po_number"],
         "vendor_name": po_data.get("vendor_name", ""),
         "vendor_ntn": po_data.get("vendor_ntn", ""),
+        "company_code": (po_data.get("company_code") or "").strip() or None,
         "po_date": po_data.get("po_date", ""),
         "po_type": "local",
         "total_amount": po_data.get("total_value", 0),

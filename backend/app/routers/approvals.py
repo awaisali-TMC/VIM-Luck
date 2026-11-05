@@ -37,6 +37,7 @@ from app.services.workflow_engine import (
     process_action,
     get_pending_for_user,
 )
+from app.services.duplicate_detection import duplicate_block_message, find_key_duplicates
 
 logger = logging.getLogger(__name__)
 
@@ -204,6 +205,10 @@ async def initiate_invoice_approval(
             status_code=400,
             detail=f"Invoice must be in 'validated', 'rejected', or 'exception' status to initiate approval (current: {invoice.status})"
         )
+
+    duplicates = await find_key_duplicates(db, invoice)
+    if duplicates:
+        raise HTTPException(status_code=409, detail=duplicate_block_message(duplicates))
 
     request = await initiate_approval(db, invoice_id, user.id, user.display_name)
 

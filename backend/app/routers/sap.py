@@ -27,6 +27,7 @@ from app.models.purchase_order import PurchaseOrder, POLineItem
 from app.models.internal_user import InternalUser
 from app.security import get_current_internal_user, require_admin
 from app.routers.role_permissions import role_labels, humanize_role
+from app.services.duplicate_detection import duplicate_block_message, find_key_duplicates
 from app.services.invoice_line_rules import (
     find_zero_quantity_goods,
     route_invoice_lines,
@@ -322,6 +323,7 @@ async def sync_single_po(po_number: str, db: AsyncSession = Depends(get_db)):
             po_number=po_data["po_number"],
             vendor_name=po_data["vendor_name"],
             sap_vendor_number=(sap_po.get("vendor_number") or "").strip() or None,
+            company_code=po_data["company_code"],
             vendor_ntn=po_data["vendor_ntn"],
             po_date=po_data["po_date"],
             po_type=po_data["po_type"],
@@ -408,6 +410,7 @@ async def sync_all_pos(
                     po_number=po_data["po_number"],
                     vendor_name=po_data["vendor_name"],
                     sap_vendor_number=(detail.get("vendor_number") or "").strip() or None,
+                    company_code=po_data["company_code"],
                     vendor_ntn=po_data["vendor_ntn"],
                     po_date=po_data["po_date"],
                     po_type=po_data["po_type"],
@@ -512,6 +515,7 @@ async def sync_sap_grn(po_number: str, db: AsyncSession = Depends(get_db)):
         po_data = sync_po_to_db(sap_po, None)
         po = PurchaseOrder(
             po_number=po_data["po_number"], vendor_name=po_data["vendor_name"],
+            company_code=po_data["company_code"],
             vendor_ntn=po_data["vendor_ntn"], po_date=po_data["po_date"],
             po_type=po_data["po_type"], total_amount=po_data["total_amount"],
             currency=po_data["currency"], status=po_data["status"],
@@ -874,6 +878,12 @@ async def post_invoice_to_sap_endpoint(
             detail=f"Invoice already sent to SAP as document {invoice.sap_document_number}/{invoice.sap_fiscal_year} ({invoice.sap_doc_status or 'posted'})",
         )
 
+    # A duplicate never reaches SAP — in any mode, so the submit-time dry run
+    # (mode="validate") surfaces it before the approval chain starts.
+    duplicates = await find_key_duplicates(db, invoice)
+    if duplicates:
+        raise HTTPException(status_code=409, detail=duplicate_block_message(duplicates))
+
     # ── No-SAP instance (e.g. Martin Dow demo): assume the SAP process ──
     # Skip PO-in-SAP lookup and the live BAPI call entirely.
     if not settings.SAP_ENABLED:
@@ -1229,6 +1239,8 @@ async def post_invoice_to_sap_endpoint(
     invoice.sap_document_number = sap_result["invoice_doc_number"]
     invoice.sap_fiscal_year = sap_result["fiscal_year"]
     invoice.sap_company_code = company_code
+    invoice.sap_vendor_number = invoice.sap_vendor_number or vendor_number
+    po.company_code = po.company_code or company_code  # backfill POs synced before the column
     invoice.sap_posted_at = datetime.now(timezone.utc)
     invoice.sap_doc_status = doc_status
     invoice.sap_tax_code = eff_tax_code   # record the values actually used

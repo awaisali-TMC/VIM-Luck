@@ -40,7 +40,11 @@ from app.services.file_storage import (
     sniff_inline_type,
     stored_files_available,
 )
-from app.services.duplicate_detection import check_duplicates
+from app.services.duplicate_detection import (
+    check_duplicates,
+    duplicate_block_message,
+    find_key_duplicates,
+)
 from app.services.invoice_classifier import classify_invoice
 
 logger = logging.getLogger(__name__)
@@ -110,6 +114,9 @@ VALID_TRANSITIONS = {
     "parked": ["posted", "exception"],  # parked in SAP; a SAP user posts it (or it's reversed)
     "posted": [],  # terminal state
 }
+
+# Target statuses a duplicate invoice (services/duplicate_detection.py) is refused.
+DUPLICATE_BLOCKED_STATUSES = ("pending_approval", "approved", "parked", "posted")
 
 
 def _clamp(v, n):
@@ -1096,6 +1103,12 @@ async def update_invoice_status(
             detail=f"Cannot transition from '{invoice.status}' to '{target.value}'. Allowed transitions: {allowed}",
         )
 
+    # A duplicate may not move toward approval or SAP.
+    if target.value in DUPLICATE_BLOCKED_STATUSES:
+        duplicates = await find_key_duplicates(db, invoice)
+        if duplicates:
+            raise HTTPException(status_code=409, detail=duplicate_block_message(duplicates))
+
     invoice.status = target.value
     await db.commit()
     await db.refresh(invoice)
@@ -1386,6 +1399,7 @@ async def get_invoice_duplicates(
         total_amount=invoice.total_amount,
         invoice_date=invoice.invoice_date,
         exclude_id=invoice.id,
+        invoice=invoice,
     )
 
 

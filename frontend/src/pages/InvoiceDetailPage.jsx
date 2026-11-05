@@ -995,7 +995,10 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
       )}
 
       {/* ── Duplicate Warning ── */}
-      <DuplicateWarningCard invoiceId={invoice.id} />
+      <DuplicateWarningCard
+        invoiceId={invoice.id}
+        refreshKey={`${invoice.matched_po_id}|${invoice.invoice_number}|${invoice.supplier_ntn}|${invoice.po_reference}`}
+      />
 
       {/* ── Workflow Stepper ── */}
       <WorkflowStepper currentStatus={invoice.status} />

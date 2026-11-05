@@ -40,6 +40,9 @@ class PurchaseOrder(Base):
     # SAP vendor master number (LIFNR) — set when the PO is synced from SAP.
     # Scopes supplier-portal PO visibility to the account's linked vendor.
     sap_vendor_number = Column(String(20), nullable=True, index=True)
+    # SAP company code (EKKO-BUKRS) — set on SAP sync, backfilled at park.
+    # Part of the duplicate-invoice key (services/duplicate_detection.py).
+    company_code = Column(String(10), nullable=True)
     vendor_ntn = Column(String(50))
     po_date = Column(String(50))
     po_type = Column(String(20), default=POType.LOCAL.value)
