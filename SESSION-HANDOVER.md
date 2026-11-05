@@ -5,7 +5,20 @@ Handover from Claude Code sessions on this machine (`D:\VIM\VIM-Luck`). Read
 what is still open. (`HANDOFF.md` is the separate product feature-status doc.)
 Newest session first; §1–§5 below are from session 1 and are still accurate.
 
-## 2026-11-05: "View" showed nothing in the local preview (fixed locally, not committed or deployed)
+## 2026-11-05: "View" showed nothing in the local preview (committed `34472b5`, NOT pushed or deployed)
+
+**Push and deploy are blocked by the network here.** The office firewall (a Fortinet FortiGate,
+`CN=FG4H1FT923900717`) inspects HTTPS and re-signs certificates with its own CA, which Windows does
+not trust. As a result, `git push` and every `gcloud` call fail with `SEC_E_UNTRUSTED_ROOT`. Run
+these from a network without that inspection, or after IT trusts the Fortinet CA or exempts
+`github.com` and `*.googleapis.com`. Do not turn off certificate checks.
+
+1. `git push origin main`
+2. `gcloud builds submit --config=cloudbuild.yaml --project=tmc-presales-pocs --substitutions=_TAG=34472b5`
+3. `gcloud run deploy lucky-cement-vim-web --image=us-central1-docker.pkg.dev/tmc-presales-pocs/presales-lucky-cement-vim/lucky-cement-vim-web:34472b5 --region=us-central1 --project=tmc-presales-pocs`
+
+Only the web service changes; the API image is unchanged. The rollback target is
+`lucky-cement-vim-web-00006-jcj`.
 
 **Cause:** the Claude app's preview pane blocks new tabs, so `window.open` returned `null` and
 "View" fell back to a download, which the pane never shows. Any browser that blocks the popup
