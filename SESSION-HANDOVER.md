@@ -85,6 +85,13 @@ renders, and the click opens a `blob:` URL holding the exact PDF. Lint and build
   invoice, and no eye icon is left.
   - **Local test data added for this check:** supplier "LOCAL TEST Supplier (delete me)"
     (mobile `03009990001`) and its draft invoice #2 `LOCAL-SUP-0001` in `backend\invoices.db`.
+  - **Deployed 2026-11-05:** build `3bc3db83-f4ed-4e70-a3aa-e943935c8df2`, web
+    `lucky-cement-vim-web-00006-jcj` (`:b08b75d`); rollback target `00005-thp`. The live bundles of
+    both portals contain no eye buttons.
+- **gcloud sign-in expires (seen 2026-11-05):** commands then stop at "Reauthentication required.
+  Please enter your password". The browser flow (`gcloud auth login --force`) did not hand the
+  login back on this machine. What worked: `gcloud auth login --force --no-launch-browser`; open
+  the printed link, approve, and paste the verification code into **that terminal** (not the chat).
 - **Not covered:** the supplier portal's own list (`HistoryView` in `SupplierPortal.jsx`) is a
   separate component and does not have the column.
 - **Deployed 2026-11-04** together with the review-page View File (images `:74ad257`, build
