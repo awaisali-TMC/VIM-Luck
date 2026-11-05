@@ -7,6 +7,12 @@ cd "$(dirname "$0")" || exit 1
 export PATH="$HOME/.local/bin:$PATH"
 export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 
+# SAP live connection (SAP_MODE=live): PyRFC needs the Linux NW RFC SDK's
+# libsapnwrfc.so on LD_LIBRARY_PATH at runtime. The SDK is git-ignored and lives
+# at backend/nwrfcsdk-linux (unpacked from the licensed SAP download).
+export SAPNWRFC_HOME="$PWD/backend/nwrfcsdk-linux"
+export LD_LIBRARY_PATH="$SAPNWRFC_HOME/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
 (cd backend && exec .venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8000) &
 BACK=$!
 (cd frontend && exec npm run dev -- --host 0.0.0.0 --port 5173 --strictPort) &
