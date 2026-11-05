@@ -7,6 +7,7 @@ import { PermissionsProvider } from "./context/PermissionsContext";
 import { canAccessPath, homeRoute } from "./config/rolePermissions";
 import { getRolePermissions } from "./services/permissionService";
 import Layout from "./components/layout/Layout";
+import DocumentViewer from "./components/common/DocumentViewer";
 import AdminPermissionsPage from "./pages/AdminPermissionsPage";
 import LoginPage from "./pages/LoginPage";
 import UploadInvoicePage from "./pages/UploadInvoicePage";
@@ -327,6 +328,7 @@ export default function App() {
           <Route path="*" element={<Navigate to={home} replace />} />
         </Route>
       </Routes>
+      <DocumentViewer />
     </ExtractionProvider>
     </PermissionsProvider>
   );

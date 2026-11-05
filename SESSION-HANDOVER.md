@@ -1,9 +1,41 @@
-# Session handover — 2026-11-04
+# Session handover — 2026-11-05
 
 Handover from Claude Code sessions on this machine (`D:\VIM\VIM-Luck`). Read
 `CLAUDE.md` and `CONTEXT.md` first; this file records only what these sessions did and
 what is still open. (`HANDOFF.md` is the separate product feature-status doc.)
 Newest session first; §1–§5 below are from session 1 and are still accurate.
+
+## 2026-11-05: "View" showed nothing in the local preview (fixed locally, not committed or deployed)
+
+**Cause:** the Claude app's preview pane blocks new tabs, so `window.open` returned `null` and
+"View" fell back to a download, which the pane never shows. Any browser that blocks the popup
+behaved the same way: View quietly turned into a download.
+
+**Fix:** when the new tab is blocked, View now opens the file in a viewer on the page instead.
+Normal browsers still get the new tab, and Download is unchanged.
+
+| File | Change |
+|---|---|
+| `frontend/src/components/common/DocumentViewer.jsx` | New. Built on the existing `Modal`: PDF in an `<iframe>`, JPEG/PNG as `<img>`, anything else (TIFF) a "can't be shown" note; Close and Download buttons; Esc closes; the object URL is freed on close |
+| `frontend/src/utils/invoiceDocument.js` | `showOrSaveBlob` split into `saveBlob` (download) and `viewBlob` (new tab, else sends the `einv:view-document` event the viewer listens for) |
+| `frontend/src/App.jsx` | Mounts `<DocumentViewer />` once for the internal portal |
+| `frontend/src/pages/ExtractionResultsPage.jsx` | Review-page "View File" uses `viewBlob` |
+
+**Verified in the pane** (`localhost:5173`, admin, invoice #1):
+- Detail-page View shows the PDF in the viewer (screenshot). The viewer's Download saves `INV-DOC-0001.pdf`.
+- Close removes the viewer and frees the URL. Esc closes too.
+- Inbox-row View opens the viewer without opening the row.
+- A PNG renders, and a TIFF shows the note.
+- With a stubbed popup that is allowed, View still goes to the new tab.
+- `npm run build` OK. The new files lint clean; the 2 lint errors in `ExtractionResultsPage.jsx` are old.
+
+**Not covered:** the supplier portal has no viewer mounted. It has no View button today.
+
+**Correction to the note below:** the pane does render PDFs inside an `<iframe>`. It only blocks
+new tabs and top-level `blob:` navigation.
+
+**Also why a file can be missing locally:** invoice #2 (`LOCAL-SUP-0001`) has no stored file
+(`po-flip`), so it shows "—". New local uploads fail until `GEMINI_API_KEY` is set in `backend\.env`.
 
 ## Pulled 2026-11-04: supplier demo OTP moved into the database
 
@@ -55,7 +87,8 @@ their own download in `AttachmentsCard` / `routers/attachments.py`.)
 uses the same `ExtractionResultsPage.jsx`). A button next to "Raw Output" opens the uploaded file
 from browser memory (`URL.createObjectURL` on the dropped `File`), with no server request, so users can
 check the extracted fields against the document before saving. It is hidden for email-inbox
-reviews, which only carry a `{name, size}` stand-in. If a popup is blocked, it downloads instead.
+reviews, which only carry a `{name, size}` stand-in. If a popup is blocked, it opens in the in-page
+viewer (2026-11-05; it used to download instead).
 Checked in the pane with a stubbed upload response (the local Gemini key is empty): the button
 renders, and the click opens a `blob:` URL holding the exact PDF. Lint and build unchanged.
 
