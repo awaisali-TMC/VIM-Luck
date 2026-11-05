@@ -77,8 +77,14 @@ renders, and the click opens a `blob:` URL holding the exact PDF. Lint and build
   is gone, since the row click does the same. The `#id` link is now a real `<button>`, so an
   invoice can still be opened from the keyboard (Tab, then Enter: checked). **Deployed**: build
   `9dc785b9`, web `lucky-cement-vim-web-00005-thp` (`:845cbd2`); rollback target `00004-j5s`.
-  The API was not redeployed. Eye icons still exist on the **Reports** page (`ReportsPage.jsx`)
-  and the supplier **My Invoices** list (`SupplierPortal.jsx`, `HistoryView`); they were not part of this request.
+  The API was not redeployed.
+- **Eye icons also removed from Reports and the supplier My Invoices list** (client request), the
+  same way: the row opens the invoice (skipped while text is selected), and `#id` is a real
+  button. Reports uses `DataTable`'s `onRowClick`, and `HistoryView` in `SupplierPortal.jsx` got a
+  row `onClick`. Verified locally: on both screens, a cell click and Enter on `#id` open the
+  invoice, and no eye icon is left.
+  - **Local test data added for this check:** supplier "LOCAL TEST Supplier (delete me)"
+    (mobile `03009990001`) and its draft invoice #2 `LOCAL-SUP-0001` in `backend\invoices.db`.
 - **Not covered:** the supplier portal's own list (`HistoryView` in `SupplierPortal.jsx`) is a
   separate component and does not have the column.
 - **Deployed 2026-11-04** together with the review-page View File (images `:74ad257`, build

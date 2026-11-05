@@ -109,7 +109,7 @@ function HistoryView({ onViewInvoice, onUpload, highlightIds = [], uploadErrors 
           <table className="w-full text-xs">
             <thead>
               <tr className="bg-neutral-25 border-b border-neutral-100">
-                {["#", "Invoice No.", "Supplier", "Date", "Amount", "Status", "Submitted", ""].map((h, i) => (
+                {["#", "Invoice No.", "Supplier", "Date", "Amount", "Status", "Submitted"].map((h, i) => (
                   <th
                     key={h || `col-${i}`}
                     className="px-4 py-2.5 text-left text-2xs font-semibold text-neutral-500 uppercase tracking-wider whitespace-nowrap"
@@ -123,17 +123,25 @@ function HistoryView({ onViewInvoice, onUpload, highlightIds = [], uploadErrors 
               {invoices.map((inv) => (
                 <tr
                   key={inv.id}
-                  className={`transition-colors ${newIds.has(inv.id) ? "bg-emerald-50/60" : "hover:bg-neutral-25"}`}
+                  // The whole row opens the invoice, unless text is being selected.
+                  onClick={() => {
+                    if (window.getSelection()?.toString()) return;
+                    onViewInvoice(inv.id);
+                  }}
+                  className={`cursor-pointer transition-colors ${newIds.has(inv.id) ? "bg-emerald-50/60" : "hover:bg-neutral-25"}`}
                 >
                   <td className="px-4 py-3 text-neutral-400">
                     <span className="inline-flex items-center gap-1.5">
                       {newIds.has(inv.id) && <span className="w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0" title="Just uploaded" />}
-                      <span
-                        className="text-emerald-600 font-semibold cursor-pointer hover:underline"
-                        onClick={() => onViewInvoice(inv.id)}
+                      {/* A real button, so the invoice opens from the keyboard too. */}
+                      <button
+                        type="button"
+                        className="text-emerald-600 font-semibold cursor-pointer hover:underline bg-transparent border-none p-0"
+                        onClick={(e) => { e.stopPropagation(); onViewInvoice(inv.id); }}
+                        title="Open invoice"
                       >
                         #{inv.id}
-                      </span>
+                      </button>
                     </span>
                   </td>
                   <td className="px-4 py-3 font-mono font-semibold text-neutral-800">{inv.invoice_number || "—"}</td>
@@ -146,20 +154,6 @@ function HistoryView({ onViewInvoice, onUpload, highlightIds = [], uploadErrors 
                     <Badge status={inv.status} />
                   </td>
                   <td className="px-4 py-3 text-neutral-400 whitespace-nowrap">{fmtDate(inv.created_at)}</td>
-                  <td className="px-4 py-3">
-                    <button
-                      type="button"
-                      title="View invoice"
-                      aria-label="View invoice"
-                      onClick={(e) => { e.stopPropagation(); onViewInvoice(inv.id); }}
-                      className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-transparent border border-transparent text-emerald-600 hover:bg-emerald-50 hover:border-emerald-200 cursor-pointer transition-colors"
-                    >
-                      <svg className="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" />
-                        <circle cx="12" cy="12" r="3" />
-                      </svg>
-                    </button>
-                  </td>
                 </tr>
               ))}
             </tbody>

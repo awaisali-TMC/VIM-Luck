@@ -26,23 +26,6 @@ const PAGE_SIZE = 25;
 const fmtInt = (n) => Number(n || 0).toLocaleString();
 const fmtMoney = (n) => `PKR ${Math.round(Number(n || 0)).toLocaleString()}`;
 
-function EyeButton({ onClick }) {
-  return (
-    <button
-      type="button"
-      title="View invoice"
-      aria-label="View invoice"
-      onClick={onClick}
-      className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-transparent border border-transparent text-brand-600 hover:bg-brand-50 hover:border-brand-200 cursor-pointer transition-colors"
-    >
-      <svg className="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" />
-        <circle cx="12" cy="12" r="3" />
-      </svg>
-    </button>
-  );
-}
-
 export default function ReportsPage() {
   const navigate = useNavigate();
 
@@ -182,13 +165,17 @@ export default function ReportsPage() {
   const invoiceColumns = [
     {
       key: "id", label: "#",
+      // A real button, so the invoice opens from the keyboard too (the row
+      // click replaced the eye icon).
       render: (v) => (
-        <span
-          className="text-brand-600 font-semibold cursor-pointer hover:underline whitespace-nowrap"
-          onClick={() => navigate(`/invoices/${v}`)}
+        <button
+          type="button"
+          className="text-brand-600 font-semibold cursor-pointer hover:underline whitespace-nowrap bg-transparent border-none p-0"
+          onClick={(e) => { e.stopPropagation(); navigate(`/invoices/${v}`); }}
+          title="Open invoice"
         >
           #{v}
-        </span>
+        </button>
       ),
     },
     {
@@ -245,10 +232,6 @@ export default function ReportsPage() {
     {
       key: "created_at", label: "Received",
       render: (v) => <span className="text-neutral-500 whitespace-nowrap">{v ? new Date(v).toLocaleDateString() : "—"}</span>,
-    },
-    {
-      key: "_actions", label: "",
-      render: (_, row) => <EyeButton onClick={() => navigate(`/invoices/${row.id}`)} />,
     },
   ];
 
@@ -367,6 +350,11 @@ export default function ReportsPage() {
             <DataTable
               columns={groupBySupplier ? invoiceColumns.filter((c) => c.key !== "supplier_name") : invoiceColumns}
               data={table.items}
+              // The whole row opens the invoice, unless text is being selected.
+              onRowClick={(row) => {
+                if (window.getSelection()?.toString()) return;
+                navigate(`/invoices/${row.id}`);
+              }}
               groupKey={groupBySupplier ? (row) => row.supplier_name || "Unknown supplier" : undefined}
               renderGroupHeader={
                 groupBySupplier
