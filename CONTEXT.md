@@ -63,36 +63,36 @@ instance (Cloud SQL CSV export → GCS → CSV import, `id` column left out so t
 sequence stays valid for later `import_atl.py` runs). Counts verified after import;
 the temporary transfer bucket was deleted.
 
-## 3. Deploying (manual)
+## 3. Deploying (manual, on-prem / LAN server)
 
-Cloud Build's identity in this project (`527930147362-compute@…`) can push images but
-cannot deploy to Cloud Run, so build and rollout are two steps. From the repo root:
+**Updated 2026-11-06: deployment moved off Google Cloud.** The Cloud Build pipeline
+(`cloudbuild.yaml`), the `.gcloudignore` files, the GCP-credentials bootstrap in
+`main.py` and the legacy Document AI path were removed from the repo. There is no CI
+and no automated deploy.
 
-```powershell
-$tag = git rev-parse --short HEAD
-gcloud builds submit --config=cloudbuild.yaml --project=tmc-presales-pocs --substitutions=_TAG=$tag
-$repo = "us-central1-docker.pkg.dev/tmc-presales-pocs/presales-lucky-cement-vim"
-gcloud run deploy lucky-cement-vim-api --image="$repo/lucky-cement-vim-api:$tag" --region=us-central1 --project=tmc-presales-pocs
-gcloud run deploy lucky-cement-vim-web --image="$repo/lucky-cement-vim-web:$tag" --region=us-central1 --project=tmc-presales-pocs
+**The LAN server** is on the SAP network, so it runs **live SAP** (AUP DEV,
+`10.10.100.171`, sysnr `01`, client `100`, direct, no SAProuter). From the repo root
+on that box:
+
+```bash
+git pull
+./start-lan.sh
 ```
 
-Image-only deploys keep every env var, secret, the Cloud SQL attachment, scaling and
-public access. `cloudbuild.yaml` builds the backend with `--build-arg SAP_SDK=off`
-under BuildKit (`DOCKER_BUILDKIT=1` — the legacy builder also builds the unused
-`sap-on` stage and fails on its `COPY` of the absent SDK) and the frontend with
-`API_BASE_URL` = the API URL above, **baked into the bundle at build time**.
+`start-lan.sh` exports `SAPNWRFC_HOME` / `LD_LIBRARY_PATH` for the Linux NW RFC SDK in
+`backend/nwrfcsdk-linux` (git-ignored, licensed), then starts the backend (uvicorn,
+:8000) and the frontend (Vite, :5173, bound to `0.0.0.0`). All configuration is that
+box's own git-ignored `backend/.env`: `SAP_MODE=live`, the `SAP_*` connection, the
+Gemini key, `DATABASE_URL`, `CORS_ORIGINS`. Invoice uploads are saved under
+`backend/uploads/<uploader>/` with `vendor_<name>_` / `apo_<name>_` prefixes
+(`SAVE_UPLOADS` defaults to true).
 
-Backend runtime configuration (set once at creation; change with
-`gcloud run services update lucky-cement-vim-api --update-env-vars=…`):
-
-| Env var | Value |
-|---|---|
-| `DEBUG` | `true` (required by `SAP_MODE=fake`; §5) |
-| `SAP_ENABLED` / `SAP_MODE` | `true` / `fake` |
-| `GEMINI_MODEL` | `gemini-3.5-flash` |
-| `INITIAL_ADMIN_EMAIL` | `admin@tmcltd.com` |
-| `CORS_ORIGINS` | both portal URLs (`…-527930147362.us-central1.run.app` and `…-wwmrdyz2sa-uc.a.run.app`) |
-| `DATABASE_URL`, `GEMINI_API_KEY`, `INITIAL_ADMIN_PASSWORD`, `SUPPLIER_DEMO_OTP` | from the secrets in §2 |
+**The old Cloud Run services** (`lucky-cement-vim-api` / `lucky-cement-vim-web`) and
+their database, images, secrets and bucket in `tmc-presales-pocs` still exist; they
+were deliberately **not** deleted. They are no longer a deploy target. Their last
+revision (API `lucky-cement-vim-api-00005-qhw`) runs fixture SAP (`SAP_MODE=fake`;
+Cloud Run cannot reach the private SAP host) with `SAVE_UPLOADS=false`. Delete them
+from the console whenever they're no longer wanted.
 
 ## 4. No SAP SDK
 

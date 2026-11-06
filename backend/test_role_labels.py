@@ -67,7 +67,6 @@ else:
 os.environ["DATABASE_URL"] = URL
 os.environ["DEBUG"] = "true"
 os.environ["GEMINI_API_KEY"] = ""
-os.environ["GCP_CREDENTIALS_JSON"] = ""
 
 from fastapi.testclient import TestClient                                  # noqa: E402
 from sqlalchemy import select, text                                        # noqa: E402

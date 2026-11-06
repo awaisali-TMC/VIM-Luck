@@ -25,13 +25,15 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = "sqlite+aiosqlite:///./invoices.db"
 
-    # Google Document AI
+    # Google Cloud — DEPRECATED / INERT. The Document AI extraction path and the
+    # GCP deploy pipeline were removed; no code reads these any more. They remain
+    # only so existing .env files that still list them keep loading (pydantic-
+    # settings forbids unknown keys). Remove these fields and the matching .env
+    # lines together, once every deployment's .env has dropped them.
     GCP_PROJECT_ID: str = ""
     GCP_LOCATION: str = "us"
     DOCAI_PROCESSOR_ID: str = ""
     GOOGLE_APPLICATION_CREDENTIALS: str = "./service-account-key.json"
-    # Base64-encoded service account JSON — used in cloud deployments (Render, etc.)
-    # If set, takes priority over GOOGLE_APPLICATION_CREDENTIALS file path
     GCP_CREDENTIALS_JSON: str = ""
 
     # Gemini AI
@@ -114,7 +116,6 @@ class Settings(BaseSettings):
     # CORS — explicit allowlist (no wildcard). Override via env CORS_ORIGINS
     # (JSON list) to add/replace origins per environment.
     CORS_ORIGINS: list[str] = [
-        "https://einv-frontend-656805782370.asia-south1.run.app",
         "http://localhost:5173",
         "http://localhost:5174",
         "http://localhost:8081",

@@ -1,8 +1,0 @@
-# Keep the upload small — deps are installed inside the container build
-node_modules/
-dist/
-.vite/
-
-# Local env files (but .env.production IS uploaded — Vite needs it at build time)
-.env
-.env.local

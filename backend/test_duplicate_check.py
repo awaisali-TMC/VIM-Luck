@@ -27,7 +27,6 @@ os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{SCRATCH}"
 os.environ["DEBUG"] = "true"
 os.environ["SAP_MODE"] = "fake"
 os.environ["GEMINI_API_KEY"] = ""
-os.environ["GCP_CREDENTIALS_JSON"] = ""
 
 from app.config import settings  # noqa: E402
 
