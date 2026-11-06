@@ -36,7 +36,12 @@ EXTRACTION_PROMPT = """You are an expert accounts payable specialist. Extract AL
 
 ## FIELDS TO EXTRACT
 Extract these header fields. Use null if not found:
-- invoice_id: Invoice number / reference
+- invoice_id: Invoice number / reference. If any page has a field labelled "Invoice Reference No"
+  / "Invoice Reference Number" / "Invoice Ref No" (for example on an ERP / SAP "Vendor Tracking
+  Invoice" cover sheet), use THAT value — it takes precedence over the bill / invoice number
+  printed on the vendor's own invoice, even when the two differ slightly. Only when no such
+  field exists, use the vendor's invoice / bill number. Copy the value exactly as printed,
+  character for character: never add, drop or pad digits (e.g. "LC 01" stays "LC 01", not "LC 001").
 - invoice_date: Invoice date (return as-is from document)
 - due_date: Payment due date (return as-is from document)
 - supplier_name: Vendor / supplier name
