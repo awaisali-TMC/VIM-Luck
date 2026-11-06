@@ -173,6 +173,7 @@ export function ExtractionProvider({ children }) {
           supplier_ntn: fieldMap.supplier_tax_id || null,
           receiver_name: fieldMap.receiver_name || null,
           receiver_address: fieldMap.receiver_address || null,
+          receiver_ntn: fieldMap.receiver_tax_id || null,
           subtotal_amount: parseFloat(String(fieldMap.net_amount || "").replace(/,/g, "")) || null,
           tax_amount: parseFloat(String(fieldMap.total_tax_amount || "").replace(/,/g, "")) || null,
           total_amount: parseFloat(String(fieldMap.total_amount || "").replace(/,/g, "")) || null,

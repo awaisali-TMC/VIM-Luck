@@ -15,6 +15,7 @@ from google import genai
 from google.genai import types
 
 from app.config import settings
+from app.services.fbr_verification import receiver_ntn_problem
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +54,9 @@ Extract these header fields. Use null if not found:
 - supplier_tax_id: Vendor NTN / tax registration number
 - receiver_name: Buyer / receiver name
 - receiver_address: Buyer address
+- receiver_tax_id: Buyer / receiver NTN — the tax registration number of the company the
+  invoice is addressed TO (often labelled "Buyer NTN", "Customer NTN", "NTN of Purchaser").
+  Never the vendor's own NTN. null when the invoice does not print it.
 - total_amount: Grand total / amount due
 - net_amount: Subtotal before tax
 - total_tax_amount: Total tax amount
@@ -130,6 +134,7 @@ Respond ONLY with valid JSON:
     "supplier_tax_id": "1234567-8",
     "receiver_name": "Buyer Co",
     "receiver_address": "456 Avenue",
+    "receiver_tax_id": "7654321-0",
     "total_amount": 118000.00,
     "net_amount": 100000.00,
     "total_tax_amount": 18000.00,
@@ -181,6 +186,7 @@ FIELD_LABELS = {
     "supplier_address": "Vendor Address",
     "receiver_name": "Receiver Name",
     "receiver_address": "Receiver Address",
+    "receiver_tax_id": "Receiver NTN",
     "total_amount": "Total Amount",
     "net_amount": "Subtotal",
     "total_tax_amount": "Tax Amount",
@@ -368,6 +374,14 @@ def _detect_attention_flags(
             "severity": "low", "category": "tax",
             "title": "No vendor NTN",
             "message": "No vendor NTN/STRN found — verify FBR registration and filer status.",
+        })
+    # Receiver gate: the invoice must be addressed to us (silent without BUYER_NTN).
+    receiver_problem = receiver_ntn_problem(field_map.get("receiver_tax_id"))
+    if receiver_problem:
+        flags.append({
+            "severity": "high", "category": "tax",
+            "title": "Not addressed to us",
+            "message": receiver_problem,
         })
 
     # --- Foreign currency ---

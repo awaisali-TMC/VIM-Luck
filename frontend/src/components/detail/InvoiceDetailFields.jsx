@@ -25,6 +25,7 @@ const FIELD_GROUPS = [
     fields: [
       { key: "receiver_name", label: "Receiver Name" },
       { key: "receiver_address", label: "Receiver Address" },
+      { key: "receiver_ntn", label: "Receiver NTN" },
     ],
   },
   {

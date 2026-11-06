@@ -109,6 +109,8 @@ async def run_migrations():
         "ALTER TABLE invoices ADD COLUMN sap_vendor_number VARCHAR(20)",
         # SAP company code on the PO — part of the duplicate-invoice key.
         "ALTER TABLE purchase_orders ADD COLUMN company_code VARCHAR(10)",
+        # Buyer NTN printed on the invoice (checked against BUYER_NTN).
+        "ALTER TABLE invoices ADD COLUMN receiver_ntn VARCHAR(50)",
         # Repair POs synced while the header total read EKKO RLWRT (0 for POs
         # without a release strategy): recompute from line values. Idempotent —
         # only touches rows whose stored total is still 0.

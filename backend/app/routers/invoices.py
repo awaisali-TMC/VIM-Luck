@@ -47,6 +47,7 @@ from app.services.duplicate_detection import (
     find_key_duplicates,
 )
 from app.services.invoice_classifier import classify_invoice
+from app.services.fbr_verification import receiver_ntn_problem
 
 logger = logging.getLogger(__name__)
 
@@ -222,6 +223,7 @@ def _build_detail_response(invoice: Invoice) -> InvoiceDetailResponse:
         supplier_ntn=invoice.supplier_ntn,
         receiver_name=invoice.receiver_name,
         receiver_address=invoice.receiver_address,
+        receiver_ntn=invoice.receiver_ntn,
         subtotal_amount=invoice.subtotal_amount,
         tax_amount=invoice.tax_amount,
         total_amount=invoice.total_amount,
@@ -319,6 +321,12 @@ def _extraction_to_draft(result: dict, filename: str, stored_path: str,
 
     clamp = _clamp
 
+    # Same receiver gate as /save: drafts never pass through it.
+    draft_warnings = list(result.get("warnings") or [])
+    receiver_problem = receiver_ntn_problem(fm.get("receiver_tax_id"))
+    if receiver_problem and receiver_problem not in draft_warnings:
+        draft_warnings.append(receiver_problem)
+
     invoice = Invoice(
         original_filename=clamp(filename, 255),
         stored_filepath=stored_path,
@@ -334,6 +342,7 @@ def _extraction_to_draft(result: dict, filename: str, stored_path: str,
         supplier_ntn=clamp(fm.get("supplier_tax_id"), 50),
         receiver_name=clamp(fm.get("receiver_name"), 255),
         receiver_address=fm.get("receiver_address"),
+        receiver_ntn=clamp(fm.get("receiver_tax_id"), 50),
         subtotal_amount=_pnum(fm.get("net_amount")),
         tax_amount=_pnum(fm.get("total_tax_amount")),
         total_amount=_pnum(fm.get("total_amount")),
@@ -342,7 +351,7 @@ def _extraction_to_draft(result: dict, filename: str, stored_path: str,
         document_type=clamp(result.get("document_type"), 50),
         overall_confidence=result.get("overall_confidence"),
         field_confidences=json.dumps(cm) if cm else None,
-        warnings=json.dumps(result.get("warnings")) if result.get("warnings") else None,
+        warnings=json.dumps(draft_warnings) if draft_warnings else None,
         detected_taxes=json.dumps(result.get("detected_taxes")) if result.get("detected_taxes") else None,
         processing_time_ms=result.get("processing_time_ms"),
         status=InvoiceStatus.DRAFT.value,
@@ -701,6 +710,12 @@ async def save_invoice(
                 owner_supplier_id, registered, data.supplier_name,
             )
 
+    # Receiver gate: an invoice addressed to another company's NTN is flagged
+    # for AP (warning only, like the vendor gate above). Silent without BUYER_NTN.
+    receiver_problem = receiver_ntn_problem(data.receiver_ntn)
+    if receiver_problem and receiver_problem not in warnings:
+        warnings.append(receiver_problem)
+
     # _clamp: Postgres enforces VARCHAR lengths (SQLite dev doesn't) — an
     # over-long extracted/edited field must not 500 the whole save.
     invoice = Invoice(
@@ -719,6 +734,7 @@ async def save_invoice(
         supplier_ntn=_clamp(data.supplier_ntn, 50),
         receiver_name=_clamp(data.receiver_name, 255),
         receiver_address=data.receiver_address,
+        receiver_ntn=_clamp(data.receiver_ntn, 50),
         subtotal_amount=data.subtotal_amount,
         tax_amount=data.tax_amount,
         total_amount=data.total_amount,

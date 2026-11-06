@@ -290,6 +290,7 @@ async def persist_invoice(
             supplier_ntn=fields.get("supplier_tax_id"),
             receiver_name=fields.get("receiver_name"),
             receiver_address=fields.get("receiver_address"),
+            receiver_ntn=fields.get("receiver_tax_id"),
             total_amount=_safe_float(fields.get("total_amount")),
             subtotal_amount=_safe_float(fields.get("net_amount")),
             tax_amount=_safe_float(fields.get("total_tax_amount")),

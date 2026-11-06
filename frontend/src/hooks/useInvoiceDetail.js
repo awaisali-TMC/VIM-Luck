@@ -67,6 +67,7 @@ export default function useInvoiceDetail(invoiceId) {
       supplier_ntn: invoice.supplier_ntn || "",
       receiver_name: invoice.receiver_name || "",
       receiver_address: invoice.receiver_address || "",
+      receiver_ntn: invoice.receiver_ntn || "",
       subtotal_amount: invoice.subtotal_amount,
       tax_amount: invoice.tax_amount,
       total_amount: invoice.total_amount,

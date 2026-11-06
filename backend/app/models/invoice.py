@@ -47,6 +47,8 @@ class Invoice(Base):
     # Receiver
     receiver_name = Column(String(255))
     receiver_address = Column(Text)
+    # Buyer's NTN as printed on the invoice; checked against settings.BUYER_NTN.
+    receiver_ntn = Column(String(50))
 
     # Amounts
     subtotal_amount = Column(Float)

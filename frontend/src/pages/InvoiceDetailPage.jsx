@@ -293,7 +293,7 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
   const INLINE_FIELD_KEYS = [
     "invoice_number", "invoice_date", "due_date", "currency", "document_type",
     "po_reference", "supplier_name", "supplier_address", "supplier_ntn",
-    "receiver_name", "receiver_address", "subtotal_amount", "tax_amount",
+    "receiver_name", "receiver_address", "receiver_ntn", "subtotal_amount", "tax_amount",
     "gst_amount", "wht_amount", "total_amount", "bank_iban",
   ];
   const [inlineFields, setInlineFields] = useState({});

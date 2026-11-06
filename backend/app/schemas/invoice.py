@@ -111,6 +111,7 @@ class InvoiceSaveRequest(BaseModel):
     supplier_ntn: Optional[str] = None
     receiver_name: Optional[str] = None
     receiver_address: Optional[str] = None
+    receiver_ntn: Optional[str] = None
     subtotal_amount: Optional[float] = None
     tax_amount: Optional[float] = None
     total_amount: Optional[float] = None
@@ -168,6 +169,7 @@ class InvoiceUpdateRequest(BaseModel):
     supplier_ntn: Optional[str] = None
     receiver_name: Optional[str] = None
     receiver_address: Optional[str] = None
+    receiver_ntn: Optional[str] = None
     subtotal_amount: Optional[float] = None
     tax_amount: Optional[float] = None
     total_amount: Optional[float] = None
@@ -270,6 +272,7 @@ class InvoiceDetailResponse(BaseModel):
     # Receiver info
     receiver_name: Optional[str] = None
     receiver_address: Optional[str] = None
+    receiver_ntn: Optional[str] = None
     # Financial amounts
     subtotal_amount: Optional[float] = None
     tax_amount: Optional[float] = None
