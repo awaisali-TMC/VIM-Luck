@@ -45,6 +45,11 @@ class Settings(BaseSettings):
     # File Storage
     UPLOAD_DIR: str = "./uploads"
     MAX_FILE_SIZE_MB: int = 20
+    # Whether uploaded INVOICE files are persisted to disk. True on a real server
+    # (files land in UPLOAD_DIR/<uploader>/, see services/file_storage.py). Set
+    # False on Cloud Run so uploads are extracted but NOT saved to the Storage
+    # bucket — there is no file to view/download for cloud-uploaded invoices.
+    SAVE_UPLOADS: bool = True
 
     # Gmail IMAP (for email invoice inbox)
     GMAIL_ADDRESS: str = ""

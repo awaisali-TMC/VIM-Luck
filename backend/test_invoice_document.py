@@ -36,7 +36,14 @@ from fastapi.testclient import TestClient  # noqa: E402
 import app.main as main  # noqa: E402
 from app.config import settings  # noqa: E402
 from app.security import get_current_principal, Principal  # noqa: E402
-from app.services.file_storage import save_uploaded_file, resolve_stored_file  # noqa: E402
+from app.services.file_storage import (  # noqa: E402
+    save_uploaded_file,
+    save_invoice_file,
+    resolve_stored_file,
+    invoice_upload_target,
+    slugify_name,
+    UNSAVED_MARKER,
+)
 
 assert settings.UPLOAD_DIR.startswith(SCRATCH), "UPLOAD_DIR is not the scratch folder; .env won"
 assert SCRATCH in settings.DATABASE_URL, "DATABASE_URL is not the scratch DB; .env won"
@@ -175,6 +182,45 @@ if __name__ == "__main__":
         expect("HTML bytes are not served as HTML", "html" not in r.headers.get("content-type", ""))
         expect("unknown bytes go out as octet-stream", r.headers.get("content-type") == "application/octet-stream")
         expect("unknown bytes are never inline", r.headers.get("content-disposition", "").startswith("attachment"))
+
+        print("\nPER-UPLOADER STORAGE: folders + vendor_/apo_ prefixes")
+        expect("slugify collapses punctuation/spaces",
+               slugify_name("Haier Pakistan (Pvt) Ltd") == "haier_pakistan_pvt_ltd")
+        expect("blank name -> 'unknown'", slugify_name("") == "unknown")
+        vsub, vpre = invoice_upload_target("supplier", "Haier Pakistan (Pvt) Ltd")
+        asub, apre = invoice_upload_target("internal", "Arslan Zafar")
+        expect("vendor folder = name slug", vsub == "haier_pakistan_pvt_ltd")
+        expect("vendor prefix is vendor_<slug>_", vpre == "vendor_haier_pakistan_pvt_ltd_")
+        expect("ap operator folder = name slug", asub == "arslan_zafar")
+        expect("ap operator prefix is apo_<slug>_", apre == "apo_arslan_zafar_")
+
+        # A vendor upload and an AP-operator upload each land in their own folder,
+        # and resolve_stored_file serves them back from the subfolder.
+        vpath = save_invoice_file(PDF, "inv.pdf", "supplier", "Haier Pakistan (Pvt) Ltd")
+        apath = save_invoice_file(PDF, "inv.pdf", "internal", "Arslan Zafar")
+        expect("vendor file saved under its folder with its prefix",
+               os.path.join("haier_pakistan_pvt_ltd", "vendor_haier_pakistan_pvt_ltd_") in vpath)
+        expect("apo file saved under its folder with its prefix",
+               os.path.join("arslan_zafar", "apo_arslan_zafar_") in apath)
+        expect("subfolder-stored files resolve back",
+               resolve_stored_file(vpath) is not None and resolve_stored_file(apath) is not None)
+        vinv = save(client, STAFF, vpath)
+        expect("subfolder-stored invoice is viewable", fetch(client, STAFF, vinv).status_code == 200)
+        expect("subfolder-stored invoice body matches", fetch(client, STAFF, vinv).content == PDF)
+
+        # SAVE_UPLOADS off (Cloud Run): the file is extracted but NOT written, so
+        # there is nothing to serve.
+        settings.SAVE_UPLOADS = False
+        try:
+            marker = save_invoice_file(PDF, "inv.pdf", "internal", "Arslan Zafar")
+            expect("SAVE_UPLOADS off returns the unsaved marker", marker == UNSAVED_MARKER)
+            expect("unsaved marker resolves to nothing", resolve_stored_file(marker) is None)
+            nos = save(client, STAFF, marker)
+            expect("unsaved invoice reports document_available=False",
+                   available(client, STAFF, nos) == (200, False))
+            expect("unsaved invoice document -> 404", fetch(client, STAFF, nos).status_code == 404)
+        finally:
+            settings.SAVE_UPLOADS = True
 
         print("\nAUTH: the route needs a session")
         main.app.dependency_overrides.clear()
