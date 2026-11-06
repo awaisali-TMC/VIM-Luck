@@ -42,7 +42,11 @@ Extract these header fields. Use null if not found:
   printed on the vendor's own invoice, even when the two differ slightly. Only when no such
   field exists, use the vendor's invoice / bill number. Copy the value exactly as printed,
   character for character: never add, drop or pad digits (e.g. "LC 01" stays "LC 01", not "LC 001").
-- invoice_date: Invoice date (return as-is from document)
+  This rule applies to invoice_id ONLY: every other field, the line items and the taxes still come
+  from the vendor's own tax invoice / bill (a file may also hold cover sheets, payment advices,
+  deduction sheets and other supporting pages — those are not the invoice).
+- invoice_date: The invoice's own date from its header (return as-is from document) — not the date
+  of an individual line / delivery row
 - due_date: Payment due date (return as-is from document)
 - supplier_name: Vendor / supplier name
 - supplier_address: Vendor address
@@ -58,7 +62,12 @@ Extract these header fields. Use null if not found:
 - invoice_type: One of: invoice, credit_note, debit_note, purchase_order, utility_bill, receipt, expense_report, statement, remittance_advice, invoice_statement, invoice_receipt
 
 ## LINE ITEMS
-Extract EVERY billable line item / service / product:
+Extract EVERY billable line item / service / product from the vendor invoice's line-item table:
+- ONE entry PER TABLE ROW. Never merge, group, summarise or collapse rows into a single line,
+  however many there are (a table of 41 truck / bilty rows gives 41 line items, not one
+  "transportation" line built from the subtotal)
+- Keep each row's own quantity, rate and amount; the line amounts should add up to the subtotal
+- When the invoice table continues over several pages, include the rows from every page
 - Do NOT include tax rows (GST, WHT, Sales Tax, etc.)
 - Do NOT include summary rows (Subtotal, Grand Total)
 - description must never be empty
@@ -563,7 +572,7 @@ def extract_invoice(file_content: bytes, mime_type: str) -> dict:
                 EXTRACTION_PROMPT,
             ],
             config=types.GenerateContentConfig(
-                temperature=0.1,
+                temperature=0.0,
                 response_mime_type="application/json",
             ),
         )
