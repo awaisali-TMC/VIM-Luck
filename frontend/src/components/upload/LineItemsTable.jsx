@@ -415,15 +415,17 @@ function ControlledLineItems({
         ) : null
       }
       noPad
+      className="h-full flex flex-col"
+      bodyClassName="flex-1 min-h-0 flex flex-col"
     >
       {blockedMessage && (
         <div role="alert" className="mx-3.5 mt-3 mb-1 bg-danger-bg border border-danger-base rounded-base px-3 py-2 text-2xs text-danger-dark">
           {blockedMessage}
         </div>
       )}
-      {/* Cap the list and scroll inside it so many rows don't stretch the page;
-          the header row stays pinned (sticky) while scrolling. */}
-      <div className="overflow-auto max-h-[70vh]">
+      {/* Fill the remaining card height and scroll inside it, so the list never
+          stretches the row; the header row stays pinned (sticky) while scrolling. */}
+      <div className="flex-1 min-h-0 overflow-auto">
         <table className="w-full table-fixed border-collapse text-xs">
           <thead>
             <tr>

@@ -1,6 +1,6 @@
 // overflowVisible: opt out of overflow-hidden so absolutely-positioned popovers
 // (e.g. filter dropdowns) can extend past the card edge.
-export default function Card({ title, subtitle, action, children, noPad = false, className = "", overflowVisible = false }) {
+export default function Card({ title, subtitle, action, children, noPad = false, className = "", bodyClassName = "", overflowVisible = false }) {
   return (
     <div className={`bg-neutral-0 border border-neutral-100 rounded-md shadow-sm ${overflowVisible ? "" : "overflow-hidden"} ${className}`}>
       {title && (
@@ -12,7 +12,7 @@ export default function Card({ title, subtitle, action, children, noPad = false,
           {action}
         </div>
       )}
-      <div className={noPad ? "" : "p-5"}>
+      <div className={`${noPad ? "" : "p-5"} ${bodyClassName}`}>
         {children}
       </div>
     </div>

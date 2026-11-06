@@ -1216,9 +1216,11 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
       </Card>
 
       {/* ── Two-Column: Fields + Line Items ── */}
-      {/* items-start so a long line-items card doesn't stretch the fields card
-          (and leave white space under it); the line-items card scrolls inside. */}
-      <div className="grid grid-cols-2 gap-5 items-start">
+      {/* The Fields card drives the row height. The Line Items card is absolutely
+          positioned so its (possibly long) list never stretches the row; it fills
+          the Fields card's height and scrolls inside — so neither side shows a
+          band of white space, however many lines there are. */}
+      <div className="grid grid-cols-2 gap-5 items-stretch">
         <InvoiceDetailFields
           invoice={invoice}
           editing={editable}
@@ -1229,7 +1231,8 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
         {/* "+ Add line" is hidden for now (operators shouldn't add lines that
             aren't on the vendor's document) — re-enable by passing
             onAddLineItem={handleAddLine}. */}
-        <div ref={lineItemsRef}>
+        <div ref={lineItemsRef} className="relative">
+        <div className="absolute inset-0">
         <LineItemsTable
           lineItems={invoice.line_items || []}
           taxSummary={buildSelectedTaxSummary(
@@ -1254,6 +1257,7 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
           blockedIds={blockedIds}
           blockedMessage={blockedMessage}
         />
+        </div>
         </div>
       </div>
 
