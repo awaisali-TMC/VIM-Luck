@@ -1,5 +1,14 @@
 import json
+from pathlib import Path
+
 from pydantic_settings import BaseSettings
+
+# Absolute path to backend/.env (config.py lives at backend/app/config.py), so the
+# file is loaded no matter what working directory the process is started from.
+# A relative "env_file" is resolved against the CWD: launched outside backend/, the
+# app would silently ignore .env and fall back to the defaults below — e.g. talking
+# to the wrong SAP system instead of the one configured here.
+_ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
 
 
 class Settings(BaseSettings):
@@ -117,7 +126,7 @@ class Settings(BaseSettings):
     # See routers/app_settings.py.
 
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    model_config = {"env_file": str(_ENV_FILE), "env_file_encoding": "utf-8"}
 
 
 settings = Settings()
