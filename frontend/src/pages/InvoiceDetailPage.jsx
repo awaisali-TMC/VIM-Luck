@@ -1216,7 +1216,9 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
       </Card>
 
       {/* ── Two-Column: Fields + Line Items ── */}
-      <div className="grid grid-cols-2 gap-5">
+      {/* items-start so a long line-items card doesn't stretch the fields card
+          (and leave white space under it); the line-items card scrolls inside. */}
+      <div className="grid grid-cols-2 gap-5 items-start">
         <InvoiceDetailFields
           invoice={invoice}
           editing={editable}
