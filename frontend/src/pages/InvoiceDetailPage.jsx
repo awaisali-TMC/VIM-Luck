@@ -32,7 +32,6 @@ import InvoiceClassificationCard from "../components/detail/InvoiceClassificatio
 import MultiCurrencyCard from "../components/detail/MultiCurrencyCard";
 import AttachmentsCard from "../components/detail/AttachmentsCard";
 import Modal from "../components/common/Modal";
-import { listTemplates, initiateApproval } from "../services/workflowService";
 import { postInvoiceToSAP, fetchSAPTaxCodes, fetchSAPCurrencies, unparkInvoiceFromSAP, validateInvoiceForSAP, lookupSAPVendor } from "../services/sapService";
 import { tokens } from "../styles/tokens";
 import { todayIso } from "../utils/dateRange";
@@ -49,14 +48,14 @@ const STATUS_ACTIONS = {
     { label: "Validate", variant: "success", targetStatus: "validated" },
   ],
   validated: [
-    { label: "Submit for Approval", variant: "primary", targetStatus: "pending_approval" },
+    { label: "Submit & Park to SAP", variant: "primary", targetStatus: "pending_approval" },
   ],
   pending_approval: [],  // approval actions handled by ApprovalProgressCard
   approved: [
     { label: "Flag Exception", variant: "danger", targetStatus: "exception" },
   ],
   rejected: [
-    { label: "Resubmit for Approval", variant: "primary", targetStatus: "pending_approval" },
+    { label: "Resubmit & Park to SAP", variant: "primary", targetStatus: "pending_approval" },
     { label: "Resubmit for Processing", variant: "secondary", targetStatus: "pending_processing" },
     { label: "Flag Exception", variant: "danger", targetStatus: "exception" },
   ],
@@ -396,27 +395,13 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
     }).catch(() => {});
   }, [invoice?.id, invoice?.status]);
 
-  // Approval confirmation modal state
+  // Submit-to-SAP confirmation modal state. Approval is skipped on this
+  // instance: a validated invoice parks straight to SAP, so there is no
+  // workflow lookup — only the SAP dry-run pre-flight.
   const [showApprovalConfirm, setShowApprovalConfirm] = useState(false);
-  const [workflowSteps, setWorkflowSteps] = useState([]);
-  const [workflowName, setWorkflowName] = useState("");
-  const [workflowBlocked, setWorkflowBlocked] = useState(null); // reason string when no workflow matches
   const [sapValidationError, setSapValidationError] = useState(null); // SAP dry-run error(s) at submit time
   const [validatingSap, setValidatingSap] = useState(false);
   const [submittingApproval, setSubmittingApproval] = useState(false);
-
-  /** Does this active template actually match the invoice (same rules as the
-   *  backend engine: currency, amount range, invoice type)? */
-  const templateMatches = (t) => {
-    if (!t.is_active) return false;
-    if (t.currency && invoice?.currency && t.currency !== invoice.currency) return false;
-    const amt = Number(invoice?.total_amount || 0);
-    if (t.min_amount != null && amt < t.min_amount) return false;
-    if (t.max_amount != null && t.max_amount > 0 && amt > t.max_amount) return false;
-    if (t.invoice_type && t.invoice_type !== "all" && invoice?.document_type &&
-        t.invoice_type !== invoice.document_type) return false;
-    return true;
-  };
 
   const handleSubmitForApproval = async () => {
     if (blockedMessage) {
@@ -430,15 +415,11 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
       sapCardRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
       return;
     }
-    setWorkflowBlocked(null);
-    setWorkflowName("");
-    setWorkflowSteps([]);
     setSapValidationError(null);
 
     // Pre-flight the SAP park (dry run) so parking errors — duplicate check,
-    // missing entry sheet, dates, tax — surface NOW, before the approval chain,
-    // instead of after Finance Director approves. Only parkers (Purchaser /
-    // Admin) can run the dry run; other submitters skip it (someone else parks).
+    // missing entry sheet, dates, tax — surface NOW, in the dialog, instead of
+    // after the user confirms. Only parkers (Purchaser / Admin) run the dry run.
     if (canParkToSAP) {
       setValidatingSap(true);
       try {
@@ -456,25 +437,6 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
       }
     }
 
-    // Find a workflow template that MATCHES this invoice — no match = blocked.
-    try {
-      const templates = await listTemplates();
-      const list = Array.isArray(templates) ? templates : templates?.templates || [];
-      const match = list.find(templateMatches);
-      if (match) {
-        setWorkflowName(match.name);
-        setWorkflowSteps((match.steps || []).sort((a, b) => a.step_order - b.step_order));
-      } else {
-        const actives = list.filter((t) => t.is_active);
-        setWorkflowBlocked(
-          actives.length === 0
-            ? "No active approval workflow is configured. An admin must create one in Admin → Workflows before this invoice can be submitted."
-            : `No active workflow matches this invoice (currency ${invoice?.currency || "PKR"}, amount ${Number(invoice?.total_amount || 0).toLocaleString()}). Adjust a workflow template's currency/amount range in Admin → Workflows.`
-        );
-      }
-    } catch {
-      setWorkflowBlocked("Could not load workflow templates — check the backend and try again.");
-    }
     setShowApprovalConfirm(true);
   };
 
@@ -500,19 +462,30 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
     changeStatus("validated");
   };
 
+  // Approval is skipped on this instance: confirming a validated invoice parks
+  // it straight to SAP (the backend allows validated → parked for parker roles).
   const confirmApproval = async () => {
     setSubmittingApproval(true);
     try {
-      const token = currentUser?.token || localStorage.getItem("auth_token");
-      // Lock in the line-item selection so it carries through the workflow and
-      // every approver sees the same lines (and the parked amount matches).
+      // Lock in the line-item selection so the parked amount matches what's shown.
       try { await setParkingSelection(invoice.id, selectedLineIdArray() || []); } catch { /* non-fatal */ }
-      await initiateApproval(invoice.id, token);
+      await postInvoiceToSAP(invoice.id, {
+        mode: "park",
+        taxCode: invoice.sap_tax_code || effectiveTaxCode || "I0",
+        postingDate: invoice.sap_posting_date || todayIso(),
+        headerText: invoice.sap_header_text || null,
+        exchangeRate: invoice.exchange_rate || null,
+        layout: invoice.sap_layout || "goods",
+        lineItemIds: selectedLineIdArray(),
+      });
       setShowApprovalConfirm(false);
       await refetch();
     } catch (err) {
       setShowApprovalConfirm(false);
-      alert(err.response?.data?.detail || "Failed to initiate approval workflow");
+      const detail = err.response?.data?.detail;
+      setActionError(
+        typeof detail === "object" ? detail.message || JSON.stringify(detail) : detail || "Failed to park invoice in SAP"
+      );
     } finally {
       setSubmittingApproval(false);
     }
@@ -1473,69 +1446,28 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
         </div>
       </Modal>
 
-      {/* Approval Confirmation Modal */}
+      {/* Submit-to-SAP Confirmation Modal (approval skipped — parks directly) */}
       <Modal
         open={showApprovalConfirm}
-        title="Submit for Approval"
+        title="Submit & Park to SAP"
         onClose={() => setShowApprovalConfirm(false)}
       >
         <div className="flex flex-col gap-4">
           <div className="text-xs text-neutral-600">
-            This invoice will be sent through the following approval workflow:
+            This invoice will be parked directly in SAP — approval is skipped on this instance.
           </div>
-
-          {/* No matching workflow — submission is blocked */}
-          {workflowBlocked && (
-            <div className="bg-danger-bg border border-danger-base rounded-md px-3 py-2.5 text-2xs text-danger-dark">
-              <strong>Cannot submit:</strong> {workflowBlocked}
-            </div>
-          )}
 
           {sapValidationError && (
             <div className="bg-danger-bg border border-danger-base rounded-md px-3 py-2.5 text-2xs text-danger-dark">
               <strong>SAP validation failed — fix before submitting:</strong>
               <div className="mt-1">{sapValidationError}</div>
-              <div className="mt-1 opacity-70">This invoice would fail when parking to SAP. Resolve it now so it doesn&apos;t error after approval.</div>
+              <div className="mt-1 opacity-70">This invoice would fail when parking to SAP. Resolve it before submitting.</div>
             </div>
           )}
 
-          {canParkToSAP && !sapValidationError && !workflowBlocked && (
+          {canParkToSAP && !sapValidationError && (
             <div className="bg-success-bg border border-success-base rounded-md px-3 py-2 text-2xs text-success-dark">
-              ✓ SAP validation passed — this invoice will park cleanly after approval.
-            </div>
-          )}
-
-          {workflowName && (
-            <div className="text-sm font-semibold text-neutral-800">{workflowName}</div>
-          )}
-
-          {workflowSteps.length > 0 && (
-            <div className="flex flex-col gap-2">
-              {workflowSteps.map((step, i) => (
-                <div key={step.id || i} className="flex items-center gap-3 bg-neutral-25 border border-neutral-100 rounded-md px-4 py-3">
-                  <span className="w-6 h-6 rounded-full bg-brand-600 text-white text-2xs font-bold flex items-center justify-center flex-shrink-0">
-                    {step.step_order}
-                  </span>
-                  <div className="flex-1">
-                    <div className="text-xs font-semibold text-neutral-800">{step.step_name}</div>
-                    <div className="text-2xs text-neutral-500">
-                      {roleLabel(step.approver_role)}
-                      {step.sla_hours && <> &middot; SLA: {step.sla_hours}h</>}
-                    </div>
-                  </div>
-                  {i < workflowSteps.length - 1 && (
-                    <span className="text-neutral-300 text-xs">&rarr;</span>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-
-          {workflowSteps.length > 0 && (
-            <div className="bg-info-bg border border-info-base rounded-md px-3 py-2 text-2xs text-info-dark">
-              The invoice will first go to <strong>{roleLabel(workflowSteps[0]?.approver_role)}</strong> for review{workflowSteps[1] && (
-                <>, then to <strong>{roleLabel(workflowSteps[1]?.approver_role)}</strong> for final approval</>
-              )}.
+              ✓ SAP validation passed — this invoice will park cleanly when you submit.
             </div>
           )}
 
@@ -1547,9 +1479,9 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
               variant="primary"
               size="sm"
               onClick={confirmApproval}
-              disabled={submittingApproval || !!workflowBlocked || !!sapValidationError || workflowSteps.length === 0}
+              disabled={submittingApproval || !!sapValidationError}
             >
-              {submittingApproval ? "Submitting..." : "Confirm & Submit"}
+              {submittingApproval ? "Parking…" : "Confirm & Park"}
             </Button>
           </div>
         </div>

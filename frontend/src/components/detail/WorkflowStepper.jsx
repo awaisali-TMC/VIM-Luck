@@ -1,32 +1,32 @@
 const STEPS = [
   { key: "draft", label: "Received" },
-  { key: "pending_processing", label: "Validated" },
-  { key: "approval", label: "Approval" },
-  { key: "posted", label: "ERP Posting" },
+  { key: "validated", label: "Validated" },
+  { key: "posting", label: "ERP Posting" },
 ];
 
+// Approval is skipped on this instance — a validated invoice parks straight to
+// SAP — so there is no Approval step. "Ready to Submit" sits under ERP Posting.
 const STATUS_TO_INDEX = {
   draft: 0,
   pending_processing: 1,
   validated: 2,
   pending_approval: 2,
-  approved: 3,
-  posted: 3,
-  parked: 3,
+  approved: 2,
+  posted: 2,
+  parked: 2,
 };
 
-// Sub-label shown under the Approval step
-const APPROVAL_SUBLABEL = {
+// Sub-label shown under the ERP Posting step
+const POSTING_SUBLABEL = {
   validated: "Ready to Submit",
-  pending_approval: "Pending Approval",
-  approved: "Approved",
-  rejected: "Rejected",
+  parked: "Parked",
+  posted: "Posted",
 };
 
 export default function WorkflowStepper({ currentStatus }) {
   const isException = currentStatus === "exception";
   const isRejected = currentStatus === "rejected";
-  const isApproved = currentStatus === "approved" || currentStatus === "posted" || currentStatus === "parked";
+  const isParkedOrPosted = currentStatus === "parked" || currentStatus === "posted";
 
   const currentIndex = isException
     ? 1
@@ -42,11 +42,11 @@ export default function WorkflowStepper({ currentStatus }) {
           const isCurrent = i === currentIndex;
           const isError = isCurrent && (isException || isRejected);
 
-          // For the Approval step, show as completed (green) when approved/posted
-          const isApprovalStep = step.key === "approval";
-          const approvalCompleted = isApprovalStep && isApproved;
+          // The ERP Posting step is green once the invoice is parked/posted.
+          const isPostingStep = step.key === "posting";
+          const postingCompleted = isPostingStep && isParkedOrPosted;
 
-          const showCompleted = isCompleted || approvalCompleted;
+          const showCompleted = isCompleted || postingCompleted;
 
           return (
             <div key={step.key} className="flex items-center flex-1 last:flex-none">
@@ -97,16 +97,16 @@ export default function WorkflowStepper({ currentStatus }) {
                     ? "Exception"
                     : isCurrent && isRejected
                       ? "Rejected"
-                      : step.key === "posted" && currentStatus === "parked"
+                      : step.key === "posting" && currentStatus === "parked"
                         ? "Parked"
                         : step.label}
                 </span>
-                {/* Sub-label for Approval step */}
-                {isApprovalStep && APPROVAL_SUBLABEL[currentStatus] && !isException && (
+                {/* Sub-label for the ERP Posting step */}
+                {isPostingStep && POSTING_SUBLABEL[currentStatus] && !isException && !isRejected && (
                   <span className={`text-2xs whitespace-nowrap ${
-                    isApproved ? "text-success-dark" : isRejected ? "text-danger-dark" : isCurrent ? "text-neutral-500" : "text-neutral-400"
+                    isParkedOrPosted ? "text-success-dark" : isCurrent ? "text-neutral-500" : "text-neutral-400"
                   }`}>
-                    {APPROVAL_SUBLABEL[currentStatus]}
+                    {POSTING_SUBLABEL[currentStatus]}
                   </span>
                 )}
               </div>
