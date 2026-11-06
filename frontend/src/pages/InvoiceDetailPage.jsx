@@ -35,6 +35,7 @@ import Modal from "../components/common/Modal";
 import { listTemplates, initiateApproval } from "../services/workflowService";
 import { postInvoiceToSAP, fetchSAPTaxCodes, fetchSAPCurrencies, unparkInvoiceFromSAP, validateInvoiceForSAP, lookupSAPVendor } from "../services/sapService";
 import { tokens } from "../styles/tokens";
+import { todayIso } from "../utils/dateRange";
 
 /**
  * Status-based action configurations.
@@ -661,8 +662,8 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
   const sapFieldErrors = {};
   if (invoice) {
     const layoutVal   = liveSap ? liveSap.layout       : (invoice.sap_layout ?? "goods");
-    const postingVal  = liveSap ? liveSap.postingDate  : (invoice.sap_posting_date ?? "2025-05-20");
-    const baselineVal = liveSap ? liveSap.baselineDate : (invoice.sap_baseline_date ?? "2025-05-20");
+    const postingVal  = liveSap ? liveSap.postingDate  : (invoice.sap_posting_date ?? todayIso());
+    const baselineVal = liveSap ? liveSap.baselineDate : (invoice.sap_baseline_date ?? todayIso());
     const headerVal   = liveSap ? liveSap.headerText   : (invoice.sap_header_text ?? `einv-${invoice.invoice_number || invoice.id}`);
     const itemVal     = liveSap ? liveSap.itemText     : (invoice.sap_item_text ?? (invoice.invoice_number || `einv-${invoice.id}`));
     const fxVal       = liveSap ? liveSap.exchangeRate : invoice.exchange_rate;
@@ -697,8 +698,8 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
     if (!invoice || !sapFieldsEditable) return;
     const patch = {};
     if (invoice.sap_layout == null) patch.sap_layout = "goods";
-    if (invoice.sap_posting_date == null) patch.sap_posting_date = "2025-05-20";
-    if (invoice.sap_baseline_date == null) patch.sap_baseline_date = "2025-05-20";
+    if (invoice.sap_posting_date == null) patch.sap_posting_date = todayIso();
+    if (invoice.sap_baseline_date == null) patch.sap_baseline_date = todayIso();
     if (invoice.sap_header_text == null) patch.sap_header_text = `einv-${invoice.invoice_number || invoice.id}`;
     if (invoice.sap_item_text == null) patch.sap_item_text = invoice.invoice_number || `einv-${invoice.id}`;
     if (invoice.sap_currency == null) patch.sap_currency = invoice.currency || "PKR";
@@ -722,7 +723,7 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
         mode: "park",
         // All values come from what was set on the invoice before approval.
         taxCode: invoice.sap_tax_code || effectiveTaxCode || "I0",
-        postingDate: invoice.sap_posting_date || "2025-05-20",
+        postingDate: invoice.sap_posting_date || todayIso(),
         headerText: invoice.sap_header_text || null,
         exchangeRate: invoice.exchange_rate || null,
         layout: invoice.sap_layout || "goods",
@@ -1426,11 +1427,11 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
               </div>
               <div className="flex justify-between">
                 <span className="text-neutral-500">Posting Date</span>
-                <span className="font-medium text-neutral-800">{invoice.sap_posting_date || "2025-05-20"}</span>
+                <span className="font-medium text-neutral-800">{invoice.sap_posting_date || todayIso()}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-neutral-500">Baseline Date</span>
-                <span className="font-medium text-neutral-800">{invoice.sap_baseline_date || "2025-05-20"}</span>
+                <span className="font-medium text-neutral-800">{invoice.sap_baseline_date || todayIso()}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-neutral-500">Header Text</span>

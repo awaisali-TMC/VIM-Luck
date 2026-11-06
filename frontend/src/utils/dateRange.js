@@ -17,6 +17,15 @@ export const DATE_PRESETS = [
   { key: "custom", label: "Custom range" },
 ];
 
+/** Today's date as YYYY-MM-DD in the user's LOCAL time zone (toISOString would
+ *  give the UTC date, which is still yesterday until 05:00 in Pakistan). Used as
+ *  the default SAP posting/baseline date: today is always in SAP's open period. */
+export function todayIso() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
 /** Resolve a preset (+ optional custom dates) to { date_from, date_to }. */
 export function resolveDateRange({ preset, date_from, date_to }) {
   const now = new Date();
