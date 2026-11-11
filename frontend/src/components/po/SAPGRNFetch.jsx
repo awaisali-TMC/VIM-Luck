@@ -10,7 +10,7 @@ import { searchPurchaseOrders } from "../../services/purchaseOrderService";
  * alone — typing a different PO sticks and is never overwritten on re-render.
  * Picking a suggestion (or Enter / the Fetch button) fetches that PO's GRNs.
  */
-export default function SAPGRNFetch({ defaultPoNumber = "" }) {
+export default function SAPGRNFetch({ defaultPoNumber = "", onPoSelected }) {
   const [query, setQuery] = useState(defaultPoNumber || "");
   const [results, setResults] = useState([]);
   const [open, setOpen] = useState(false);
@@ -83,7 +83,25 @@ export default function SAPGRNFetch({ defaultPoNumber = "" }) {
     setQuery(po.po_number);
     setResults([]);
     setOpen(false);
+    onPoSelected?.(po);   // also select this PO for matching (enables Run Match)
     doFetch(po.po_number);
+  };
+
+  // When a number is typed and fetched (not picked from the list), resolve it to
+  // a local PO so it also becomes the match PO. Exact po_number match preferred.
+  const resolveAndSelect = useCallback(async (num) => {
+    const n = (num || "").trim();
+    if (!n || !onPoSelected) return;
+    try {
+      const data = await searchPurchaseOrders(n);
+      const exact = (data || []).find((p) => String(p.po_number) === n) || (data || [])[0];
+      if (exact) onPoSelected(exact);
+    } catch { /* not resolvable locally — leave the match PO as-is */ }
+  }, [onPoSelected]);
+
+  const handleFetchClick = () => {
+    doFetch(query);
+    resolveAndSelect(query);
   };
 
   const fmt = (n) => (n != null && n !== "" ? Number(n).toLocaleString() : "—");
@@ -97,7 +115,7 @@ export default function SAPGRNFetch({ defaultPoNumber = "" }) {
             value={query}
             onChange={(e) => runSearch(e.target.value)}
             onFocus={() => results.length > 0 && setOpen(true)}
-            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); doFetch(query); } }}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleFetchClick(); } }}
             className="w-full text-xs border border-neutral-200 rounded-base px-3 py-2 outline-none focus:border-brand-400 transition-colors"
             placeholder="Search by PO number, e.g. 4500005363"
           />
@@ -128,7 +146,7 @@ export default function SAPGRNFetch({ defaultPoNumber = "" }) {
           )}
         </div>
         <button
-          onClick={() => doFetch(query)}
+          onClick={handleFetchClick}
           disabled={loading || !query.trim()}
           className="px-3 py-2 rounded-base text-2xs font-semibold border cursor-pointer transition-colors whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed bg-brand-600 text-white border-brand-600 hover:bg-brand-700"
         >

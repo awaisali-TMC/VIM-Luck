@@ -209,7 +209,10 @@ export default function POMatchSection({ invoiceId, poReference, onMatched, read
               <div className="text-2xs font-semibold text-neutral-500 uppercase mb-2">
                 Goods Receipts (GRN) — fetch from SAP
               </div>
-              <SAPGRNFetch defaultPoNumber={selectedPO?.po_number || poReference || ""} />
+              <SAPGRNFetch
+                defaultPoNumber={selectedPO?.po_number || poReference || ""}
+                onPoSelected={(po) => setSelectedPO(po)}
+              />
             </div>
           )}
 
