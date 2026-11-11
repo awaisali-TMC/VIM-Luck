@@ -1,16 +1,20 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from "react";
 import { fetchSAPGRN } from "../../services/sapService";
 import { searchPurchaseOrders } from "../../services/purchaseOrderService";
 
 /**
  * Fetch a PO's Goods Received Notes (GRNs) live from SAP (EKBE history).
  *
- * The PO field has the same type-ahead suggestions as the main PO search
- * (local DB autocomplete). It is seeded from the selected PO ONCE and then left
- * alone — typing a different PO sticks and is never overwritten on re-render.
- * Picking a suggestion (or Enter / the Fetch button) fetches that PO's GRNs.
+ * The PO field has the same type-ahead suggestions as the main PO search. It is
+ * seeded from the selected PO ONCE and then left alone — a different PO the user
+ * types sticks and is never overwritten on re-render. Picking a suggestion
+ * selects that PO and shows its GRNs.
+ *
+ * There is no separate Fetch button: the parent's single "Run Match" button
+ * calls resolveAndFetch() through a ref to resolve/select the typed PO and load
+ * its GRNs, then runs the match — fetch and match in one click.
  */
-export default function SAPGRNFetch({ defaultPoNumber = "", onPoSelected }) {
+const SAPGRNFetch = forwardRef(function SAPGRNFetch({ defaultPoNumber = "", onPoSelected, onQueryChange }, ref) {
   const [query, setQuery] = useState(defaultPoNumber || "");
   const [results, setResults] = useState([]);
   const [open, setOpen] = useState(false);
@@ -21,17 +25,20 @@ export default function SAPGRNFetch({ defaultPoNumber = "", onPoSelected }) {
   const wrapperRef = useRef(null);
   const debounceRef = useRef(null);
   const seededRef = useRef(false);
+  const queryRef = useRef(query);
 
-  // Seed the field from the selected PO ONCE; after that the user's input is
-  // authoritative — a different PO they type is never replaced on re-render.
+  useEffect(() => { queryRef.current = query; }, [query]);
+
+  const setQ = useCallback((v) => { setQuery(v); onQueryChange?.(v); }, [onQueryChange]);
+
+  // Seed from the selected PO ONCE; after that the user's input is authoritative.
   useEffect(() => {
     if (!seededRef.current && defaultPoNumber) {
-      setQuery(defaultPoNumber);
+      setQ(defaultPoNumber);
       seededRef.current = true;
     }
-  }, [defaultPoNumber]);
+  }, [defaultPoNumber, setQ]);
 
-  // Close the suggestions dropdown on an outside click.
   useEffect(() => {
     const handleClick = (e) => {
       if (wrapperRef.current && !wrapperRef.current.contains(e.target)) setOpen(false);
@@ -41,7 +48,7 @@ export default function SAPGRNFetch({ defaultPoNumber = "", onPoSelected }) {
   }, []);
 
   const runSearch = useCallback((value) => {
-    setQuery(value);
+    setQ(value);
     if (debounceRef.current) clearTimeout(debounceRef.current);
     if (!value.trim() || value.trim().length < 2) {
       setResults([]);
@@ -60,7 +67,7 @@ export default function SAPGRNFetch({ defaultPoNumber = "", onPoSelected }) {
         setOpen(true);
       }
     }, 300);
-  }, []);
+  }, [setQ]);
 
   const doFetch = useCallback(async (num) => {
     const n = (num || "").trim();
@@ -79,79 +86,79 @@ export default function SAPGRNFetch({ defaultPoNumber = "", onPoSelected }) {
     }
   }, []);
 
+  // Resolve a PO number to a local PO (exact po_number preferred) so it can also
+  // become the match PO.
+  const resolveLocal = useCallback(async (num) => {
+    const n = (num || "").trim();
+    if (!n) return null;
+    try {
+      const data = await searchPurchaseOrders(n);
+      return (data || []).find((p) => String(p.po_number) === n) || (data || [])[0] || null;
+    } catch {
+      return null;
+    }
+  }, []);
+
   const selectPO = (po) => {
-    setQuery(po.po_number);
+    setQ(po.po_number);
     setResults([]);
     setOpen(false);
-    onPoSelected?.(po);   // also select this PO for matching (enables Run Match)
+    onPoSelected?.(po);
     doFetch(po.po_number);
   };
 
-  // When a number is typed and fetched (not picked from the list), resolve it to
-  // a local PO so it also becomes the match PO. Exact po_number match preferred.
-  const resolveAndSelect = useCallback(async (num) => {
-    const n = (num || "").trim();
-    if (!n || !onPoSelected) return;
-    try {
-      const data = await searchPurchaseOrders(n);
-      const exact = (data || []).find((p) => String(p.po_number) === n) || (data || [])[0];
-      if (exact) onPoSelected(exact);
-    } catch { /* not resolvable locally — leave the match PO as-is */ }
-  }, [onPoSelected]);
-
-  const handleFetchClick = () => {
-    doFetch(query);
-    resolveAndSelect(query);
-  };
+  // Called by the parent's single Run button: resolve + select the typed PO and
+  // fetch its GRNs. Returns the resolved PO (or null).
+  useImperativeHandle(ref, () => ({
+    async resolveAndFetch() {
+      const num = (queryRef.current || "").trim();
+      if (!num) return null;
+      const po = await resolveLocal(num);
+      if (po) onPoSelected?.(po);
+      await doFetch(num);
+      return po;
+    },
+  }), [resolveLocal, doFetch, onPoSelected]);
 
   const fmt = (n) => (n != null && n !== "" ? Number(n).toLocaleString() : "—");
 
   return (
     <div ref={wrapperRef} className="flex flex-col gap-3">
-      <div className="flex gap-2">
-        <div className="relative flex-1">
-          <input
-            type="text"
-            value={query}
-            onChange={(e) => runSearch(e.target.value)}
-            onFocus={() => results.length > 0 && setOpen(true)}
-            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleFetchClick(); } }}
-            className="w-full text-xs border border-neutral-200 rounded-base px-3 py-2 outline-none focus:border-brand-400 transition-colors"
-            placeholder="Search by PO number, e.g. 4500005363"
-          />
-          {searching && (
-            <div className="absolute right-3 top-1/2 -translate-y-1/2">
-              <div className="w-3 h-3 border-2 border-brand-400 border-t-transparent rounded-full animate-spin" />
-            </div>
-          )}
-          {open && results.length > 0 && (
-            <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-neutral-0 border border-neutral-200 rounded-base shadow-lg max-h-60 overflow-y-auto">
-              {results.map((po) => (
-                <button
-                  key={po.id}
-                  onClick={() => selectPO(po)}
-                  className="w-full flex items-center justify-between px-3 py-2 text-xs hover:bg-brand-50 cursor-pointer border-none bg-transparent text-left transition-colors border-b border-neutral-50"
-                >
-                  <div>
-                    <span className="font-semibold text-brand-600">{po.po_number}</span>
-                    <span className="text-neutral-500 ml-2">{po.vendor_name}</span>
-                    <span className="text-2xs text-neutral-400 ml-2">local</span>
-                  </div>
-                  <span className="text-neutral-600 font-mono text-2xs">
-                    {po.currency} {fmt(po.total_amount)}
-                  </span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-        <button
-          onClick={handleFetchClick}
-          disabled={loading || !query.trim()}
-          className="px-3 py-2 rounded-base text-2xs font-semibold border cursor-pointer transition-colors whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed bg-brand-600 text-white border-brand-600 hover:bg-brand-700"
-        >
-          {loading ? "Fetching…" : "Fetch GRNs from SAP"}
-        </button>
+      <div className="relative">
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => runSearch(e.target.value)}
+          onFocus={() => results.length > 0 && setOpen(true)}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); resolveLocal(query).then((po) => { if (po) onPoSelected?.(po); }); doFetch(query); } }}
+          className="w-full text-xs border border-neutral-200 rounded-base px-3 py-2 outline-none focus:border-brand-400 transition-colors"
+          placeholder="Search by PO number — pick a suggestion (its GRNs load when you Run the match)"
+        />
+        {(searching || loading) && (
+          <div className="absolute right-3 top-1/2 -translate-y-1/2">
+            <div className="w-3 h-3 border-2 border-brand-400 border-t-transparent rounded-full animate-spin" />
+          </div>
+        )}
+        {open && results.length > 0 && (
+          <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-neutral-0 border border-neutral-200 rounded-base shadow-lg max-h-60 overflow-y-auto">
+            {results.map((po) => (
+              <button
+                key={po.id}
+                onClick={() => selectPO(po)}
+                className="w-full flex items-center justify-between px-3 py-2 text-xs hover:bg-brand-50 cursor-pointer border-none bg-transparent text-left transition-colors border-b border-neutral-50"
+              >
+                <div>
+                  <span className="font-semibold text-brand-600">{po.po_number}</span>
+                  <span className="text-neutral-500 ml-2">{po.vendor_name}</span>
+                  <span className="text-2xs text-neutral-400 ml-2">local</span>
+                </div>
+                <span className="text-neutral-600 font-mono text-2xs">
+                  {po.currency} {fmt(po.total_amount)}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {error && (
@@ -203,4 +210,6 @@ export default function SAPGRNFetch({ defaultPoNumber = "", onPoSelected }) {
       )}
     </div>
   );
-}
+});
+
+export default SAPGRNFetch;

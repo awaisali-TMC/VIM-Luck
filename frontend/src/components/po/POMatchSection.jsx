@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   triggerPOMatch,
   getInvoiceMatches,
@@ -23,6 +23,8 @@ export default function POMatchSection({ invoiceId, poReference, onMatched, read
   const [error, setError] = useState(null);
   const [warning, setWarning] = useState(null);
   const [expandedResult, setExpandedResult] = useState(null);
+  const [grnQuery, setGrnQuery] = useState("");   // text in the GRN field (for enabling Run)
+  const grnRef = useRef(null);                      // imperative handle on SAPGRNFetch
 
   // Load existing match results
   const loadMatches = useCallback(async () => {
@@ -55,8 +57,9 @@ export default function POMatchSection({ invoiceId, poReference, onMatched, read
       .finally(() => setLoadingSuggestions(false));
   }, [invoiceId, poReference]);
 
-  const handleRunMatch = useCallback(async () => {
-    if (!selectedPO) {
+  const handleRunMatch = useCallback(async (poOverride) => {
+    const po = poOverride || selectedPO;
+    if (!po) {
       setError("Please select a Purchase Order first.");
       return;
     }
@@ -68,12 +71,12 @@ export default function POMatchSection({ invoiceId, poReference, onMatched, read
       // Otherwise the engine sees received=0 and every line fails the 3-way check
       // (the GRN/SES column stays empty). Best-effort: if there are no GRNs in SAP
       // or the sync fails, proceed and let the match reflect received=0.
-      if (matchType === "3-way" && selectedPO.po_number) {
+      if (matchType === "3-way" && po.po_number) {
         try {
-          const grnRes = await syncSAPGRN(selectedPO.po_number);
+          const grnRes = await syncSAPGRN(po.po_number);
           if ((grnRes?.total_in_sap ?? 0) === 0) {
             setWarning(
-              `No goods receipts found in SAP for PO ${selectedPO.po_number}. ` +
+              `No goods receipts found in SAP for PO ${po.po_number}. ` +
               `A 3-way match needs a goods receipt, so it can't pass — switch to 2-Way, ` +
               `or run again once the GR is posted in SAP.`
             );
@@ -82,7 +85,7 @@ export default function POMatchSection({ invoiceId, poReference, onMatched, read
           /* no GRNs in SAP / sync failed — continue with whatever is local */
         }
       }
-      await triggerPOMatch(invoiceId, selectedPO.id, matchType);
+      await triggerPOMatch(invoiceId, po.id, matchType);
       await loadMatches();
       onMatched?.();  // tell the page to refetch the invoice (matched_po_id is now set)
     } catch (err) {
@@ -91,6 +94,23 @@ export default function POMatchSection({ invoiceId, poReference, onMatched, read
       setMatching(false);
     }
   }, [invoiceId, selectedPO, matchType, loadMatches, onMatched]);
+
+  // Single-button flow: for 3-way, resolve/select the PO typed in the GRN field
+  // and load its GRNs, then run the match — fetch and match in one click.
+  const handleFetchAndMatch = useCallback(async () => {
+    let po = selectedPO;
+    if (matchType === "3-way" && grnRef.current) {
+      try {
+        const resolved = await grnRef.current.resolveAndFetch();
+        if (resolved) po = resolved;
+      } catch { /* fall back to selectedPO */ }
+    }
+    if (!po) {
+      setError("Enter or select a Purchase Order first.");
+      return;
+    }
+    await handleRunMatch(po);
+  }, [selectedPO, matchType, handleRunMatch]);
 
   const handleDeleteResult = useCallback(async (matchId) => {
     try {
@@ -210,8 +230,10 @@ export default function POMatchSection({ invoiceId, poReference, onMatched, read
                 Goods Receipts (GRN) — fetch from SAP
               </div>
               <SAPGRNFetch
+                ref={grnRef}
                 defaultPoNumber={selectedPO?.po_number || poReference || ""}
                 onPoSelected={(po) => setSelectedPO(po)}
+                onQueryChange={setGrnQuery}
               />
             </div>
           )}
@@ -232,10 +254,10 @@ export default function POMatchSection({ invoiceId, poReference, onMatched, read
             <Button
               variant="primary"
               size="sm"
-              onClick={handleRunMatch}
-              disabled={matching || !selectedPO}
+              onClick={handleFetchAndMatch}
+              disabled={matching || (matchType === "3-way" ? (!selectedPO && !grnQuery.trim()) : !selectedPO)}
             >
-              {matching ? "Matching..." : matchType === "3-way" ? "Run 3-Way Match" : "Run 2-Way Match"}
+              {matching ? "Matching..." : matchType === "3-way" ? "Fetch GRNs & Run 3-Way Match" : "Run 2-Way Match"}
             </Button>
           </div>
         </div>
