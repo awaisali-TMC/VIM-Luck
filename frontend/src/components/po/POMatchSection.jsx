@@ -200,7 +200,10 @@ export default function POMatchSection({ invoiceId, poReference, onMatched, read
             </div>
           </div>
 
-          {/* 3-way needs goods receipts — fetch them live from SAP */}
+          {/* 3-way needs goods receipts — fetch them live from SAP. The field
+              has the same PO type-ahead as the search above and keeps whatever
+              PO the user types. "Run 3-Way Match" imports GRNs for the selected
+              PO automatically. */}
           {matchType === "3-way" && (
             <div className="pt-1">
               <div className="text-2xs font-semibold text-neutral-500 uppercase mb-2">

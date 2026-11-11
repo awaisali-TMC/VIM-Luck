@@ -1,79 +1,135 @@
-import { useState, useEffect } from "react";
-import { fetchSAPGRN, syncSAPGRN } from "../../services/sapService";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { fetchSAPGRN } from "../../services/sapService";
+import { searchPurchaseOrders } from "../../services/purchaseOrderService";
 
 /**
- * Fetch a PO's Goods Received Notes (GRNs) live from SAP (EKBE history) by PO
- * number, show each material document + received quantities, and sync them into
- * the local DB so 3-way matching (PO + GRN vs Invoice) can use them.
+ * Fetch a PO's Goods Received Notes (GRNs) live from SAP (EKBE history).
  *
- * defaultPoNumber pre-fills the input from the currently-selected PO.
- * onSynced() is called after a successful sync so the parent can refresh.
+ * The PO field has the same type-ahead suggestions as the main PO search
+ * (local DB autocomplete). It is seeded from the selected PO ONCE and then left
+ * alone — typing a different PO sticks and is never overwritten on re-render.
+ * Picking a suggestion (or Enter / the Fetch button) fetches that PO's GRNs.
  */
-export default function SAPGRNFetch({ defaultPoNumber = "", onSynced }) {
-  const [poNumber, setPoNumber] = useState(defaultPoNumber || "");
+export default function SAPGRNFetch({ defaultPoNumber = "" }) {
+  const [query, setQuery] = useState(defaultPoNumber || "");
+  const [results, setResults] = useState([]);
+  const [open, setOpen] = useState(false);
+  const [searching, setSearching] = useState(false);
   const [loading, setLoading] = useState(false);
   const [grns, setGrns] = useState(null);
   const [error, setError] = useState(null);
-  const [syncing, setSyncing] = useState(false);
-  const [syncMsg, setSyncMsg] = useState(null);
+  const wrapperRef = useRef(null);
+  const debounceRef = useRef(null);
+  const seededRef = useRef(false);
 
-  // Keep the input in sync with the selected PO until the user fetches/edits.
+  // Seed the field from the selected PO ONCE; after that the user's input is
+  // authoritative — a different PO they type is never replaced on re-render.
   useEffect(() => {
-    if (defaultPoNumber && grns === null) setPoNumber(defaultPoNumber);
-  }, [defaultPoNumber, grns]);
+    if (!seededRef.current && defaultPoNumber) {
+      setQuery(defaultPoNumber);
+      seededRef.current = true;
+    }
+  }, [defaultPoNumber]);
 
-  const handleFetch = async () => {
-    const num = poNumber.trim();
-    if (!num) return;
+  // Close the suggestions dropdown on an outside click.
+  useEffect(() => {
+    const handleClick = (e) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  const runSearch = useCallback((value) => {
+    setQuery(value);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (!value.trim() || value.trim().length < 2) {
+      setResults([]);
+      setOpen(false);
+      return;
+    }
+    debounceRef.current = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const data = await searchPurchaseOrders(value);
+        setResults(data || []);
+      } catch {
+        setResults([]);
+      } finally {
+        setSearching(false);
+        setOpen(true);
+      }
+    }, 300);
+  }, []);
+
+  const doFetch = useCallback(async (num) => {
+    const n = (num || "").trim();
+    if (!n) return;
+    setOpen(false);
     setLoading(true);
     setError(null);
     setGrns(null);
-    setSyncMsg(null);
     try {
-      const data = await fetchSAPGRN(num);
+      const data = await fetchSAPGRN(n);
       setGrns(data.grns || []);
     } catch (err) {
       setError(err.response?.data?.detail || err.message || "SAP GRN fetch failed — check the backend logs.");
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const handleSync = async () => {
-    const num = poNumber.trim();
-    if (!num) return;
-    setSyncing(true);
-    setError(null);
-    setSyncMsg(null);
-    try {
-      const res = await syncSAPGRN(num);
-      const parts = [`${res.grns_created} GRN(s) imported`];
-      if (res.grns_skipped) parts.push(`${res.grns_skipped} already present`);
-      setSyncMsg(parts.join(", ") + ".");
-      onSynced?.(res);
-    } catch (err) {
-      setError(err.response?.data?.detail || err.message || "GRN sync failed.");
-    } finally {
-      setSyncing(false);
-    }
+  const selectPO = (po) => {
+    setQuery(po.po_number);
+    setResults([]);
+    setOpen(false);
+    doFetch(po.po_number);
   };
 
   const fmt = (n) => (n != null && n !== "" ? Number(n).toLocaleString() : "—");
 
   return (
-    <div className="flex flex-col gap-3">
+    <div ref={wrapperRef} className="flex flex-col gap-3">
       <div className="flex gap-2">
-        <input
-          type="text"
-          value={poNumber}
-          onChange={(e) => setPoNumber(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && handleFetch()}
-          className="flex-1 text-xs border border-neutral-200 rounded-base px-3 py-2 outline-none focus:border-brand-400 transition-colors"
-          placeholder="PO number to fetch its GRNs, e.g. 4500005363"
-        />
+        <div className="relative flex-1">
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => runSearch(e.target.value)}
+            onFocus={() => results.length > 0 && setOpen(true)}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); doFetch(query); } }}
+            className="w-full text-xs border border-neutral-200 rounded-base px-3 py-2 outline-none focus:border-brand-400 transition-colors"
+            placeholder="Search by PO number, e.g. 4500005363"
+          />
+          {searching && (
+            <div className="absolute right-3 top-1/2 -translate-y-1/2">
+              <div className="w-3 h-3 border-2 border-brand-400 border-t-transparent rounded-full animate-spin" />
+            </div>
+          )}
+          {open && results.length > 0 && (
+            <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-neutral-0 border border-neutral-200 rounded-base shadow-lg max-h-60 overflow-y-auto">
+              {results.map((po) => (
+                <button
+                  key={po.id}
+                  onClick={() => selectPO(po)}
+                  className="w-full flex items-center justify-between px-3 py-2 text-xs hover:bg-brand-50 cursor-pointer border-none bg-transparent text-left transition-colors border-b border-neutral-50"
+                >
+                  <div>
+                    <span className="font-semibold text-brand-600">{po.po_number}</span>
+                    <span className="text-neutral-500 ml-2">{po.vendor_name}</span>
+                    <span className="text-2xs text-neutral-400 ml-2">local</span>
+                  </div>
+                  <span className="text-neutral-600 font-mono text-2xs">
+                    {po.currency} {fmt(po.total_amount)}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         <button
-          onClick={handleFetch}
-          disabled={loading || !poNumber.trim()}
+          onClick={() => doFetch(query)}
+          disabled={loading || !query.trim()}
           className="px-3 py-2 rounded-base text-2xs font-semibold border cursor-pointer transition-colors whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed bg-brand-600 text-white border-brand-600 hover:bg-brand-700"
         >
           {loading ? "Fetching…" : "Fetch GRNs from SAP"}
@@ -86,13 +142,6 @@ export default function SAPGRNFetch({ defaultPoNumber = "", onSynced }) {
         </div>
       )}
 
-      {syncMsg && (
-        <div className="bg-success-bg border border-success-base rounded-base px-3 py-2">
-          <span className="text-2xs text-success-dark font-medium">✓ {syncMsg}</span>
-        </div>
-      )}
-
-      {/* Fetched GRNs */}
       {grns !== null && grns.length === 0 && !loading && (
         <div className="text-2xs text-neutral-500 px-1">No goods receipts found in SAP for this PO.</div>
       )}
@@ -131,19 +180,7 @@ export default function SAPGRNFetch({ defaultPoNumber = "", onSynced }) {
               </table>
             </div>
           ))}
-
-          <div className="flex items-center justify-between">
-            <span className="text-2xs text-neutral-500">
-              {grns.length} GRN(s) · live from SAP
-            </span>
-            <button
-              onClick={handleSync}
-              disabled={syncing}
-              className="px-3 py-1.5 rounded-base text-2xs font-semibold border cursor-pointer transition-colors disabled:opacity-50 bg-brand-600 text-white border-brand-600 hover:bg-brand-700"
-            >
-              {syncing ? "Importing…" : "Import GRNs for 3-Way Matching"}
-            </button>
-          </div>
+          <span className="text-2xs text-neutral-500">{grns.length} GRN(s) · live from SAP</span>
         </>
       )}
     </div>
