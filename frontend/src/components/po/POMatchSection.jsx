@@ -135,7 +135,7 @@ export default function POMatchSection({ invoiceId, poReference, onMatched, read
     <div className="flex flex-col gap-5">
       {/* Match Trigger Section — hidden for read-only (reviewer) users */}
       {!readOnly && (
-      <Card title="PO Matching">
+      <Card title="PO Matching" overflowVisible>
         <div className="flex flex-col gap-4">
           {/* Auto-suggestions */}
           {suggestions.length > 0 && (
