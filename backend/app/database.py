@@ -77,6 +77,9 @@ async def run_migrations():
         # Session token issue time — for token expiry
         "ALTER TABLE internal_users ADD COLUMN token_issued_at TIMESTAMP",
         "ALTER TABLE supplier_users ADD COLUMN token_issued_at TIMESTAMP",
+        # Per-user SAP login (sap_password_enc is a Fernet token, not a hash)
+        "ALTER TABLE internal_users ADD COLUMN sap_username VARCHAR(100)",
+        "ALTER TABLE internal_users ADD COLUMN sap_password_enc TEXT",
         # SAP document status — "parked" (BAPI_INCOMINGINVOICE_PARK) | "posted"
         "ALTER TABLE invoices ADD COLUMN sap_doc_status VARCHAR(20)",
         # SAP tax code chosen for the invoice (AI-suggested, user-editable, used at park)

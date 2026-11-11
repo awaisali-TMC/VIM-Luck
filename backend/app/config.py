@@ -110,6 +110,12 @@ class Settings(BaseSettings):
     SAP_PASSWD: str = ""
     SAP_SYSID: str = "523"
     SAP_SAPROUTER: str = "/H/103.111.160.96"
+    # Key used to encrypt per-user SAP passwords at rest (internal_users.
+    # sap_password_enc). A urlsafe-base64 Fernet key, or any string (it is then
+    # hashed into one). If empty, a fixed derived key is used with a warning —
+    # set a real value in production. Changing it makes stored SAP passwords
+    # undecryptable (users must re-enter them). See services/sap_credentials.py.
+    SAP_CRED_KEY: str = ""
 
     # CORS — explicit allowlist (no wildcard). Override via env CORS_ORIGINS
     # (JSON list) to add/replace origins per environment.

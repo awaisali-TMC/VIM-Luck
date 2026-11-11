@@ -48,6 +48,7 @@ export default function AdminUsersPage() {
   const [resetTarget, setResetTarget] = useState(null);
   const [formData, setFormData] = useState({
     email: "", display_name: "", password: "", role: "ap_operator", department: "", is_active: 1,
+    sap_username: "", sap_password: "",
   });
   const [resetPw, setResetPw] = useState("");
   const [saving, setSaving] = useState(false);
@@ -71,7 +72,7 @@ export default function AdminUsersPage() {
 
   const handleCreate = () => {
     setEditingUser(null);
-    setFormData({ email: "", display_name: "", password: "", role: "ap_operator", department: "", is_active: 1 });
+    setFormData({ email: "", display_name: "", password: "", role: "ap_operator", department: "", is_active: 1, sap_username: "", sap_password: "" });
     setShowModal(true);
   };
 
@@ -80,6 +81,7 @@ export default function AdminUsersPage() {
     setFormData({
       email: user.email, display_name: user.display_name, password: "",
       role: user.role, department: user.department || "", is_active: user.is_active,
+      sap_username: user.sap_username || "", sap_password: "",
     });
     setShowModal(true);
   };
@@ -93,7 +95,11 @@ export default function AdminUsersPage() {
           role: formData.role,
           department: formData.department || null,
           is_active: formData.is_active,
+          sap_username: formData.sap_username || "",
         };
+        // Only send sap_password when the admin typed one — a blank field means
+        // "keep the current SAP password", not "clear it".
+        if (formData.sap_password) payload.sap_password = formData.sap_password;
         await updateUser(editingUser.id, payload);
       } else {
         await createUser({
@@ -102,6 +108,8 @@ export default function AdminUsersPage() {
           password: formData.password,
           role: formData.role,
           department: formData.department || null,
+          sap_username: formData.sap_username || null,
+          sap_password: formData.sap_password || null,
         });
       }
       setShowModal(false);
@@ -275,6 +283,36 @@ export default function AdminUsersPage() {
                     <option key={d} value={d}>{d}</option>
                   ))}
                 </select>
+              </div>
+            </div>
+            <div className="border-t border-neutral-100 pt-3 mt-1">
+              <div className="text-2xs font-semibold text-neutral-500 mb-2 uppercase tracking-wide">SAP Login (optional)</div>
+              <p className="text-2xs text-neutral-400 mb-2">
+                Used to log in to SAP when this user parks or posts an invoice. Leave blank to use the system SAP account.
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-2xs font-semibold text-neutral-600 mb-1">SAP Username</label>
+                  <input
+                    type="text"
+                    value={formData.sap_username}
+                    onChange={(e) => setFormData({ ...formData, sap_username: e.target.value })}
+                    className="w-full text-xs border border-neutral-200 rounded-base px-3 py-2 focus:border-brand-400 outline-none"
+                    placeholder="SAP user ID"
+                    autoComplete="off"
+                  />
+                </div>
+                <div>
+                  <label className="block text-2xs font-semibold text-neutral-600 mb-1">SAP Password</label>
+                  <input
+                    type="password"
+                    value={formData.sap_password}
+                    onChange={(e) => setFormData({ ...formData, sap_password: e.target.value })}
+                    className="w-full text-xs border border-neutral-200 rounded-base px-3 py-2 focus:border-brand-400 outline-none"
+                    placeholder={editingUser?.sap_password_set ? "•••••• (leave blank to keep)" : "SAP password"}
+                    autoComplete="new-password"
+                  />
+                </div>
               </div>
             </div>
             {editingUser && (
