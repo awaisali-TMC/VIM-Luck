@@ -25,13 +25,16 @@ export default function FilterBar({ filters }) {
               />
             </div>
           ) : f.type === "date" ? (
-            <input
-              type="date"
-              value={f.value || ""}
-              onChange={f.onChange}
-              title={f.title}
-              className="py-1.5 px-2.5 border border-neutral-200 rounded-base text-xs bg-neutral-0 text-neutral-700 cursor-pointer shrink-0 font-sans outline-none focus:border-brand-400 transition-colors"
-            />
+            // Native date inputs ignore `placeholder`, so show a visible label.
+            <label className="flex items-center gap-1.5 text-2xs font-medium text-neutral-500 shrink-0" title={f.title}>
+              {f.label && <span className="whitespace-nowrap">{f.label}</span>}
+              <input
+                type="date"
+                value={f.value || ""}
+                onChange={f.onChange}
+                className="py-1.5 px-2.5 border border-neutral-200 rounded-base text-xs bg-neutral-0 text-neutral-700 cursor-pointer font-sans outline-none focus:border-brand-400 transition-colors"
+              />
+            </label>
           ) : (
             <select
               value={f.value}

@@ -17,6 +17,20 @@ import { openInvoiceDocument } from "../utils/invoiceDocument";
 const DOC_LINK =
   "text-brand-600 hover:text-brand-800 hover:underline bg-transparent border-none p-0 cursor-pointer disabled:opacity-50 disabled:cursor-wait";
 
+// Status display names + the order they appear in the Status filter.
+const STATUS_LABELS = {
+  draft: "Draft",
+  pending_processing: "Processing",
+  validated: "Validated",
+  pending_approval: "Pending Approval",
+  approved: "Approved",
+  parked: "Parked",
+  posted: "Posted",
+  rejected: "Rejected",
+  exception: "Exception",
+};
+const STATUS_ORDER = Object.keys(STATUS_LABELS);
+
 export default function InvoiceListPage({ onViewInvoice, onUpload }) {
   // Freshly uploaded drafts (batch upload) arrive via router state — highlight them.
   const location = useLocation();
@@ -102,6 +116,17 @@ export default function InvoiceListPage({ onViewInvoice, onUpload }) {
       if (inv.status === "exception") counts.exception++;
     }
     return counts;
+  }, [invoices]);
+
+  // Status filter options — only the statuses actually present in the rows.
+  const statusOptions = useMemo(() => {
+    const present = new Set(invoices.map((inv) => inv.status).filter(Boolean));
+    const ordered = STATUS_ORDER.filter((s) => present.has(s));
+    for (const s of present) if (!STATUS_ORDER.includes(s)) ordered.push(s); // unknowns last
+    return [
+      { value: "all", label: "All statuses" },
+      ...ordered.map((s) => ({ value: s, label: STATUS_LABELS[s] || s })),
+    ];
   }, [invoices]);
 
   // Filtered by tab
@@ -360,21 +385,10 @@ export default function InvoiceListPage({ onViewInvoice, onUpload }) {
               {
                 type: "select", value: statusFilter, title: "Filter by status",
                 onChange: (e) => setStatusFilter(e.target.value),
-                options: [
-                  { value: "all", label: "All statuses" },
-                  { value: "draft", label: "Draft" },
-                  { value: "pending_processing", label: "Processing" },
-                  { value: "validated", label: "Validated" },
-                  { value: "pending_approval", label: "Pending Approval" },
-                  { value: "approved", label: "Approved" },
-                  { value: "parked", label: "Parked" },
-                  { value: "posted", label: "Posted" },
-                  { value: "rejected", label: "Rejected" },
-                  { value: "exception", label: "Exception" },
-                ],
+                options: statusOptions,
               },
-              { type: "date", value: dateFrom, title: "Created from", onChange: (e) => setDateFrom(e.target.value) },
-              { type: "date", value: dateTo, title: "Created to", onChange: (e) => setDateTo(e.target.value) },
+              { type: "date", label: "From", value: dateFrom, title: "Created from", onChange: (e) => setDateFrom(e.target.value) },
+              { type: "date", label: "To", value: dateTo, title: "Created to", onChange: (e) => setDateTo(e.target.value) },
               {
                 type: "select", value: sortDir, title: "Sort by created date",
                 onChange: (e) => setSortDir(e.target.value),
