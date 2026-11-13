@@ -42,6 +42,10 @@ export default function InvoiceListPage({ onViewInvoice, onUpload }) {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("all");
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");  // specific status, on top of the tabs
+  const [dateFrom, setDateFrom] = useState("");              // created-date range (yyyy-mm-dd)
+  const [dateTo, setDateTo] = useState("");
+  const [sortDir, setSortDir] = useState("desc");            // by created date: desc = newest first
   const [page, setPage] = useState(1);
   const [approvalInfo, setApprovalInfo] = useState({}); // { invoiceId: { stepName, role } }
   const perPage = 10;
@@ -110,25 +114,48 @@ export default function InvoiceListPage({ onViewInvoice, onUpload }) {
     return invoices;
   }, [invoices, tab]);
 
-  // Filtered by search
-  const searchFiltered = useMemo(() => {
-    if (!search.trim()) return tabFiltered;
-    const q = search.toLowerCase();
-    return tabFiltered.filter(
-      (inv) =>
-        (inv.invoice_number || "").toLowerCase().includes(q) ||
-        (inv.supplier_name || "").toLowerCase().includes(q) ||
-        (inv.original_filename || "").toLowerCase().includes(q) ||
-        String(inv.id).includes(q)
-    );
-  }, [tabFiltered, search]);
+  // Filtered by search + status + created-date range, then sorted by created date
+  const filtered = useMemo(() => {
+    let list = tabFiltered;
+
+    if (statusFilter !== "all") {
+      list = list.filter((inv) => inv.status === statusFilter);
+    }
+
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      list = list.filter(
+        (inv) =>
+          (inv.invoice_number || "").toLowerCase().includes(q) ||
+          (inv.supplier_name || "").toLowerCase().includes(q) ||
+          (inv.original_filename || "").toLowerCase().includes(q) ||
+          String(inv.id).includes(q)
+      );
+    }
+
+    if (dateFrom) {
+      const from = new Date(dateFrom);
+      list = list.filter((inv) => inv.created_at && new Date(inv.created_at) >= from);
+    }
+    if (dateTo) {
+      const to = new Date(dateTo);
+      to.setHours(23, 59, 59, 999);  // include the whole "to" day
+      list = list.filter((inv) => inv.created_at && new Date(inv.created_at) <= to);
+    }
+
+    return [...list].sort((a, b) => {
+      const da = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const db = b.created_at ? new Date(b.created_at).getTime() : 0;
+      return sortDir === "asc" ? da - db : db - da;
+    });
+  }, [tabFiltered, statusFilter, search, dateFrom, dateTo, sortDir]);
 
   // Pagination
-  const totalPages = Math.max(1, Math.ceil(searchFiltered.length / perPage));
-  const paginated = searchFiltered.slice((page - 1) * perPage, page * perPage);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / perPage));
+  const paginated = filtered.slice((page - 1) * perPage, page * perPage);
 
-  // Reset page on filter change
-  useEffect(() => { setPage(1); }, [tab, search]);
+  // Reset page on any filter/sort change
+  useEffect(() => { setPage(1); }, [tab, search, statusFilter, dateFrom, dateTo, sortDir]);
 
   if (loading) {
     return (
@@ -330,6 +357,32 @@ export default function InvoiceListPage({ onViewInvoice, onUpload }) {
           <FilterBar
             filters={[
               { type: "search", placeholder: "Search invoice #, vendor, filename...", value: search, onChange: (e) => setSearch(e.target.value) },
+              {
+                type: "select", value: statusFilter, title: "Filter by status",
+                onChange: (e) => setStatusFilter(e.target.value),
+                options: [
+                  { value: "all", label: "All statuses" },
+                  { value: "draft", label: "Draft" },
+                  { value: "pending_processing", label: "Processing" },
+                  { value: "validated", label: "Validated" },
+                  { value: "pending_approval", label: "Pending Approval" },
+                  { value: "approved", label: "Approved" },
+                  { value: "parked", label: "Parked" },
+                  { value: "posted", label: "Posted" },
+                  { value: "rejected", label: "Rejected" },
+                  { value: "exception", label: "Exception" },
+                ],
+              },
+              { type: "date", value: dateFrom, title: "Created from", onChange: (e) => setDateFrom(e.target.value) },
+              { type: "date", value: dateTo, title: "Created to", onChange: (e) => setDateTo(e.target.value) },
+              {
+                type: "select", value: sortDir, title: "Sort by created date",
+                onChange: (e) => setSortDir(e.target.value),
+                options: [
+                  { value: "desc", label: "Newest first" },
+                  { value: "asc", label: "Oldest first" },
+                ],
+              },
             ]}
           />
         </div>
@@ -351,7 +404,7 @@ export default function InvoiceListPage({ onViewInvoice, onUpload }) {
           rowClassName={(row) => (newIds.has(row.id) ? "bg-success-bg/60" : null)}
         />
         <div className="flex items-center justify-between px-5 py-3 text-2xs text-neutral-500">
-          <span>Showing {paginated.length} of {searchFiltered.length} invoices</span>
+          <span>Showing {paginated.length} of {filtered.length} invoices</span>
           <div className="flex items-center gap-1">
             {Array.from({ length: totalPages }, (_, i) => i + 1).slice(0, 8).map((p) => (
               <button
