@@ -1,13 +1,12 @@
 # SAP_SDK=on  (default) — production. Copies the licensed NW RFC SDK and builds
 #             PyRFC against it, so the image can talk to a real SAP system.
 # SAP_SDK=off           — demo/local. No SDK, no PyRFC. Needed because the SDK is
-#             git-ignored and lives in a GCS bucket, so a laptop build has no
-#             copy of it. Only usable with SAP_MODE=fake at runtime.
+#             git-ignored (backend/nwrfcsdk-linux, licensed), so a machine
+#             without it has no copy. Only usable with SAP_MODE=fake at runtime.
 #
-# The default keeps cloudbuild.yaml's `docker build … backend` byte-identical to
-# before — it passes no build-arg, so production still gets the SDK image.
 # Docker only builds stages in the target's dependency chain, so with
-# SAP_SDK=off the sap-on stage below (and its failing COPY) never runs.
+# SAP_SDK=off the sap-on stage below (and its failing COPY) never runs — under
+# BuildKit (DOCKER_BUILDKIT=1); the legacy builder builds every stage.
 #
 #   docker build --build-arg SAP_SDK=off -t <registry>/vim-internal-backend:<tag> backend
 ARG SAP_SDK=on

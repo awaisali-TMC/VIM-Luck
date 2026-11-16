@@ -29,7 +29,6 @@ os.environ["UPLOAD_DIR"] = os.path.join(SCRATCH, "uploads")
 os.environ["DEBUG"] = "true"
 os.environ["SAP_ENABLED"] = "false"
 os.environ["GEMINI_API_KEY"] = ""
-os.environ["GCP_CREDENTIALS_JSON"] = ""
 
 from fastapi.testclient import TestClient  # noqa: E402
 
