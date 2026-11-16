@@ -5,6 +5,31 @@ Handover from Claude Code sessions on this machine (`D:\VIM\VIM-Luck`). Read
 what is still open. (`HANDOFF.md` is the separate product feature-status doc.)
 Newest session first; §1–§5 below are from session 1 and are still accurate.
 
+## 2026-11-16: dev-shahzaib merged, pushed, and deployed to Cloud Run (`52e90b9`)
+
+- **Merged into `main` and pushed:** `origin/dev-shahzaib` (14 commits: Inbox filters/sort,
+  PO-match GRN type-ahead, per-user SAP login, submit parks straight to SAP, extraction
+  tweaks) and `origin/main`'s `b57c810` (Cloud deploy machinery removed). No conflicts.
+  All 6 offline suites pass, and `npm run build` is OK.
+- **Deployed to Cloud Run at the user's request,** although `CONTEXT.md` §3 says the LAN server is
+  now the deploy target. API `lucky-cement-vim-api-00006-slx`, web `lucky-cement-vim-web-00008-lwm`,
+  both image tag `52e90b9`. The rollback targets are API `00005-qhw` and web `00007-z96`.
+- **How the deploy was built:** `cloudbuild.yaml` is no longer in the repo. It was restored from
+  `b57c810^` into a `git archive HEAD` export in the session scratchpad and submitted from there,
+  so no local `.env` or `node_modules` was uploaded.
+- **gcloud on this machine:** a portable CLI at
+  `%LOCALAPPDATA%\Programs\google-cloud-sdk` (user PATH), signed in as shahzaib.moin@.
+- **Live checks:** the portal loads, its bundle targets the `…527930147362.us-central1.run.app`
+  API, the API answers 401 without a token, and CORS passes. A logged-in run-through was not done.
+- **Open:**
+  - The LAN server has not been updated. Its address is unknown here, and `192.168.15.10`
+    (from `CORS_ORIGINS`) did not answer on 22/8000/5173 from this network. On that box run
+    `git pull`, `backend/.venv/bin/pip install -r backend/requirements.txt` (the new
+    `cryptography` dependency), then restart `./start-lan.sh`.
+  - `SAP_CRED_KEY` is unset on both. Set it before users save per-user SAP passwords.
+  - A key `~/.ssh/vim_luck_lan` was generated for LAN access. Its public half was not
+    installed anywhere yet.
+
 ## 2026-11-05: "View" showed nothing in the local preview (committed `34472b5`, NOT pushed or deployed)
 
 **Push and deploy are blocked by the network here.** The office firewall (a Fortinet FortiGate,
