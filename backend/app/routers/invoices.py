@@ -47,7 +47,6 @@ from app.services.duplicate_detection import (
     find_key_duplicates,
 )
 from app.services.invoice_classifier import classify_invoice
-from app.services.fbr_verification import receiver_ntn_problem
 
 logger = logging.getLogger(__name__)
 
@@ -321,12 +320,6 @@ def _extraction_to_draft(result: dict, filename: str, stored_path: str,
 
     clamp = _clamp
 
-    # Same receiver gate as /save: drafts never pass through it.
-    draft_warnings = list(result.get("warnings") or [])
-    receiver_problem = receiver_ntn_problem(fm.get("receiver_tax_id"))
-    if receiver_problem and receiver_problem not in draft_warnings:
-        draft_warnings.append(receiver_problem)
-
     invoice = Invoice(
         original_filename=clamp(filename, 255),
         stored_filepath=stored_path,
@@ -351,7 +344,7 @@ def _extraction_to_draft(result: dict, filename: str, stored_path: str,
         document_type=clamp(result.get("document_type"), 50),
         overall_confidence=result.get("overall_confidence"),
         field_confidences=json.dumps(cm) if cm else None,
-        warnings=json.dumps(draft_warnings) if draft_warnings else None,
+        warnings=json.dumps(result.get("warnings")) if result.get("warnings") else None,
         detected_taxes=json.dumps(result.get("detected_taxes")) if result.get("detected_taxes") else None,
         processing_time_ms=result.get("processing_time_ms"),
         status=InvoiceStatus.DRAFT.value,
@@ -709,12 +702,6 @@ async def save_invoice(
                 "Supplier vendor-name mismatch: supplier_id=%s registered=%r document=%r",
                 owner_supplier_id, registered, data.supplier_name,
             )
-
-    # Receiver gate: an invoice addressed to another company's NTN is flagged
-    # for AP (warning only, like the vendor gate above). Silent without BUYER_NTN.
-    receiver_problem = receiver_ntn_problem(data.receiver_ntn)
-    if receiver_problem and receiver_problem not in warnings:
-        warnings.append(receiver_problem)
 
     # _clamp: Postgres enforces VARCHAR lengths (SQLite dev doesn't) — an
     # over-long extracted/edited field must not 500 the whole save.

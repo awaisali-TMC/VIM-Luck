@@ -47,7 +47,7 @@ class Invoice(Base):
     # Receiver
     receiver_name = Column(String(255))
     receiver_address = Column(Text)
-    # Buyer's NTN as printed on the invoice; checked against settings.BUYER_NTN.
+    # Buyer's (receiver's) NTN as printed on the invoice; empty when not shown.
     receiver_ntn = Column(String(50))
 
     # Amounts

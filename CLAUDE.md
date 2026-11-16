@@ -59,7 +59,7 @@ py -3 backend/test_line_item_guards.py      # zero-quantity goods lines must not
 py -3 backend/test_role_labels.py           # role display-name renames, offline; own throwaway DB
 py -3 backend/test_invoice_document.py      # original invoice file view/download + path guard, offline; own temp DB + upload dir
 py -3 backend/test_duplicate_check.py       # duplicate-invoice key blocks approval/SAP, offline; fake SAP, own throwaway DB
-py -3 backend/test_receiver_ntn.py          # receiver NTN: extraction field + flag, draft/save/edit, BUYER_NTN check; own DB
+py -3 backend/test_receiver_ntn.py          # receiver NTN: extracted when printed, stored, shown, editable; own DB
 py -3 backend/test_po_regression.py         # PO-lane BASELINE: live SAP validate dry-run (needs SAP env)
 ```
 
@@ -146,7 +146,7 @@ Lucky Cement's rule: an invoice is a **duplicate** of an *earlier* live invoice 
 - The older checks (same number from any supplier; same NTN + amount ±1% + date ±7 days; same amount + date) remain as **advisory** banner warnings. `DuplicateWarningCard` shows the blocking case first.
 
 ### Receiver NTN (buyer NTN on the invoice)
-Gemini extracts it as field `receiver_tax_id` (label "Receiver NTN"); it is stored as `invoices.receiver_ntn` and shown and editable on the review screen and the invoice page. When `BUYER_NTN` (Lucky Cement's own NTN(s), comma-separated) is set, `fbr_verification.receiver_ntn_problem()` compares on the 7-digit base (check digit optional). An invoice addressed to a different NTN gets a high "Not addressed to us" attention flag on review, and a warning saved on the invoice at `/save` and on batch drafts. It only warns, never blocks, like the vendor-name gate. Without `BUYER_NTN` the field is captured but not checked. `BUYER_NAME` (default "Lucky Cement Limited") is used in this warning.
+Gemini extracts it as field `receiver_tax_id` (label "Receiver NTN") **only when the invoice prints it**; otherwise it stays empty, and it is never the vendor's own NTN. It is stored as `invoices.receiver_ntn` and shown and editable on the review screen and the invoice page. It is captured only: not compared with Lucky Cement's NTN, flagged or warned on.
 
 ### FBR tax compliance (Pakistan-specific)
 FBR = the Pakistani tax authority. The app verifies supplier NTNs against the **Active Taxpayer List** and computes WHT/GST compliance. Live IRIS API lookup is **disabled by default** (`FBR_LIVE_LOOKUP_ENABLED=False`). ATL lookups (`services/fbr_verification.py`) prefer the app DB's `atl_taxpayers` table (imported on this instance, ~8.5M rows) and fall back to a local SQLite file at `FBR_ATL_DB_PATH` (dev only). `GET /api/fbr/atl-stats` reads **only** the SQLite file, so it reports 0 on every cloud instance — never use it as a health check. The tax-rules engine (`tax_rule.py` + seeded defaults in `main.py`) holds GST/WHT/SED/FED rates with FBR section references.

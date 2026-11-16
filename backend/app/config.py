@@ -127,13 +127,6 @@ class Settings(BaseSettings):
         "http://localhost:8081",
     ]
 
-    # The buyer this instance belongs to — the company invoices are addressed to.
-    BUYER_NAME: str = "Lucky Cement Limited"
-    # The buyer's own NTN(s), comma-separated. When set, an invoice whose Receiver
-    # NTN differs is flagged (review screen + a warning saved on the invoice).
-    # Empty = receiver NTN is captured but not checked.
-    BUYER_NTN: str = ""
-
     # Initial admin bootstrap (only used when internal_users table is empty).
     # Leave INITIAL_ADMIN_PASSWORD unset in real deployments to force a random,
     # logged-once password instead of a weak default.

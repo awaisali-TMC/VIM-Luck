@@ -15,7 +15,6 @@ from google import genai
 from google.genai import types
 
 from app.config import settings
-from app.services.fbr_verification import receiver_ntn_problem
 
 logger = logging.getLogger(__name__)
 
@@ -374,14 +373,6 @@ def _detect_attention_flags(
             "severity": "low", "category": "tax",
             "title": "No vendor NTN",
             "message": "No vendor NTN/STRN found — verify FBR registration and filer status.",
-        })
-    # Receiver gate: the invoice must be addressed to us (silent without BUYER_NTN).
-    receiver_problem = receiver_ntn_problem(field_map.get("receiver_tax_id"))
-    if receiver_problem:
-        flags.append({
-            "severity": "high", "category": "tax",
-            "title": "Not addressed to us",
-            "message": receiver_problem,
         })
 
     # --- Foreign currency ---

@@ -68,39 +68,6 @@ def normalize_ntn(raw_ntn: str) -> str:
     return cleaned
 
 
-def ntn_base(value: Optional[str]) -> str:
-    """Comparable form of an NTN: its 7-digit base, since invoices print it both
-    with and without the check digit ("5433744-3" == "5433744"). Longer numbers
-    (a 13-digit CNIC) compare in full. "" when there are no digits."""
-    digits = re.sub(r"\D", "", value or "")
-    if 0 < len(digits) <= 8:
-        return digits.zfill(7)[:7]
-    return digits
-
-
-def buyer_ntns() -> list[str]:
-    """The configured BUYER_NTN value(s), as entered (comma-separated in .env)."""
-    from app.config import settings
-    return [n.strip() for n in (settings.BUYER_NTN or "").split(",") if n.strip()]
-
-
-def receiver_ntn_problem(receiver_ntn: Optional[str]) -> Optional[str]:
-    """A warning when the invoice's Receiver NTN is not the buyer's own NTN, else
-    None. Silent when BUYER_NTN is not configured or no receiver NTN was found —
-    there is nothing to compare."""
-    from app.config import settings
-    ours = buyer_ntns()
-    theirs = ntn_base(receiver_ntn)
-    if not ours or not theirs:
-        return None
-    if theirs in {ntn_base(n) for n in ours}:
-        return None
-    return (
-        f"Receiver NTN on the invoice ({receiver_ntn.strip()}) is not {settings.BUYER_NAME}'s "
-        f"NTN ({', '.join(ours)}). Check the invoice is addressed to {settings.BUYER_NAME}."
-    )
-
-
 def normalize_cnic(raw_cnic: str) -> str:
     """Strip dashes/spaces from CNIC, return 13-digit string."""
     return re.sub(r"[\s\-/]", "", raw_cnic.strip())

@@ -1,15 +1,15 @@
-"""Receiver NTN: captured from the invoice, stored, editable, and checked against
-the buyer's own NTN (BUYER_NTN).
+"""Receiver NTN: read from the invoice when it is printed, stored, shown, editable.
+
+It is capture-only: never compared with the buyer's own NTN, never flagged or
+warned on.
 
 Covers:
-  - fbr_verification.ntn_base / receiver_ntn_problem: with and without the check
-    digit, several buyer NTNs, silent without BUYER_NTN or without a receiver NTN
-  - extraction: the prompt asks for receiver_tax_id, it has a label, and a
-    mismatch raises a "Not addressed to us" attention flag on the review screen
-  - _extraction_to_draft (batch-upload drafts): maps receiver_tax_id and adds
-    the warning
-  - API: /save stores it and adds the warning on a mismatch only; the detail
-    response returns it; PUT edits it
+  - extraction: the prompt asks for receiver_tax_id and it has a label; no
+    attention flag is ever raised for it, whatever its value
+  - _extraction_to_draft (batch-upload drafts): maps receiver_tax_id and adds no
+    warning of its own
+  - API: /save stores it; a missing value stays empty; the detail response
+    returns it; PUT edits it; no warning is saved for it
 
 Offline: no Gemini, no SAP. Uses its own throwaway SQLite database, recreated on
 every run.
@@ -31,9 +31,6 @@ os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{SCRATCH}"
 os.environ["DEBUG"] = "true"
 os.environ["SAP_ENABLED"] = "false"
 os.environ["GEMINI_API_KEY"] = ""
-os.environ["EMAIL_NOTIFICATIONS_ENABLED"] = "false"
-os.environ["BUYER_NAME"] = "Lucky Cement Limited"
-os.environ["BUYER_NTN"] = ""   # set per check below
 
 from app.config import settings  # noqa: E402
 
@@ -44,11 +41,9 @@ from fastapi.testclient import TestClient  # noqa: E402
 import app.main as main  # noqa: E402
 from app.routers.invoices import _extraction_to_draft  # noqa: E402
 from app.security import get_current_principal, Principal  # noqa: E402
-from app.services.fbr_verification import ntn_base, receiver_ntn_problem  # noqa: E402
 from app.services.gemini_extract import EXTRACTION_PROMPT, FIELD_LABELS, _detect_attention_flags  # noqa: E402
 
-OURS = "0712345-6"     # invented buyer NTN for the test
-OTHER = "4455667-1"    # someone else's
+NTN = "4455667-1"   # invented
 
 _failures = []
 
@@ -59,51 +54,29 @@ def expect(label, cond, extra=None):
         _failures.append(label)
 
 
-def test_rule():
-    print("\nUNIT: the buyer-NTN check")
-    expect("check digit is ignored", ntn_base("0712345-6") == ntn_base("0712345") == ntn_base("712345"))
-    expect("a 13-digit CNIC compares in full", ntn_base("35202-1234567-1") != ntn_base("35202-1234567-9"))
-
-    settings.BUYER_NTN = ""
-    expect("no BUYER_NTN configured -> silent", receiver_ntn_problem(OTHER) is None)
-
-    settings.BUYER_NTN = OURS
-    expect("our NTN -> fine", receiver_ntn_problem(OURS) is None)
-    expect("our NTN without the check digit -> fine", receiver_ntn_problem("0712345") is None)
-    expect("no receiver NTN on the invoice -> silent", receiver_ntn_problem(None) is None and receiver_ntn_problem("  ") is None)
-    msg = receiver_ntn_problem(OTHER)
-    expect("someone else's NTN -> warning", bool(msg))
-    expect("... naming both NTNs and the buyer",
-           bool(msg) and OTHER in msg and OURS in msg and "Lucky Cement Limited" in msg, msg)
-
-    settings.BUYER_NTN = f"1111111-1, {OURS}"
-    expect("several buyer NTNs: any one matches", receiver_ntn_problem("0712345-6") is None)
-    settings.BUYER_NTN = OURS
-
-
 def test_extraction():
     print("\nUNIT: extraction")
     expect("prompt asks for receiver_tax_id", "receiver_tax_id" in EXTRACTION_PROMPT)
+    expect("prompt says to leave it empty when not printed", "null when the invoice does not print it" in EXTRACTION_PROMPT)
     expect("receiver_tax_id has a label", FIELD_LABELS.get("receiver_tax_id") == "Receiver NTN")
 
-    def flags(receiver):
+    def receiver_flags(receiver):
         fm = {"invoice_id": "INV-1", "supplier_name": "Vendor", "supplier_tax_id": "1234567-8",
               "total_amount": 100, "currency": "PKR", "receiver_tax_id": receiver}
-        return [f for f in _detect_attention_flags(fm, [], [], 99.0) if f["title"] == "Not addressed to us"]
+        return [f for f in _detect_attention_flags(fm, [], [], 99.0)
+                if "receiver" in (f.get("title", "") + f.get("message", "")).lower()
+                or "addressed" in f.get("title", "").lower()]
 
-    got = flags(OTHER)
-    expect("mismatch -> 'Not addressed to us' flag on the review screen", len(got) == 1, got)
-    expect("... high severity", bool(got) and got[0]["severity"] == "high")
-    expect("our NTN -> no flag", flags(OURS) == [])
-    expect("no receiver NTN -> no flag", flags(None) == [])
+    expect("no attention flag for any receiver NTN", receiver_flags(NTN) == [], receiver_flags(NTN))
+    expect("no attention flag when it is missing", receiver_flags(None) == [])
 
     result = {"fields": [{"field_name": "invoice_id", "value": "INV-9", "confidence": 99},
-                         {"field_name": "receiver_tax_id", "value": OTHER, "confidence": 99}],
+                         {"field_name": "receiver_tax_id", "value": NTN, "confidence": 99}],
               "line_items": [], "warnings": ["existing warning"]}
     draft = _extraction_to_draft(result, "a.pdf", "unsaved", "application/pdf", 10)
-    expect("batch draft carries the receiver NTN", draft.receiver_ntn == OTHER, draft.receiver_ntn)
-    expect("batch draft gets the warning (and keeps existing ones)",
-           draft.warnings and "existing warning" in draft.warnings and OTHER in draft.warnings, draft.warnings)
+    expect("batch draft carries the receiver NTN", draft.receiver_ntn == NTN, draft.receiver_ntn)
+    expect("batch draft keeps only the extraction's own warnings",
+           draft.warnings == '["existing warning"]', draft.warnings)
 
 
 def save(client, receiver_ntn):
@@ -122,31 +95,19 @@ def save(client, receiver_ntn):
 
 def test_api(client):
     print("\nAPI: save, read back, edit")
-    settings.BUYER_NTN = OURS
-    inv = save(client, OURS)
-    expect("detail returns the receiver NTN", inv.get("receiver_ntn") == OURS, inv.get("receiver_ntn"))
-    expect("our NTN -> no warning", not any(OURS in w for w in (inv.get("warnings") or [])), inv.get("warnings"))
+    inv = save(client, NTN)
+    expect("detail returns the receiver NTN", inv.get("receiver_ntn") == NTN, inv.get("receiver_ntn"))
+    expect("no warning is saved for it", not inv.get("warnings"), inv.get("warnings"))
 
-    bad = save(client, OTHER)
-    expect("someone else's NTN -> warning saved on the invoice",
-           any("not Lucky Cement Limited's NTN" in w for w in (bad.get("warnings") or [])), bad.get("warnings"))
+    empty = save(client, None)
+    expect("not on the invoice -> stays empty", empty.get("receiver_ntn") is None, empty.get("receiver_ntn"))
 
-    none = save(client, None)
-    expect("no receiver NTN -> stored empty, no warning",
-           none.get("receiver_ntn") is None and not none.get("warnings"), (none.get("receiver_ntn"), none.get("warnings")))
-
-    r = client.put(f"/api/invoices/{none['id']}", json={"receiver_ntn": "0712345"})
+    r = client.put(f"/api/invoices/{empty['id']}", json={"receiver_ntn": "0712345-6"})
     expect(f"PUT edits the receiver NTN (got {r.status_code})",
-           r.status_code == 200 and r.json().get("receiver_ntn") == "0712345", r.text[:200])
-
-    settings.BUYER_NTN = ""
-    quiet = save(client, OTHER)
-    expect("BUYER_NTN not configured -> captured but not flagged",
-           quiet.get("receiver_ntn") == OTHER and not quiet.get("warnings"), quiet.get("warnings"))
+           r.status_code == 200 and r.json().get("receiver_ntn") == "0712345-6", r.text[:200])
 
 
 if __name__ == "__main__":
-    test_rule()
     test_extraction()
     main.app.dependency_overrides[get_current_principal] = lambda: Principal(kind="internal", id=1, role="admin")
     with TestClient(main.app) as client:
