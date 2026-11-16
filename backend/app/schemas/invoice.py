@@ -245,6 +245,7 @@ class InvoiceResponse(BaseModel):
     source_email_from: Optional[str] = None
     fbr_verification_status: Optional[str] = "not_verified"
     sap_doc_status: Optional[str] = None  # "parked" | "posted" — used to label the status
+    sap_wf_status: Optional[str] = None   # SAP approval workflow: INIT | BLK | APP | REJ
 
     model_config = {"from_attributes": True}
 
@@ -326,6 +327,12 @@ class InvoiceDetailResponse(BaseModel):
     sap_item_text: Optional[str] = None
     sap_currency: Optional[str] = None
     sap_vendor_number: Optional[str] = None              # resolved LIFNR
+    # SAP approval workflow (services/sap_workflow.py)
+    sap_wf_objkey: Optional[str] = None
+    sap_wf_status: Optional[str] = None       # INIT | BLK | APP | REJ
+    sap_wf_posted_doc: Optional[str] = None
+    sap_wf_message: Optional[str] = None
+    sap_wf_checked_at: Optional[datetime] = None
     parking_line_item_ids: Optional[list[int]] = None  # lines selected for parking (locked at submit)
     # PO matching
     matched_po_id: Optional[int] = None

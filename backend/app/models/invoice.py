@@ -116,6 +116,14 @@ class Invoice(Base):
     sap_header_text = Column(String(50), nullable=True)             # Basic Data "Text" → HEADER_TXT (BKTXT)
     sap_item_text = Column(String(50), nullable=True)               # Details "Text" → ITEM_TEXT (SGTXT)
     sap_currency = Column(String(10), nullable=True)                # document currency chosen for posting
+    # SAP approval workflow (services/sap_workflow.py) — set when parking raised
+    # the workflow event, then refreshed from ZMIR7_WF_LOG / ZMIR7_ERROR_LOG.
+    sap_wf_objkey = Column(String(18), nullable=True)      # CoCode(4)+DocNo(10)+FY(4)
+    sap_wf_event_id = Column(String(40), nullable=True)
+    sap_wf_status = Column(String(10), nullable=True)      # INIT | BLK | APP | REJ ("" = not read yet)
+    sap_wf_posted_doc = Column(String(20), nullable=True)  # document SAP posted after approval
+    sap_wf_message = Column(String(500), nullable=True)    # latest ZMIR7_ERROR_LOG error
+    sap_wf_checked_at = Column(DateTime(timezone=True), nullable=True)
 
     # Resolved SAP vendor (LIFNR). Written on PO sync (routers/sap.py) and read
     # by the supplier-portal PO-flip gate.

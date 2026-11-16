@@ -100,6 +100,9 @@ def _store() -> sqlite3.Connection:
             conn.executescript((_FIXTURES / "schema.sql").read_text(encoding="utf-8"))
             conn.executescript((_FIXTURES / "data.sql").read_text(encoding="utf-8"))
             conn.commit()
+        # Every start, IF NOT EXISTS: older file-backed stores gain these too.
+        conn.executescript((_FIXTURES / "workflow_schema.sql").read_text(encoding="utf-8"))
+        conn.commit()
 
         _columns = {
             t: [c["name"] for c in conn.execute(f"PRAGMA table_info({t})")]
@@ -220,6 +223,7 @@ class SAPConnectorFake:
             "BAPI_TRANSACTION_ROLLBACK": self._rollback,
             "BAPI_EXCHANGERATE_CREATEMULTIPLE": self._exchange_rate,
             "BAPI_EXCHANGERATE_CREATE": self._exchange_rate,
+            "SAP_WAPI_CREATE_EVENT": self._create_event,
         }.get(function_name)
 
         if handler is None:
@@ -351,6 +355,31 @@ class SAPConnectorFake:
         return _shape({"RETURN": [_msg("E", "M8", "417",
                                        f"Document {doc} deleted", doc)]}, {}, {}, kwargs)
 
+    def _create_event(self, kwargs) -> dict:
+        """SAP_WAPI_CREATE_EVENT for the parking workflow.
+
+        Like the BAPIs, it writes inside the open transaction: the caller's
+        COMMIT keeps the park and the workflow row together, its ROLLBACK
+        discards both. RETURN_CODE 0 = event raised. Scripted failures stand in
+        for "no approval hierarchy for this initiator" (scripted.json).
+        """
+        objkey = (kwargs.get("OBJECT_KEY") or "").strip()
+        user = (kwargs.get("USER") or "").strip().upper()
+        failures = (_scripts().get("workflow_errors") or {}).get("users") or {}
+        if user in failures:
+            return _shape({"MESSAGE_LINES": [{"LINE": failures[user]}]},
+                          {"RETURN_CODE": "1", "EVENT_ID": ""}, {}, kwargs)
+        if len(objkey) != 18:
+            return _shape({"MESSAGE_LINES": [{"LINE": f"Object key {objkey!r} is not 18 characters"}]},
+                          {"RETURN_CODE": "1", "EVENT_ID": ""}, {}, kwargs)
+
+        conn = _store()
+        conn.execute("DELETE FROM ZMIR7_WF_LOG WHERE OBJKEY = ?", (objkey,))
+        conn.execute("INSERT INTO ZMIR7_WF_LOG (OBJKEY, STATUS, POSTED_DOC) VALUES (?, 'BLK', '')",
+                     (objkey,))
+        return _shape({"MESSAGE_LINES": []},
+                      {"RETURN_CODE": "0", "EVENT_ID": f"EVT{objkey[4:14]}"}, {}, kwargs)
+
     def _commit(self, kwargs) -> dict:
         _store().commit()
         return {}
@@ -385,3 +414,37 @@ def _rowcount(value) -> int:
     except (TypeError, ValueError):
         return 0
     return n if n > 0 else 0
+
+
+def decide_workflow(objkey: str, approve: bool, error: str = "") -> dict:
+    """Play the SAP approver for one parked invoice (demos and tests).
+
+    approve=True  → STATUS APP; SAP "posts" the parked document (RBKP 5) and
+                    logs an S row. With `error`, posting fails instead: APP with
+                    no posted document and an E row, which is what VIM shows as
+                    "approved, but SAP could not post it".
+    approve=False → STATUS REJ.
+    """
+    conn = _store()
+    row = conn.execute("SELECT STATUS FROM ZMIR7_WF_LOG WHERE OBJKEY = ?", (objkey,)).fetchone()
+    if not row:
+        raise LookupError(f"No workflow record for OBJKEY {objkey}")
+    if not approve:
+        conn.execute("UPDATE ZMIR7_WF_LOG SET STATUS = 'REJ' WHERE OBJKEY = ?", (objkey,))
+        conn.commit()
+        return {"objkey": objkey, "status": "REJ"}
+    if error:
+        conn.execute("UPDATE ZMIR7_WF_LOG SET STATUS = 'APP' WHERE OBJKEY = ?", (objkey,))
+        conn.execute("INSERT INTO ZMIR7_ERROR_LOG (OBJKEY, TYPE, MESSAGE) VALUES (?, 'E', ?)",
+                     (objkey, error))
+        conn.commit()
+        return {"objkey": objkey, "status": "APP", "error": error}
+    # A parked invoice keeps its number when posted (MIR4 shows the same BELNR).
+    doc, year = objkey[4:14], objkey[14:18]
+    conn.execute("UPDATE RBKP SET RBSTAT = '5' WHERE BELNR = ? AND GJAHR = ?", (doc, year))
+    conn.execute("UPDATE ZMIR7_WF_LOG SET STATUS = 'APP', POSTED_DOC = ? WHERE OBJKEY = ?",
+                 (doc, objkey))
+    conn.execute("INSERT INTO ZMIR7_ERROR_LOG (OBJKEY, TYPE, MESSAGE) VALUES (?, 'S', ?)",
+                 (objkey, f"Document {doc} posted"))
+    conn.commit()
+    return {"objkey": objkey, "status": "APP", "posted_doc": doc}

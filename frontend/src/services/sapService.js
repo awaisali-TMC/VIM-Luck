@@ -59,6 +59,13 @@ export async function unparkInvoiceFromSAP(invoiceId) {
   return response.data;
 }
 
+export async function refreshSAPWorkflow(invoiceId) {
+  // Reads the SAP approval-workflow status (ZMIR7_WF_LOG) now; returns
+  // { status, sap_wf_status, sap_wf_label, sap_wf_posted_doc, sap_wf_message, sap_wf_checked_at }.
+  const response = await api.post(`${BASE}/invoices/${invoiceId}/workflow/refresh`);
+  return response.data;
+}
+
 export async function postInvoiceToSAP(invoiceId, options = {}) {
   const response = await api.post(`${BASE}/invoices/${invoiceId}/post`, {
     mode: options.mode || "park",   // "park" (MIR7, held) | "post" (MIRO, final)

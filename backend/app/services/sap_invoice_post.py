@@ -72,6 +72,9 @@ def post_invoice_to_sap(
     exchange_rate: float | None = None,
     baseline_date: str | None = None,
     mode: str = "post",
+    workflow: bool = False,
+    initiator_sap_user: str = "",
+    initiator_email: str = "",
 ) -> dict:
     """
     Post a vendor invoice to SAP via BAPI_INCOMINGINVOICE_CREATE1.
@@ -270,6 +273,28 @@ def post_invoice_to_sap(
                 "return_messages": return_messages,
             }
 
+        # ── SAP workflow (park only): raise the event in the SAME LUW ──
+        # Committed together with the park below, or rolled back with it, so an
+        # invoice never stays parked without its approval workflow.
+        wf = {}
+        if workflow and mode == "park":
+            from app.services.sap_workflow import build_objkey, raise_parking_event
+            objkey = build_objkey(company_code, doc_number, fiscal_year)
+            wf = raise_parking_event(sap, objkey, doc_number,
+                                     initiator_sap_user=initiator_sap_user,
+                                     initiator_email=initiator_email)
+            wf["objkey"] = objkey
+            if not wf["ok"]:
+                sap.call("BAPI_TRANSACTION_ROLLBACK")
+                return {
+                    "success": False,
+                    "invoice_doc_number": "",
+                    "fiscal_year": "",
+                    "message": f"SAP workflow could not be started, so the invoice was not parked: {wf['message']}",
+                    "return_messages": return_messages + [
+                        {"TYPE": "E", "ID": "WF", "NUMBER": "", "MESSAGE": wf["message"]}],
+                }
+
         # ── Commit the transaction ───────────────────────────────
         sap.call("BAPI_TRANSACTION_COMMIT", WAIT="X")
 
@@ -281,8 +306,11 @@ def post_invoice_to_sap(
             "invoice_doc_number": doc_number,
             "fiscal_year": fiscal_year,
             "mode": mode,
-            "message": f"Invoice {done} successfully as document {doc_number}/{fiscal_year}",
+            "message": f"Invoice {done} successfully as document {doc_number}/{fiscal_year}"
+                       + (" — SAP approval workflow started" if wf else ""),
             "return_messages": return_messages,
+            "workflow_objkey": wf.get("objkey", ""),
+            "workflow_event_id": wf.get("event_id", ""),
         }
 
     except Exception as e:

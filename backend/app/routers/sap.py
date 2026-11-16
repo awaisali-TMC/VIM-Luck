@@ -1216,6 +1216,11 @@ async def post_invoice_to_sap_endpoint(
             item_text=eff_item_text,
             exchange_rate=eff_exchange_rate,
             mode=req.mode,
+            # Lucky Cement: parking also starts the SAP approval workflow, in
+            # the same LUW (services/sap_workflow.py).
+            workflow=settings.SAP_WORKFLOW_ENABLED,
+            initiator_sap_user=(user.sap_username or ""),
+            initiator_email=(user.email or ""),
         )
     except Exception:
         logger.exception("SAP posting call failed for invoice %s", invoice.id)
@@ -1258,6 +1263,13 @@ async def post_invoice_to_sap_endpoint(
     invoice.sap_item_text = eff_item_text
     invoice.sap_currency = eff_currency
     invoice.status = doc_status  # "parked" (held in SAP) or "posted"
+    if sap_result.get("workflow_objkey"):
+        invoice.sap_wf_objkey = sap_result["workflow_objkey"]
+        invoice.sap_wf_event_id = sap_result.get("workflow_event_id") or None
+        invoice.sap_wf_status = ""        # started; first read fills it in
+        invoice.sap_wf_posted_doc = None
+        invoice.sap_wf_message = None
+        invoice.sap_wf_checked_at = None
 
     await db.commit()
 
@@ -1274,7 +1286,45 @@ async def post_invoice_to_sap_endpoint(
         "sap_document_number": sap_result["invoice_doc_number"],
         "sap_fiscal_year": sap_result["fiscal_year"],
         "company_code": company_code,
+        "sap_wf_objkey": invoice.sap_wf_objkey if sap_result.get("workflow_objkey") else None,
         "message": sap_result["message"],
+    }
+
+
+@router.post("/invoices/{invoice_id}/workflow/refresh")
+async def refresh_invoice_workflow(
+    invoice_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: InternalUser = Depends(get_current_internal_user),
+):
+    """Read this invoice's SAP approval-workflow status (ZMIR7_WF_LOG /
+    ZMIR7_ERROR_LOG) now, instead of waiting for the background poller."""
+    result = await db.execute(select(Invoice).where(Invoice.id == invoice_id, Invoice.is_deleted == 0))
+    invoice = result.scalar_one_or_none()
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    if not invoice.sap_wf_objkey:
+        raise HTTPException(status_code=409, detail="This invoice has no SAP approval workflow.")
+    if not settings.SAP_ENABLED:
+        raise HTTPException(status_code=409, detail="SAP is not enabled on this instance.")
+
+    _ensure_dll()
+    from app.services.sap_workflow import refresh_invoices, WF_LABELS
+    try:
+        await refresh_invoices(db, [invoice])
+    except Exception:
+        logger.exception("SAP workflow status read failed for invoice %s", invoice.id)
+        raise HTTPException(status_code=502, detail="Could not read the SAP workflow status — see server logs.")
+
+    return {
+        "invoice_id": invoice.id,
+        "status": invoice.status,
+        "sap_wf_objkey": invoice.sap_wf_objkey,
+        "sap_wf_status": invoice.sap_wf_status,
+        "sap_wf_label": WF_LABELS.get(invoice.sap_wf_status or "", "Waiting for SAP"),
+        "sap_wf_posted_doc": invoice.sap_wf_posted_doc,
+        "sap_wf_message": invoice.sap_wf_message,
+        "sap_wf_checked_at": invoice.sap_wf_checked_at,
     }
 
 
@@ -1306,6 +1356,15 @@ async def unpark_invoice_endpoint(
                 f"A posted document must be reversed in SAP (MR8M), not unparked."
             ),
         )
+    if invoice.sap_wf_status in ("BLK", "APP"):
+        # Deleting the document under a running workflow would leave approvers a
+        # work item for an invoice that no longer exists.
+        raise HTTPException(
+            status_code=409,
+            detail=("This invoice is in the SAP approval workflow"
+                    + (" and has been approved" if invoice.sap_wf_status == "APP" else "")
+                    + ". It can't be unparked from VIM — handle it in SAP."),
+        )
 
     # ── Delete the parked document in SAP ──
     try:
@@ -1332,6 +1391,12 @@ async def unpark_invoice_endpoint(
     invoice.sap_document_number = None
     invoice.sap_fiscal_year = None
     invoice.sap_doc_status = None
+    invoice.sap_wf_objkey = None
+    invoice.sap_wf_event_id = None
+    invoice.sap_wf_status = None
+    invoice.sap_wf_posted_doc = None
+    invoice.sap_wf_message = None
+    invoice.sap_wf_checked_at = None
     invoice.status = "approved"
     await db.commit()
 

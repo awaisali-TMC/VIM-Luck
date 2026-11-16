@@ -269,6 +269,11 @@ def _build_detail_response(invoice: Invoice) -> InvoiceDetailResponse:
         sap_item_text=invoice.sap_item_text,
         sap_currency=invoice.sap_currency,
         sap_vendor_number=invoice.sap_vendor_number,
+        sap_wf_objkey=invoice.sap_wf_objkey,
+        sap_wf_status=invoice.sap_wf_status,
+        sap_wf_posted_doc=invoice.sap_wf_posted_doc,
+        sap_wf_message=invoice.sap_wf_message,
+        sap_wf_checked_at=invoice.sap_wf_checked_at,
         parking_line_item_ids=(json.loads(invoice.parking_line_item_ids) if invoice.parking_line_item_ids else None),
         # PO matching
         matched_po_id=invoice.matched_po_id,
