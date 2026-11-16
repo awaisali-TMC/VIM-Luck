@@ -5,6 +5,27 @@ Handover from Claude Code sessions on this machine (`D:\VIM\VIM-Luck`). Read
 what is still open. (`HANDOFF.md` is the separate product feature-status doc.)
 Newest session first; §1–§5 below are from session 1 and are still accurate.
 
+## 2026-11-16: SAP approval workflow merged, pushed, and deployed to Cloud Run (`e157da7`)
+
+- **Built:** `feature/sap-workflow` (`631773d`), merged into `main` as `e157da7` and pushed.
+  This is the Lucky Cement SAP approval workflow: the `ZMIR7_PARK` event is raised in the same LUW
+  as the park, and the outcome is read back from `ZMIR7_WF_LOG` / `ZMIR7_ERROR_LOG`. See CLAUDE.md
+  "SAP approval workflow". It is **off by default** (`SAP_WORKFLOW_ENABLED=false`), so behaviour is
+  unchanged until it is switched on. `test_sap_workflow.py` and the other offline suites pass.
+- **Deployed to Cloud Run at the user's request,** the same way as below (`git archive` + `cloudbuild.yaml`
+  restored from `b57c810^`). Build `77d4600d`. API `lucky-cement-vim-api-00007-rx2`, web
+  `lucky-cement-vim-web-00009-qn2`, both on image tag `e157da7`. The rollback targets are API `00006-slx`
+  and web `00008-lwm`. No env vars were changed, so the workflow is off there too.
+- **Live checks:** the web returns 200 and its bundle targets the `…527930147362` API and carries the
+  new "Refresh from SAP" UI. The API starts cleanly with no ERROR logs, `/api/invoices/` returns 401
+  without a token, and the new `POST /api/sap/invoices/{id}/workflow/refresh` is routed (401 without a
+  token). A logged-in run-through was not done.
+- **Open:**
+  - The LAN server is still not updated. There is no SSH access from this machine. On the box: `git pull`,
+    then restart `./start-lan.sh`. No new packages are needed.
+  - To switch the workflow on anywhere, set `SAP_WORKFLOW_ENABLED=true` and `SAP_WF_EVENT` (awaited from
+    the ABAP team). First confirm the Z-table column names against DD03L on AUP.
+
 ## 2026-11-16: dev-shahzaib merged, pushed, and deployed to Cloud Run (`52e90b9`)
 
 - **Merged into `main` and pushed:** `origin/dev-shahzaib` (14 commits: Inbox filters/sort,
