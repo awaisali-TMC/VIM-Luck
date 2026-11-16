@@ -182,10 +182,14 @@ async def lifespan(app: FastAPI):
 
     # Start the serial product-matching queue worker
     await start_matching_queue()
+    # SAP approval-workflow status poller (no-op unless SAP_WORKFLOW_ENABLED)
+    from app.services.sap_workflow import start_workflow_poller, stop_workflow_poller
+    start_workflow_poller()
 
     yield
 
-    # Graceful shutdown: stop the worker
+    # Graceful shutdown: stop the workers
+    await stop_workflow_poller()
     await stop_matching_queue()
 
 

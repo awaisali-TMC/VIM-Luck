@@ -119,6 +119,30 @@ class Settings(BaseSettings):
     # undecryptable (users must re-enter them). See services/sap_credentials.py.
     SAP_CRED_KEY: str = ""
 
+    # ── SAP parking workflow (Lucky Cement, MIR7 → WS90000096) ──────────────
+    # When on, parking also raises the workflow event in the SAME SAP LUW, and
+    # commits only if the event was accepted — so an invoice is never left
+    # parked without its workflow (Naila, 2026-11-16: "if workflow initiation
+    # fails the invoice is not allowed to be parked"). SAP then approves and
+    # posts the invoice itself; VIM reads the outcome from ZMIR7_WF_LOG.
+    # Off by default: every other instance parks exactly as before.
+    SAP_WORKFLOW_ENABLED: bool = False
+    # SAP_WAPI_CREATE_EVENT arguments. The BOR object is ZMIR7_PARK (linked to
+    # WS90000096 in SWE2). The EVENT name is still to come from the ABAP team,
+    # so it has no default: parking refuses to run with the workflow on and no
+    # event set, rather than guessing a name that SAP would silently ignore.
+    SAP_WF_OBJECT_TYPE: str = "ZMIR7_PARK"
+    SAP_WF_EVENT: str = ""
+    # Workflow container values VIM supplies (MIR7_Parking_Workflow.md §2.2).
+    # SCENARIO_CHAR: the md says scenario 4, the 2026-11 meeting notes say 3 —
+    # the text value is what the container showed in SAP's own test data.
+    SAP_WF_SCENARIO: str = "MIR7 Parked Invoice"
+    SAP_WF_LEVEL: str = "01"
+    SAP_WF_TOTAL_APPROVALS: str = "01"
+    # Background status refresh for invoices waiting in the SAP workflow, in
+    # seconds. 0 turns it off (the per-invoice "Refresh" still works).
+    SAP_WF_POLL_SECONDS: int = 300
+
     # CORS — explicit allowlist (no wildcard). Override via env CORS_ORIGINS
     # (JSON list) to add/replace origins per environment.
     CORS_ORIGINS: list[str] = [

@@ -59,6 +59,7 @@ py -3 backend/test_line_item_guards.py      # zero-quantity goods lines must not
 py -3 backend/test_role_labels.py           # role display-name renames, offline; own throwaway DB
 py -3 backend/test_invoice_document.py      # original invoice file view/download + path guard, offline; own temp DB + upload dir
 py -3 backend/test_duplicate_check.py       # duplicate-invoice key blocks approval/SAP, offline; fake SAP, own throwaway DB
+py -3 backend/test_sap_workflow.py          # SAP approval workflow: park+event in one LUW, ZMIR7 status read-back, offline; own throwaway DB
 py -3 backend/test_receiver_ntn.py          # receiver NTN: extracted when printed, stored, shown, editable; own DB
 py -3 backend/test_po_regression.py         # PO-lane BASELINE: live SAP validate dry-run (needs SAP env)
 ```
@@ -147,6 +148,12 @@ Lucky Cement's rule: an invoice is a **duplicate** of an *earlier* live invoice 
 
 ### Receiver NTN (buyer NTN on the invoice)
 Gemini extracts it as field `receiver_tax_id` (label "Receiver NTN") **only when the invoice prints it**; otherwise it stays empty, and it is never the vendor's own NTN. It is stored as `invoices.receiver_ntn` and shown and editable on the review screen and the invoice page. It is captured only: not compared with Lucky Cement's NTN, flagged or warned on.
+
+### SAP approval workflow (`services/sap_workflow.py`) — Lucky Cement, off by default
+With `SAP_WORKFLOW_ENABLED=true`, parking raises `SAP_WAPI_CREATE_EVENT` (BOR object `ZMIR7_PARK` → workflow `WS90000096`) **between** `BAPI_INCOMINGINVOICE_PARK` and the single `BAPI_TRANSACTION_COMMIT`, with `COMMIT_WORK=' '`; a refused event rolls the park back, so an invoice is never left parked without its workflow (SAP's rule: "workflow first, then park" — the event needs the document number, so both share one LUW). `OBJKEY` = company code(4) + document(10) + year(4). SAP then approves (approvers from its employee hierarchy) and posts the invoice itself; VIM reads `ZMIR7_WF_LOG` (INIT / BLK / APP / REJ + posted doc) and `ZMIR7_ERROR_LOG` (S / E) with `RFC_READ_TABLE` — on demand (`POST /api/sap/invoices/{id}/workflow/refresh`) and every `SAP_WF_POLL_SECONDS`. APP with a posted doc → invoice `posted`; REJ stays `parked` and can be unparked; BLK/APP can't be unparked. The event is raised by the technical user with the VIM user's `sap_username` as `USER` (initiator) and email as `INIEMAIL`.
+- **Not yet confirmed by SAP:** the event name (`SAP_WF_EVENT`, no default — parking refuses to run without it), the two tables' column names (`WF_LOG_FIELDS` / `ERROR_LOG_FIELDS`, mirrored in `sap_fixtures/workflow_schema.sql`), the container element names, and the scenario (the md says 4, the meeting notes 3). Check the columns against DD03L on AUP before going live.
+- Fake SAP: the event writes a BLK row; `py -3 backend/sap_wf_decide.py <OBJKEY> approve|reject [--error "…"]` plays the approver (needs `SAP_FAKE_DB_PATH`); initiator `NOHIER` is scripted to have no hierarchy (`scripted.json`).
+- VIM's own approval chain is untouched — whether it stays now that SAP approves is an open decision.
 
 ### FBR tax compliance (Pakistan-specific)
 FBR = the Pakistani tax authority. The app verifies supplier NTNs against the **Active Taxpayer List** and computes WHT/GST compliance. Live IRIS API lookup is **disabled by default** (`FBR_LIVE_LOOKUP_ENABLED=False`). ATL lookups (`services/fbr_verification.py`) prefer the app DB's `atl_taxpayers` table (imported on this instance, ~8.5M rows) and fall back to a local SQLite file at `FBR_ATL_DB_PATH` (dev only). `GET /api/fbr/atl-stats` reads **only** the SQLite file, so it reports 0 on every cloud instance — never use it as a health check. The tax-rules engine (`tax_rule.py` + seeded defaults in `main.py`) holds GST/WHT/SED/FED rates with FBR section references.

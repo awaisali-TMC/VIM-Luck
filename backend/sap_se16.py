@@ -33,6 +33,8 @@ GLOSS = {
     "T007A": "Tax codes", "T007S": "Tax code texts", "TCURT": "Currency texts",
     "SKA1": "G/L accounts (chart)", "SKB1": "G/L accounts (company code)",
     "SKAT": "G/L account texts", "Z_COUNTER": "Fake bookkeeping (next document number)",
+    "ZMIR7_WF_LOG": "Approval workflow status (INIT/BLK/APP/REJ)",
+    "ZMIR7_ERROR_LOG": "Workflow posting log (S/E)",
 }
 
 RBSTAT = {"A": "parked", "5": "posted"}
