@@ -21,6 +21,7 @@ else:
     windll = None
 
 from app.config import settings
+from app.services.sap_credentials import current_sap_user, current_sap_passwd
 
 logger = logging.getLogger(__name__)
 
@@ -155,8 +156,9 @@ class SAPConnector:
             ("ASHOST", settings.SAP_ASHOST),
             ("SYSNR", settings.SAP_SYSNR),
             ("CLIENT", settings.SAP_CLIENT),
-            ("USER", settings.SAP_USER),
-            ("PASSWD", settings.SAP_PASSWD),
+            # Per-user SAP login when the request set one, else the global SAP_USER.
+            ("USER", current_sap_user()),
+            ("PASSWD", current_sap_passwd()),
         ]
 
         # Add SAProuter if configured
@@ -458,8 +460,9 @@ class SAPConnectorPyRFC:
             ashost=settings.SAP_ASHOST,
             sysnr=settings.SAP_SYSNR,
             client=settings.SAP_CLIENT,
-            user=settings.SAP_USER,
-            passwd=settings.SAP_PASSWD,
+            # Per-user SAP login when the request set one, else the global SAP_USER.
+            user=current_sap_user(),
+            passwd=current_sap_passwd(),
         )
         if settings.SAP_SAPROUTER:
             params["saprouter"] = settings.SAP_SAPROUTER

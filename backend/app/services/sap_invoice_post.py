@@ -102,13 +102,13 @@ def post_invoice_to_sap(
     sap.connect()
 
     try:
-        # SAP DEV (company 1100, July–June fiscal year) currently has open periods
-        # 11/2025 (May 2025), 10/2025 (Apr 2025), 12/2024 (Jun 2024). Default to a
-        # date in the current open period; override via posting_date / the UI's
-        # "Posting Date" field when SAP rolls the open periods forward. A corrupt/
-        # unparseable posting date falls back to this safe default rather than
-        # crashing the BAPI call.
-        sap_post_date = _sap_date(posting_date, default="20250520")
+        # Default the posting date to TODAY: SAP only accepts a posting date inside
+        # an open posting period (OB52), and the current period is the one that is
+        # reliably open. A hard-coded date (it used to be 20 May 2025, from the old
+        # OGDCL test system) goes stale as soon as SAP closes that period. Override
+        # via posting_date / the UI's "Posting Date" field. A corrupt/unparseable
+        # date also falls back to today rather than crashing the BAPI call.
+        sap_post_date = _sap_date(posting_date)
         sap_inv_date = _sap_date(invoice_date, default=sap_post_date)
         # Baseline date (payment terms) — defaults to the posting date if not given.
         sap_bline_date = _sap_date(baseline_date, default=sap_post_date)

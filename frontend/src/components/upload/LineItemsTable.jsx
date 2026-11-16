@@ -415,28 +415,32 @@ function ControlledLineItems({
         ) : null
       }
       noPad
+      className="h-full flex flex-col"
+      bodyClassName="flex-1 min-h-0 flex flex-col"
     >
       {blockedMessage && (
         <div role="alert" className="mx-3.5 mt-3 mb-1 bg-danger-bg border border-danger-base rounded-base px-3 py-2 text-2xs text-danger-dark">
           {blockedMessage}
         </div>
       )}
-      <div className="overflow-x-auto">
+      {/* Fill the remaining card height and scroll inside it, so the list never
+          stretches the row; the header row stays pinned (sticky) while scrolling. */}
+      <div className="flex-1 min-h-0 overflow-auto">
         <table className="w-full table-fixed border-collapse text-xs">
           <thead>
-            <tr className="bg-neutral-25">
+            <tr>
               {showSelect && (
-                <th className="w-[5%] px-3 py-2 border-b-2 border-neutral-100 text-center">
+                <th className="sticky top-0 z-10 bg-neutral-25 w-[5%] px-3 py-2 border-b-2 border-neutral-100 text-center">
                   <input type="checkbox" checked={allSelected} disabled={selectionLocked} onChange={() => onToggleSelectAll?.(!allSelected)} title={selectionLocked ? "Selection locked after submit" : "Select all"} />
                 </th>
               )}
-              <th className="text-left px-3.5 py-2 text-2xs font-semibold text-neutral-500 uppercase tracking-wider border-b-2 border-neutral-100">Description</th>
-              <th className="text-right w-[9%] px-3.5 py-2 text-2xs font-semibold text-neutral-500 uppercase tracking-wider border-b-2 border-neutral-100">Qty</th>
-              <th className="text-right w-[7%] px-3.5 py-2 text-2xs font-semibold text-neutral-500 uppercase tracking-wider border-b-2 border-neutral-100">Unit</th>
-              <th className="text-right w-[12%] px-3.5 py-2 text-2xs font-semibold text-neutral-500 uppercase tracking-wider border-b-2 border-neutral-100">Rate</th>
-              <th className="text-right w-[14%] px-3.5 py-2 text-2xs font-semibold text-neutral-500 uppercase tracking-wider border-b-2 border-neutral-100">Amount</th>
+              <th className="sticky top-0 z-10 bg-neutral-25 text-left px-3.5 py-2 text-2xs font-semibold text-neutral-500 uppercase tracking-wider border-b-2 border-neutral-100">Description</th>
+              <th className="sticky top-0 z-10 bg-neutral-25 text-right w-[9%] px-3.5 py-2 text-2xs font-semibold text-neutral-500 uppercase tracking-wider border-b-2 border-neutral-100">Qty</th>
+              <th className="sticky top-0 z-10 bg-neutral-25 text-right w-[7%] px-3.5 py-2 text-2xs font-semibold text-neutral-500 uppercase tracking-wider border-b-2 border-neutral-100">Unit</th>
+              <th className="sticky top-0 z-10 bg-neutral-25 text-right w-[12%] px-3.5 py-2 text-2xs font-semibold text-neutral-500 uppercase tracking-wider border-b-2 border-neutral-100">Rate</th>
+              <th className="sticky top-0 z-10 bg-neutral-25 text-right w-[14%] px-3.5 py-2 text-2xs font-semibold text-neutral-500 uppercase tracking-wider border-b-2 border-neutral-100">Amount</th>
               {showActions && (
-                <th className="w-[6%] px-3 py-2 border-b-2 border-neutral-100"></th>
+                <th className="sticky top-0 z-10 bg-neutral-25 w-[6%] px-3 py-2 border-b-2 border-neutral-100"></th>
               )}
             </tr>
           </thead>

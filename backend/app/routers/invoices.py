@@ -16,6 +16,7 @@ from app.database import get_db, async_session
 from app.security import get_current_principal, Principal
 from app.models.invoice import Invoice, InvoiceLineItem, InvoiceStatus
 from app.models.supplier import SupplierUser
+from app.models.internal_user import InternalUser
 from app.schemas.invoice import (
     ExtractionResult,
     ExtractedField,
@@ -34,7 +35,7 @@ from app.models.product import Product
 from app.services.gemini_extract import extract_invoice
 from app.services.gemini_product_match import match_products
 from app.services.file_storage import (
-    save_uploaded_file,
+    save_invoice_file,
     content_matches_type,
     resolve_stored_file,
     sniff_inline_type,
@@ -407,11 +408,25 @@ def _merge_images_to_pdf(images: list[bytes]) -> bytes:
     return buf.getvalue()
 
 
+async def _invoice_uploader(principal: Principal, db: AsyncSession) -> tuple[str, str]:
+    """(kind, display name) of whoever is uploading, for organising files on disk:
+    a supplier by company name (-> vendor_ folder/prefix), anyone internal by
+    display name (-> apo_ folder/prefix). See file_storage.invoice_upload_target."""
+    if principal.kind == "supplier":
+        s = await db.get(SupplierUser, principal.id)
+        name = (getattr(s, "company_name", None) or getattr(s, "name", None)
+                or f"supplier_{principal.id}")
+        return "supplier", name
+    u = await db.get(InternalUser, principal.id)
+    return "internal", (getattr(u, "display_name", None) or f"user_{principal.id}")
+
+
 async def _save_multi_invoice_drafts(db: AsyncSession, file_content: bytes,
                                      content_type: str, filename: str,
                                      first_result: dict,
                                      supplier_id: int | None = None,
-                                     source_type: str = "upload") -> list[Invoice]:
+                                     source_type: str = "upload",
+                                     uploader: tuple[str, str] = ("internal", "unknown")) -> list[Invoice]:
     """A file contains several distinct invoices: run a DEDICATED segmentation
     pass (per-page invoice mapping — reliable even for 20-page files with 1/2/
     3/5-page invoices), split the PDF per invoice, extract each part, and save
@@ -454,7 +469,7 @@ async def _save_multi_invoice_drafts(db: AsyncSession, file_content: bytes,
             f"File appears to contain {first_result.get('invoice_count')} invoices "
             "but could not be split automatically — review and split manually."
         )
-        stored = save_uploaded_file(file_content, filename)
+        stored = save_invoice_file(file_content, filename, uploader[0], uploader[1])
         drafts.append(_draft(first_result, filename, stored, mime, len(file_content)))
         return await _flush()
 
@@ -479,7 +494,7 @@ async def _save_multi_invoice_drafts(db: AsyncSession, file_content: bytes,
                     except Exception:
                         logger.exception("Extraction failed for re-split part %s_%d", sub_stem, j)
                         continue
-                    stored = save_uploaded_file(sub, f"{sub_stem}_{j}.pdf")
+                    stored = save_invoice_file(sub, f"{sub_stem}_{j}.pdf", uploader[0], uploader[1])
                     drafts.append(_draft(sub_result, f"{sub_stem}_{j}.pdf",
                                          stored, "application/pdf", len(sub)))
                 continue
@@ -487,7 +502,7 @@ async def _save_multi_invoice_drafts(db: AsyncSession, file_content: bytes,
                 "This part may still contain more than one invoice — review manually."
             )
 
-        stored = save_uploaded_file(part_bytes, part_name)
+        stored = save_invoice_file(part_bytes, part_name, uploader[0], uploader[1])
         drafts.append(_draft(part_result, part_name, stored,
                              "application/pdf", len(part_bytes)))
 
@@ -526,8 +541,9 @@ async def upload_invoice(
     # (and source_type=supplier) or the supplier can't see them.
     owner_supplier_id = principal.id if principal.kind == "supplier" else None
     src_type = "supplier" if principal.kind == "supplier" else "upload"
+    uploader = await _invoice_uploader(principal, db)
 
-    stored_path = save_uploaded_file(file_content, file.filename)
+    stored_path = save_invoice_file(file_content, file.filename, uploader[0], uploader[1])
 
     # Single Gemini call — extracts fields, line items, and taxes together
     try:
@@ -541,7 +557,7 @@ async def upload_invoice(
     if result.get("multiple_invoices"):
         drafts = await _save_multi_invoice_drafts(
             db, file_content, content_type, file.filename, result,
-            supplier_id=owner_supplier_id, source_type=src_type,
+            supplier_id=owner_supplier_id, source_type=src_type, uploader=uploader,
         )
         return {
             "batch": True,
@@ -592,15 +608,16 @@ async def upload_invoices_batch(
     # Scope drafts to their owner (supplier uploads must carry supplier_id).
     owner_supplier_id = principal.id if principal.kind == "supplier" else None
     src_type = "supplier" if principal.kind == "supplier" else "upload"
+    uploader = await _invoice_uploader(principal, db)
 
     async def _process_document(file_content: bytes, content_type: str, fname: str):
         result = extract_invoice(file_content, MIME_MAP[content_type])
         if result.get("multiple_invoices"):
             return await _save_multi_invoice_drafts(
                 db, file_content, content_type, fname, result,
-                supplier_id=owner_supplier_id, source_type=src_type,
+                supplier_id=owner_supplier_id, source_type=src_type, uploader=uploader,
             )
-        stored = save_uploaded_file(file_content, fname)
+        stored = save_invoice_file(file_content, fname, uploader[0], uploader[1])
         draft = _extraction_to_draft(result, fname, stored, MIME_MAP[content_type], len(file_content),
                                      supplier_id=owner_supplier_id, source_type=src_type)
         db.add(draft)

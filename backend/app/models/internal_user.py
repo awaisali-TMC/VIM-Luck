@@ -3,7 +3,7 @@
 import enum
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, Integer, String, DateTime
+from sqlalchemy import Column, Integer, String, DateTime, Text
 
 from app.models.invoice import Base
 
@@ -28,6 +28,12 @@ class InternalUser(Base):
     password_hash = Column(String(255), nullable=False)  # "{salt}:{sha256hash}"
     role = Column(String(30), default=UserRole.AP_OPERATOR.value)
     department = Column(String(100), nullable=True)
+    # Optional per-user SAP login, used when this user parks/posts to SAP
+    # (falls back to the global SAP_USER). The password is Fernet-encrypted —
+    # SAP needs it in cleartext, so it cannot be hashed. See
+    # services/sap_credentials.py.
+    sap_username = Column(String(100), nullable=True)
+    sap_password_enc = Column(Text, nullable=True)  # Fernet token of the SAP password
     is_active = Column(Integer, default=1)  # 0=disabled, 1=active
     auth_token = Column(String(100), nullable=True, index=True)
     # When the current session token was issued — used to expire stale sessions.
@@ -39,3 +45,9 @@ class InternalUser(Base):
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )
+
+    @property
+    def sap_password_set(self) -> bool:
+        """Whether a SAP password is stored — exposed to the API so the value
+        itself is never returned."""
+        return bool(self.sap_password_enc)

@@ -27,6 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.security import _extract_token, _token_expired
 from app.services.passwords import hash_password, verify_password, needs_rehash
+from app.services.sap_credentials import encrypt_sap_password
 from app.models.internal_user import InternalUser, UserRole
 from app.schemas.internal_user import (
     InternalLoginRequest,
@@ -62,6 +63,8 @@ def _user_response(u: InternalUser) -> dict:
         "role": u.role,
         "department": u.department,
         "is_active": u.is_active,
+        "sap_username": u.sap_username,
+        "sap_password_set": bool(u.sap_password_enc),
         "created_at": u.created_at,
         "updated_at": u.updated_at,
     }
@@ -245,6 +248,8 @@ async def create_user(data: CreateUserRequest, db: AsyncSession = Depends(get_db
         password_hash=_hash_password(data.password),
         role=data.role,
         department=data.department.strip() if data.department else None,
+        sap_username=(data.sap_username or "").strip() or None,
+        sap_password_enc=encrypt_sap_password(data.sap_password),
         is_active=1,
     )
     db.add(user)
@@ -287,6 +292,11 @@ async def update_user(
         user.role = data.role
     if data.department is not None:
         user.department = data.department.strip() or None
+    if data.sap_username is not None:
+        user.sap_username = data.sap_username.strip() or None
+    if data.sap_password is not None:
+        # "" clears the stored SAP password; a non-empty value is re-encrypted.
+        user.sap_password_enc = encrypt_sap_password(data.sap_password)
     if data.is_active is not None:
         user.is_active = data.is_active
         if not data.is_active:

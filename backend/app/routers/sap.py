@@ -854,6 +854,13 @@ async def post_invoice_to_sap_endpoint(
             detail=f"Only these roles can park invoices to SAP: {allowed}.",
         )
 
+    # Log in to SAP as this user when they have their own SAP credentials;
+    # otherwise the connector falls back to the global SAP_USER. Scoped to this
+    # request. Covers the PO fetch and park/post below (both run in-context).
+    from app.services.sap_credentials import set_sap_identity, decrypt_sap_password
+    if (user.sap_username or "").strip():
+        set_sap_identity(user.sap_username, decrypt_sap_password(user.sap_password_enc))
+
     # ── Load invoice with line items ────────────────────────────
     result = await db.execute(
         select(Invoice)

@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import Card from "../common/Card";
+import { todayIso } from "../../utils/dateRange";
 
 const LAYOUT_OPTIONS = [
   { value: "goods", label: "Goods/service items" },
@@ -42,8 +43,8 @@ export default function SAPPostingCard({
   // Seed with `??` (not `||`) so a value the user cleared to "" stays empty
   // (and flags as invalid), while a never-set null shows the sensible default.
   const [layout, setLayout] = useState(invoice?.sap_layout || "goods");
-  const [postingDate, setPostingDate] = useState(invoice?.sap_posting_date ?? "2025-05-20");
-  const [baselineDate, setBaselineDate] = useState(invoice?.sap_baseline_date ?? "2025-05-20");
+  const [postingDate, setPostingDate] = useState(invoice?.sap_posting_date ?? todayIso());
+  const [baselineDate, setBaselineDate] = useState(invoice?.sap_baseline_date ?? todayIso());
   const [headerText, setHeaderText] = useState(
     invoice?.sap_header_text ?? `einv-${invoice?.invoice_number || invoice?.id}`
   );

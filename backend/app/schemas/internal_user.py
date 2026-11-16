@@ -19,6 +19,8 @@ class CreateUserRequest(BaseModel):
     password: str
     role: str = "ap_operator"
     department: Optional[str] = None
+    sap_username: Optional[str] = None  # per-user SAP login (optional)
+    sap_password: Optional[str] = None  # stored encrypted; never returned
 
 
 class UpdateUserRequest(BaseModel):
@@ -26,6 +28,10 @@ class UpdateUserRequest(BaseModel):
     role: Optional[str] = None
     department: Optional[str] = None
     is_active: Optional[int] = None
+    # SAP login. None = leave unchanged; "" = clear. A non-empty sap_password is
+    # re-encrypted and stored.
+    sap_username: Optional[str] = None
+    sap_password: Optional[str] = None
 
 
 class ResetPasswordRequest(BaseModel):
@@ -41,6 +47,8 @@ class UserResponse(BaseModel):
     role: str
     department: Optional[str] = None
     is_active: int = 1
+    sap_username: Optional[str] = None
+    sap_password_set: bool = False  # whether a SAP password is stored (never the value)
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
