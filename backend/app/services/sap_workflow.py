@@ -85,6 +85,12 @@ def raise_parking_event(sap, objkey: str, doc_number: str,
     ]
     if initiator_email:
         container.append({"ELEMENT": "INIEMAIL", "VALUE": initiator_email})
+    # ZWF_LOGIN carries the initiator's SAP user id. The workflow reads this to
+    # resolve the approver from the Approval Matrix; without it the agent comes
+    # out as 00000000 (nobody). Element name confirmed with Lucky Cement's SAP
+    # team (2026-11-17). SAP user ids are upper-case.
+    if initiator_sap_user:
+        container.append({"ELEMENT": "ZWF_LOGIN", "VALUE": initiator_sap_user.strip().upper()})
 
     kwargs = dict(
         OBJECT_TYPE=settings.SAP_WF_OBJECT_TYPE,
