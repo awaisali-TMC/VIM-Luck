@@ -134,9 +134,11 @@ class Settings(BaseSettings):
     SAP_WF_OBJECT_TYPE: str = "ZMIR7_PARK"
     SAP_WF_EVENT: str = ""
     # Workflow container values VIM supplies (MIR7_Parking_Workflow.md §2.2).
-    # SCENARIO_CHAR: the md says scenario 4, the 2026-11 meeting notes say 3 —
-    # the text value is what the container showed in SAP's own test data.
-    SAP_WF_SCENARIO: str = "MIR7 Parked Invoice"
+    # SCENARIO_CHAR is the WF scenario the Approval Matrix keys on; Lucky Cement's
+    # SAP team confirmed it is "3" (2026-11-17). The workflow derives the Group
+    # Key itself from the invoice — VIM does not send it — but it needs the right
+    # scenario, or the approver resolves to 00000000 (nobody).
+    SAP_WF_SCENARIO: str = "3"
     SAP_WF_LEVEL: str = "01"
     SAP_WF_TOTAL_APPROVALS: str = "01"
     # Background status refresh for invoices waiting in the SAP workflow, in
