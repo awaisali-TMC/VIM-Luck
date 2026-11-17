@@ -54,3 +54,9 @@ export async function resetUserPassword(id, newPassword) {
   });
   return response.data;
 }
+
+// Verify a user's stored SAP employee login over RFC (used by the workflow step).
+export async function testUserSapLogin(id) {
+  const response = await api.post(`/api/sap/users/${id}/login-test`);
+  return response.data;
+}

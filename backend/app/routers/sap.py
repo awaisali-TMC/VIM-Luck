@@ -39,6 +39,20 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/sap", tags=["sap"])
 
+
+def _sap_error_detail(exc: Exception) -> str:
+    """One-line, safe summary of an RFC/SAP exception for the UI banner.
+
+    PyRFC/ctypes RFC errors carry the SAP key (e.g. ``RFC_LOGON_FAILURE``) and a
+    short message; surface that instead of a bare "see server logs" so staff can
+    act on it without opening the console. Never includes credentials — RFC error
+    messages carry none — and is capped to one line.
+    """
+    key = getattr(exc, "key", None)  # pyrfc sets .key, e.g. "RFC_LOGON_FAILURE"
+    raw = (getattr(exc, "message", None) or str(exc) or "").strip()
+    msg = raw.splitlines()[0][:300] if raw else type(exc).__name__
+    return f"{key}: {msg}" if key and key not in msg else msg
+
 # Only these roles may park/post (or dry-run validate) an invoice to SAP.
 SAP_PARK_ROLES = ("admin", "ap_operator")
 
@@ -99,6 +113,64 @@ async def test_connection():
             "error": "SAP connection failed — see server logs for details.",
             **_sap_target(),
         }
+
+
+@router.post("/users/{user_id}/login-test")
+async def test_user_sap_login(
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+    _admin: InternalUser = Depends(require_admin),
+):
+    """Admin: verify a user's stored SAP employee login actually authenticates
+    over RFC.
+
+    The workflow step logs into SAP *as this user* (their SAP ID + password), so
+    those credentials must succeed over RFC before that can run — the document
+    park itself uses TMC_VIM and is unaffected. This pings SAP under the user's
+    identity and reports the real RFC reason (e.g. RFC_LOGON_FAILURE) on failure,
+    so a wrong/expired password or missing S_RFC authorization is obvious here
+    rather than surfacing only when a park tries to start the workflow.
+    """
+    from app.services.sap_credentials import set_sap_identity, decrypt_sap_password
+
+    result = await db.execute(select(InternalUser).where(InternalUser.id == user_id))
+    target = result.scalar_one_or_none()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if not (target.sap_username or "").strip():
+        raise HTTPException(status_code=400, detail="This user has no SAP username set.")
+    if not target.sap_password_enc:
+        raise HTTPException(status_code=400, detail="This user has no SAP password saved.")
+
+    if _sap_mode() == "fake":
+        return {
+            "ok": True,
+            "sap_username": target.sap_username,
+            "detail": "Fake SAP mode — no real RFC logon is performed on this instance.",
+            **_sap_target(),
+        }
+
+    _ensure_dll()
+    set_sap_identity(target.sap_username, decrypt_sap_password(target.sap_password_enc))
+    try:
+        from app.services.sap_connector import SAPConnector
+        sap = SAPConnector()
+        sap.connect()
+        ok = sap.ping()
+        sap.disconnect()
+        return {"ok": bool(ok), "sap_username": target.sap_username, **_sap_target()}
+    except Exception as exc:
+        logger.warning(
+            "SAP login test failed for user %s (%s): %s", user_id, target.sap_username, exc
+        )
+        return {
+            "ok": False,
+            "sap_username": target.sap_username,
+            "detail": _sap_error_detail(exc),
+            **_sap_target(),
+        }
+    finally:
+        set_sap_identity(None, None)
 
 
 class ExchangeRateRequest(BaseModel):
@@ -507,9 +579,9 @@ async def sync_sap_grn(po_number: str, db: AsyncSession = Depends(get_db)):
     else:
         try:
             sap_po = fetch_po_detail(ponum)
-        except Exception:
+        except Exception as exc:
             logger.exception("SAP PO fetch failed for %s", ponum)
-            raise HTTPException(status_code=502, detail="Failed to fetch PO from SAP — see server logs.")
+            raise HTTPException(status_code=502, detail=f"Failed to fetch PO from SAP: {_sap_error_detail(exc)}")
         if not sap_po:
             raise HTTPException(status_code=404, detail=f"PO {ponum} not found in SAP.")
         po_data = sync_po_to_db(sap_po, None)
@@ -854,12 +926,12 @@ async def post_invoice_to_sap_endpoint(
             detail=f"Only these roles can park invoices to SAP: {allowed}.",
         )
 
-    # Log in to SAP as this user when they have their own SAP credentials;
-    # otherwise the connector falls back to the global SAP_USER. Scoped to this
-    # request. Covers the PO fetch and park/post below (both run in-context).
-    from app.services.sap_credentials import set_sap_identity, decrypt_sap_password
-    if (user.sap_username or "").strip():
-        set_sap_identity(user.sap_username, decrypt_sap_password(user.sap_password_enc))
+    # RFC (PO fetch + park/post) always runs as the technical user TMC_VIM
+    # (settings.SAP_USER/SAP_PASSWD) — it holds the RFC authorizations. A user's
+    # own SAP employee ID + password (internal_users.sap_username/_enc) is NOT
+    # used for the RFC logon; it is reserved for initiating the SAP workflow on
+    # the employee's behalf (see below). Logging RFC in as the employee breaks
+    # park when that account lacks RFC rights (RFC_LOGON_FAILURE).
 
     # ── Load invoice with line items ────────────────────────────
     result = await db.execute(
@@ -942,11 +1014,11 @@ async def post_invoice_to_sap_endpoint(
     try:
         from app.services.sap_po_service import fetch_po_detail
         sap_po = fetch_po_detail(po.po_number)
-    except Exception:
+    except Exception as exc:
         logger.exception("Failed to fetch PO %s from SAP", po.po_number)
         raise HTTPException(
             status_code=502,
-            detail=f"Failed to fetch PO {po.po_number} from SAP — see server logs.",
+            detail=f"Failed to fetch PO {po.po_number} from SAP: {_sap_error_detail(exc)}",
         )
 
     if not sap_po:
