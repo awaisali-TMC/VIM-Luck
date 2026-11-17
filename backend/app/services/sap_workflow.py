@@ -64,7 +64,8 @@ def build_objkey(company_code: str, doc_number: str, fiscal_year: str) -> str:
 
 
 def raise_parking_event(sap, objkey: str, doc_number: str,
-                        initiator_sap_user: str = "", initiator_email: str = "") -> dict:
+                        initiator_sap_user: str = "", initiator_email: str = "",
+                        initiator_sap_pwd: str = "") -> dict:
     """Raise the workflow event on an OPEN connection, without committing.
 
     The caller owns the LUW: it commits after a success and rolls back after a
@@ -85,12 +86,15 @@ def raise_parking_event(sap, objkey: str, doc_number: str,
     ]
     if initiator_email:
         container.append({"ELEMENT": "INIEMAIL", "VALUE": initiator_email})
-    # ZWF_LOGIN carries the initiator's SAP user id. The workflow reads this to
-    # resolve the approver from the Approval Matrix; without it the agent comes
-    # out as 00000000 (nobody). Element name confirmed with Lucky Cement's SAP
-    # team (2026-11-17). SAP user ids are upper-case.
+    # The MIR7 workflow (exit ZXM08U30 / ZWF_LOGIN) authenticates the initiator
+    # from the container: USERI = SAP user id, PWDI = that user's SAP password.
+    # Both come from the logged-in VIM user (Admin -> Users). Without them the
+    # approver resolves to 00000000 (nobody). Element names confirmed with Lucky
+    # Cement's SAP team (2026-11-17). SAP user ids are upper-case.
     if initiator_sap_user:
-        container.append({"ELEMENT": "ZWF_LOGIN", "VALUE": initiator_sap_user.strip().upper()})
+        container.append({"ELEMENT": "USERI", "VALUE": initiator_sap_user.strip().upper()})
+    if initiator_sap_pwd:
+        container.append({"ELEMENT": "PWDI", "VALUE": initiator_sap_pwd})
 
     kwargs = dict(
         OBJECT_TYPE=settings.SAP_WF_OBJECT_TYPE,
@@ -106,14 +110,17 @@ def raise_parking_event(sap, objkey: str, doc_number: str,
     if initiator_sap_user:
         kwargs["USER"] = initiator_sap_user.strip().upper()
 
-    # Diagnostic: exactly what VIM sends to SAP (no secrets here — container holds
-    # objkey, scenario, initiator id/email). Lets us confirm ZWF_LOGIN et al went.
-    # Logged at WARNING on purpose so it shows at the LAN box's default log level
-    # without --log-level info; revert to debug/remove once the flow is verified.
+    # Diagnostic: exactly what VIM sends to SAP. PWDI (the initiator's SAP
+    # password) is masked — never log it. Logged at WARNING on purpose so it
+    # shows at the LAN box's default log level without --log-level info; revert
+    # to debug/remove once the flow is verified.
+    safe_container = {
+        r["ELEMENT"]: ("***" if r["ELEMENT"] == "PWDI" else r["VALUE"]) for r in container
+    }
     logger.warning(
         "[wf-diag] SAP_WAPI_CREATE_EVENT %s.%s objkey=%s USER=%s container=%s",
         settings.SAP_WF_OBJECT_TYPE, event, objkey, kwargs.get("USER", "(none)"),
-        {r["ELEMENT"]: r["VALUE"] for r in container},
+        safe_container,
     )
 
     result = sap.call("SAP_WAPI_CREATE_EVENT", **kwargs)

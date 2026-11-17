@@ -28,6 +28,7 @@ from app.models.internal_user import InternalUser
 from app.security import get_current_internal_user, require_admin
 from app.routers.role_permissions import role_labels, humanize_role
 from app.services.duplicate_detection import duplicate_block_message, find_key_duplicates
+from app.services.sap_credentials import decrypt_sap_password
 from app.services.invoice_line_rules import (
     find_zero_quantity_goods,
     route_invoice_lines,
@@ -1293,6 +1294,9 @@ async def post_invoice_to_sap_endpoint(
             workflow=settings.SAP_WORKFLOW_ENABLED,
             initiator_sap_user=(user.sap_username or ""),
             initiator_email=(user.email or ""),
+            # The MIR7 workflow authenticates the initiator via USERI/PWDI, so it
+            # needs this user's SAP password (decrypted from the stored token).
+            initiator_sap_pwd=decrypt_sap_password(user.sap_password_enc),
         )
     except Exception:
         logger.exception("SAP posting call failed for invoice %s", invoice.id)

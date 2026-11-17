@@ -75,6 +75,7 @@ def post_invoice_to_sap(
     workflow: bool = False,
     initiator_sap_user: str = "",
     initiator_email: str = "",
+    initiator_sap_pwd: str = "",
 ) -> dict:
     """
     Post a vendor invoice to SAP via BAPI_INCOMINGINVOICE_CREATE1.
@@ -282,7 +283,8 @@ def post_invoice_to_sap(
             objkey = build_objkey(company_code, doc_number, fiscal_year)
             wf = raise_parking_event(sap, objkey, doc_number,
                                      initiator_sap_user=initiator_sap_user,
-                                     initiator_email=initiator_email)
+                                     initiator_email=initiator_email,
+                                     initiator_sap_pwd=initiator_sap_pwd)
             wf["objkey"] = objkey
             if not wf["ok"]:
                 sap.call("BAPI_TRANSACTION_ROLLBACK")
