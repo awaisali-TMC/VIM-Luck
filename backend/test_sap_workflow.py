@@ -1,0 +1,321 @@
+"""SAP parking workflow (Lucky Cement) — park + event in one LUW, status read-back.
+
+What it proves, on the fixture SAP, offline (no SAP, no Gemini, no network):
+- with SAP_WORKFLOW_ENABLED off, parking is exactly what it was (no event call);
+- with it on, parking raises SAP_WAPI_CREATE_EVENT (ZMIR7_PARK, COMMIT_WORK ' ',
+  OBJKEY = company code + document + year) before the single commit;
+- a refused event (no event name configured, or no approval hierarchy for the
+  initiator) rolls the park back: nothing is left parked in SAP or in VIM;
+- the status read from ZMIR7_WF_LOG / ZMIR7_ERROR_LOG drives VIM: BLK in
+  approval, APP + posted document → "posted", APP + error → stays parked with
+  the error, REJ → stays parked and can be unparked; BLK can't be unparked.
+
+Uses its own throwaway SQLite database, recreated on every run.
+
+    py -3 backend/test_sap_workflow.py
+"""
+
+import os
+import sys
+import tempfile
+import uuid
+
+sys.path.insert(0, os.path.dirname(__file__))
+
+# Must be set before app.config is imported (the engine is built at import time).
+SCRATCH = os.path.join(tempfile.gettempdir(), "sap_workflow_test.db")
+if os.path.exists(SCRATCH):
+    os.remove(SCRATCH)
+os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{SCRATCH}"
+os.environ["DEBUG"] = "true"
+os.environ["SAP_MODE"] = "fake"
+os.environ["GEMINI_API_KEY"] = ""
+
+from app.config import settings  # noqa: E402
+
+settings.DEBUG = True
+settings.SAP_MODE = "fake"
+settings.SAP_ENABLED = True
+settings.SAP_FAKE_DB_PATH = ""
+settings.SAP_WORKFLOW_ENABLED = False
+settings.SAP_WF_EVENT = ""
+settings.SAP_WF_POLL_SECONDS = 0          # the test drives refreshes itself
+
+from fastapi.testclient import TestClient  # noqa: E402
+
+import app.main as main  # noqa: E402
+from app.models.internal_user import InternalUser  # noqa: E402
+from app.security import get_current_principal, get_current_internal_user, Principal  # noqa: E402
+from app.services import sap_connector_fake as fake  # noqa: E402
+from app.services.sap_workflow import build_objkey  # noqa: E402
+
+PO = "4500009001"          # company code 1100, goods receipt in place — parks cleanly
+LINE = {"description": "Split AC Unit 1.5 Ton Inverter", "quantity": 20, "unit": "ST",
+        "unit_price": 185000, "amount": 3700000}
+_failures = []
+
+
+def expect(label, cond, extra=None):
+    print(f"  [{'PASS' if cond else '**FAIL**'}] {label}" + (f"  ({extra})" if (extra is not None and not cond) else ""))
+    if not cond:
+        _failures.append(label)
+
+
+# ── spy on what reaches "SAP" ────────────────────────────────────────────────
+
+_calls = []
+_real_call = fake.SAPConnectorFake.call
+
+
+def _spy(self, function_name, **kwargs):
+    _calls.append((function_name, kwargs))
+    return _real_call(self, function_name, **kwargs)
+
+
+fake.SAPConnectorFake.call = _spy
+
+
+def _names():
+    return [n for n, _ in _calls]
+
+
+def _rbkp_count():
+    return fake._store().execute("SELECT count(*) AS n FROM RBKP").fetchone()["n"]
+
+
+# ── helpers over HTTP ────────────────────────────────────────────────────────
+
+_po_id = None
+
+
+def _po(client):
+    global _po_id
+    if _po_id is None:
+        r = client.post(f"/api/sap/pos/{PO}/sync")
+        expect(f"sync PO {PO} -> 200 (got {r.status_code})", r.status_code == 200, r.text[:160])
+        _po_id = r.json().get("po_id") or r.json().get("id")
+    return _po_id
+
+
+def _new_invoice(client):
+    r = client.post("/api/invoices/save", json={
+        "original_filename": "wf.pdf", "stored_filepath": "demo/wf", "mime_type": "application/pdf",
+        "invoice_number": f"WF-{uuid.uuid4().hex[:8].upper()}", "invoice_date": "2026-03-12",
+        "currency": "PKR", "document_type": "invoice", "status": "validated",
+        "source_type": "upload", "po_reference": PO, "supplier_ntn": "0912345-6",
+        "subtotal_amount": 3700000, "tax_amount": 0, "total_amount": 3700000,
+        "line_items": [dict(LINE)],
+    })
+    inv_id = r.json()["id"]
+    m = client.post(f"/api/po-matching/invoices/{inv_id}/match", json={"po_id": _po(client)})
+    expect(f"match invoice {inv_id} -> 200 (got {m.status_code})", m.status_code == 200, m.text[:160])
+    return inv_id
+
+
+def _park(client, inv_id):
+    _calls.clear()
+    return client.post(f"/api/sap/invoices/{inv_id}/post",
+                       json={"mode": "park", "tax_code": "I1", "layout": "goods",
+                             "posting_date": "20260312"})
+
+
+def _detail(client, inv_id):
+    return client.get(f"/api/invoices/{inv_id}").json()
+
+
+def _refresh(client, inv_id):
+    return client.post(f"/api/sap/invoices/{inv_id}/workflow/refresh")
+
+
+# ── 1. OBJKEY ────────────────────────────────────────────────────────────────
+
+def test_objkey():
+    print("\nUNIT: OBJKEY = company code(4) + document(10) + year(4)")
+    expect("the example from SAP's test data", build_objkey("1200", "5105660614", "2027") == "120051056606142027")
+    expect("document number is zero-padded", build_objkey("1100", "5105001", "2026") == "110000051050012026")
+    try:
+        build_objkey("11", "5105000001", "2026")
+        expect("a short company code is refused", False)
+    except ValueError:
+        expect("a short company code is refused", True)
+
+
+# ── 2. Workflow off: unchanged ───────────────────────────────────────────────
+
+def test_off(client):
+    print("\nOFF: parking is unchanged when SAP_WORKFLOW_ENABLED is false")
+    settings.SAP_WORKFLOW_ENABLED = False
+    inv = _new_invoice(client)
+    r = _park(client, inv)
+    expect(f"park -> 200 (got {r.status_code})", r.status_code == 200, r.text[:200])
+    expect("no workflow event was raised", "SAP_WAPI_CREATE_EVENT" not in _names(), _names())
+    d = _detail(client, inv)
+    expect("invoice is parked", d["status"] == "parked", d["status"])
+    expect("and carries no workflow key", not d.get("sap_wf_objkey"), d.get("sap_wf_objkey"))
+
+
+# ── 3. Refused events roll the park back ─────────────────────────────────────
+
+def test_refusals(client):
+    print("\nREFUSED: no event name configured -> nothing is parked")
+    settings.SAP_WORKFLOW_ENABLED = True
+    settings.SAP_WF_EVENT = ""
+    inv = _new_invoice(client)
+    before = _rbkp_count()
+    r = _park(client, inv)
+    expect(f"park -> 422 (got {r.status_code})", r.status_code == 422, r.text[:200])
+    expect("message names the missing event setting", "SAP_WF_EVENT" in r.text, r.text[:200])
+    expect("the BAPI ran, then was rolled back",
+           "BAPI_INCOMINGINVOICE_PARK" in _names() and "BAPI_TRANSACTION_ROLLBACK" in _names()
+           and "BAPI_TRANSACTION_COMMIT" not in _names(), _names())
+    expect("no document left in SAP (RBKP unchanged)", _rbkp_count() == before)
+    d = _detail(client, inv)
+    expect("invoice is not parked in VIM", d["status"] == "validated" and not d.get("sap_document_number"),
+           (d["status"], d.get("sap_document_number")))
+
+    print("\nREFUSED: no approval hierarchy for the initiator -> nothing is parked")
+    settings.SAP_WF_EVENT = "PARKED"
+    from app.services.sap_invoice_post import post_invoice_to_sap
+    before = _rbkp_count()
+    _calls.clear()
+    res = post_invoice_to_sap(
+        invoice_number=f"WF-{uuid.uuid4().hex[:6]}", invoice_date="2026-03-12", posting_date="2026-03-12",
+        vendor_number="0002000101", company_code="1100", currency="PKR", gross_amount=3700000,
+        tax_amount=0, po_number=PO, line_items=[{"po_item": 10, "amount": 3700000, "quantity": 20,
+                                                 "po_unit": "ST"}],
+        tax_code="I1", mode="park", workflow=True, initiator_sap_user="nohier")
+    expect("park is reported as failed", res["success"] is False, res.get("message"))
+    expect("with SAP's hierarchy message", "hierarchy" in res["message"].lower(), res["message"])
+    expect("the event was raised as the VIM user's SAP id",
+           any(n == "SAP_WAPI_CREATE_EVENT" and k.get("USER") == "NOHIER" for n, k in _calls))
+    expect("and the park rolled back (RBKP unchanged)", _rbkp_count() == before)
+    expect("no workflow row was left behind",
+           fake._store().execute("SELECT count(*) AS n FROM ZMIR7_WF_LOG").fetchone()["n"] == 0)
+
+
+# ── 4. The happy path and the outcomes ───────────────────────────────────────
+
+def _park_with_workflow(client, label):
+    settings.SAP_WORKFLOW_ENABLED = True
+    settings.SAP_WF_EVENT = "PARKED"
+    inv = _new_invoice(client)
+    r = _park(client, inv)
+    expect(f"{label}: park -> 200 (got {r.status_code})", r.status_code == 200, r.text[:200])
+    return inv, _detail(client, inv)
+
+
+def test_flow(client):
+    print("\nFLOW: park raises the event in the same LUW")
+    inv, d = _park_with_workflow(client, "approve case")
+    names = _names()
+    expect("order: park, event, commit",
+           [n for n in names if n in ("BAPI_INCOMINGINVOICE_PARK", "SAP_WAPI_CREATE_EVENT",
+                                      "BAPI_TRANSACTION_COMMIT")]
+           == ["BAPI_INCOMINGINVOICE_PARK", "SAP_WAPI_CREATE_EVENT", "BAPI_TRANSACTION_COMMIT"], names)
+    ev = next(k for n, k in _calls if n == "SAP_WAPI_CREATE_EVENT")
+    objkey = d.get("sap_wf_objkey") or ""
+    expect("OBJKEY = 1100 + document + year",
+           objkey == build_objkey("1100", d["sap_document_number"], d["sap_fiscal_year"]), objkey)
+    expect("event: object ZMIR7_PARK, our OBJKEY, event name from settings",
+           (ev["OBJECT_TYPE"], ev["OBJECT_KEY"], ev["EVENT"]) == ("ZMIR7_PARK", objkey, "PARKED"), ev)
+    expect("event does NOT commit by itself", ev["COMMIT_WORK"] == "", ev["COMMIT_WORK"])
+    container = {r["ELEMENT"]: r["VALUE"] for r in ev["input_tables"]["INPUT_CONTAINER"]}
+    expect("container carries OBJKEY, D_NO, LEVEL, TOTALAPP, SCENARIO_CHAR, INIEMAIL",
+           container.get("OBJKEY") == objkey and container.get("D_NO") == d["sap_document_number"].zfill(10)
+           and {"LEVEL", "TOTALAPP", "SCENARIO_CHAR"} <= set(container)
+           and container.get("INIEMAIL") == "purchaser@lucky.test", container)
+    expect("without a personal SAP id, no USER is sent (TMC_VIM raises it)", "USER" not in ev, ev.get("USER"))
+
+    r = _refresh(client, inv)
+    expect(f"refresh -> 200 (got {r.status_code})", r.status_code == 200, r.text[:200])
+    expect("SAP says: in approval (BLK)", r.json().get("sap_wf_status") == "BLK", r.json())
+    expect("label reads 'In SAP approval'", r.json().get("sap_wf_label") == "In SAP approval", r.json())
+
+    u = client.post(f"/api/sap/invoices/{inv}/unpark")
+    expect(f"unpark during approval -> 409 (got {u.status_code})", u.status_code == 409, u.text[:200])
+
+    print("\nAPPROVED: SAP posts it, VIM follows")
+    fake.decide_workflow(objkey, approve=True)
+    r = _refresh(client, inv).json()
+    expect("status APP with the posted document", r["sap_wf_status"] == "APP"
+           and r["sap_wf_posted_doc"] == d["sap_document_number"], r)
+    d2 = _detail(client, inv)
+    expect("invoice is now POSTED in VIM", d2["status"] == "posted" and d2["sap_doc_status"] == "posted",
+           (d2["status"], d2["sap_doc_status"]))
+
+    print("\nAPPROVED BUT POSTING FAILED: stays parked, shows SAP's error")
+    inv, d = _park_with_workflow(client, "posting-error case")
+    fake.decide_workflow(d["sap_wf_objkey"], approve=True, error="Posting period 03 2026 is not open")
+    r = _refresh(client, inv).json()
+    expect("APP, no posted document, error text", r["sap_wf_status"] == "APP" and not r["sap_wf_posted_doc"]
+           and "Posting period" in (r["sap_wf_message"] or ""), r)
+    expect("invoice is still parked", r["status"] == "parked", r["status"])
+
+    print("\nREJECTED: stays parked, can be unparked")
+    inv, d = _park_with_workflow(client, "reject case")
+    fake.decide_workflow(d["sap_wf_objkey"], approve=False)
+    r = _refresh(client, inv).json()
+    expect("REJ, 'Rejected in SAP'", r["sap_wf_status"] == "REJ" and r["sap_wf_label"] == "Rejected in SAP", r)
+    expect("invoice is still parked", r["status"] == "parked", r["status"])
+    u = client.post(f"/api/sap/invoices/{inv}/unpark")
+    expect(f"unpark a rejected invoice -> 200 (got {u.status_code})", u.status_code == 200, u.text[:200])
+    d3 = _detail(client, inv)
+    expect("unparking clears the workflow fields", not d3.get("sap_wf_objkey") and not d3.get("sap_wf_status"),
+           (d3.get("sap_wf_objkey"), d3.get("sap_wf_status")))
+
+    r = _refresh(client, inv)
+    expect(f"refresh without a workflow -> 409 (got {r.status_code})", r.status_code == 409, r.text[:160])
+
+
+# ── 5. What the background poller picks up ───────────────────────────────────
+
+def test_poller_selection(client):
+    print("\nPOLLER: only workflows that can still change are re-read")
+    import asyncio
+    from app.database import async_session
+    from app.services.sap_workflow import due_for_refresh, refresh_invoices
+
+    # Invoices so far: 1 parked without workflow, 2 refused, 3 posted by SAP,
+    # 4 approved but SAP's posting failed, 5 rejected then unparked.
+    waiting, d = _park_with_workflow(client, "poller case")    # BLK, never read
+
+    async def run():
+        async with async_session() as db:
+            due = {i.id for i in await due_for_refresh(db)}
+            expect("a fresh workflow (never read) is due", waiting in due, due)
+            expect("approved-but-not-posted (4) is due", 4 in due, due)
+            expect("no workflow / refused / posted / unparked (1, 2, 3, 5) are not",
+                   not ({1, 2, 3, 5} & due), due)
+            fake.decide_workflow(d["sap_wf_objkey"], approve=True)
+            rows = await due_for_refresh(db)
+            await refresh_invoices(db, rows)            # what one poller round does
+        async with async_session() as db:
+            due = {i.id for i in await due_for_refresh(db)}
+            expect("after a round, the now-posted invoice drops out", waiting not in due, due)
+
+    asyncio.run(run())
+    expect("and VIM shows it posted", _detail(client, waiting)["status"] == "posted",
+           _detail(client, waiting)["status"])
+
+
+if __name__ == "__main__":
+    test_objkey()
+
+    main.app.dependency_overrides[get_current_principal] = lambda: Principal(
+        kind="internal", id=1, role="admin")
+    main.app.dependency_overrides[get_current_internal_user] = lambda: InternalUser(
+        id=1, email="purchaser@lucky.test", display_name="Purchaser",
+        password_hash="x", role="ap_operator", is_active=1)
+
+    with TestClient(main.app) as client:
+        test_off(client)
+        test_refusals(client)
+        test_flow(client)
+        test_poller_selection(client)
+
+    print("\n" + "=" * 60)
+    if _failures:
+        print(f"RESULT: {len(_failures)} FAILED -> {_failures}")
+        sys.exit(1)
+    print("RESULT: ALL SAP WORKFLOW TESTS PASSED")
+    print("=" * 60)

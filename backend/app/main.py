@@ -1,4 +1,3 @@
-import base64
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -40,14 +39,6 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Set Google Cloud credentials — support both file path (local) and base64 JSON (cloud)
-    if settings.GCP_CREDENTIALS_JSON:
-        creds_path = "/tmp/service-account-key.json"
-        with open(creds_path, "w") as f:
-            f.write(base64.b64decode(settings.GCP_CREDENTIALS_JSON).decode("utf-8"))
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = creds_path
-    else:
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = settings.GOOGLE_APPLICATION_CREDENTIALS
     await init_db()
     await run_migrations()
 
@@ -191,10 +182,14 @@ async def lifespan(app: FastAPI):
 
     # Start the serial product-matching queue worker
     await start_matching_queue()
+    # SAP approval-workflow status poller (no-op unless SAP_WORKFLOW_ENABLED)
+    from app.services.sap_workflow import start_workflow_poller, stop_workflow_poller
+    start_workflow_poller()
 
     yield
 
-    # Graceful shutdown: stop the worker
+    # Graceful shutdown: stop the workers
+    await stop_workflow_poller()
     await stop_matching_queue()
 
 

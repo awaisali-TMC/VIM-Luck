@@ -1,9 +1,79 @@
-# Session handover — 2026-11-04
+# Session handover — 2026-11-05
 
 Handover from Claude Code sessions on this machine (`D:\VIM\VIM-Luck`). Read
 `CLAUDE.md` and `CONTEXT.md` first; this file records only what these sessions did and
 what is still open. (`HANDOFF.md` is the separate product feature-status doc.)
 Newest session first; §1–§5 below are from session 1 and are still accurate.
+
+## 2026-11-16: dev-shahzaib merged, pushed, and deployed to Cloud Run (`52e90b9`)
+
+- **Merged into `main` and pushed:** `origin/dev-shahzaib` (14 commits: Inbox filters/sort,
+  PO-match GRN type-ahead, per-user SAP login, submit parks straight to SAP, extraction
+  tweaks) and `origin/main`'s `b57c810` (Cloud deploy machinery removed). No conflicts.
+  All 6 offline suites pass, and `npm run build` is OK.
+- **Deployed to Cloud Run at the user's request,** although `CONTEXT.md` §3 says the LAN server is
+  now the deploy target. API `lucky-cement-vim-api-00006-slx`, web `lucky-cement-vim-web-00008-lwm`,
+  both image tag `52e90b9`. The rollback targets are API `00005-qhw` and web `00007-z96`.
+- **How the deploy was built:** `cloudbuild.yaml` is no longer in the repo. It was restored from
+  `b57c810^` into a `git archive HEAD` export in the session scratchpad and submitted from there,
+  so no local `.env` or `node_modules` was uploaded.
+- **gcloud on this machine:** a portable CLI at
+  `%LOCALAPPDATA%\Programs\google-cloud-sdk` (user PATH), signed in as shahzaib.moin@.
+- **Live checks:** the portal loads, its bundle targets the `…527930147362.us-central1.run.app`
+  API, the API answers 401 without a token, and CORS passes. A logged-in run-through was not done.
+- **Open:**
+  - The LAN server has not been updated. Its address is unknown here, and `192.168.15.10`
+    (from `CORS_ORIGINS`) did not answer on 22/8000/5173 from this network. On that box run
+    `git pull`, `backend/.venv/bin/pip install -r backend/requirements.txt` (the new
+    `cryptography` dependency), then restart `./start-lan.sh`.
+  - `SAP_CRED_KEY` is unset on both. Set it before users save per-user SAP passwords.
+  - A key `~/.ssh/vim_luck_lan` was generated for LAN access. Its public half was not
+    installed anywhere yet.
+
+## 2026-11-05: "View" showed nothing in the local preview (committed `34472b5`, NOT pushed or deployed)
+
+**Push and deploy are blocked by the network here.** The office firewall (a Fortinet FortiGate,
+`CN=FG4H1FT923900717`) inspects HTTPS and re-signs certificates with its own CA, which Windows does
+not trust. As a result, `git push` and every `gcloud` call fail with `SEC_E_UNTRUSTED_ROOT`. Run
+these from a network without that inspection, or after IT trusts the Fortinet CA or exempts
+`github.com` and `*.googleapis.com`. Do not turn off certificate checks.
+
+1. `git push origin main`
+2. `gcloud builds submit --config=cloudbuild.yaml --project=tmc-presales-pocs --substitutions=_TAG=34472b5`
+3. `gcloud run deploy lucky-cement-vim-web --image=us-central1-docker.pkg.dev/tmc-presales-pocs/presales-lucky-cement-vim/lucky-cement-vim-web:34472b5 --region=us-central1 --project=tmc-presales-pocs`
+
+Only the web service changes; the API image is unchanged. The rollback target is
+`lucky-cement-vim-web-00006-jcj`.
+
+**Cause:** the Claude app's preview pane blocks new tabs, so `window.open` returned `null` and
+"View" fell back to a download, which the pane never shows. Any browser that blocks the popup
+behaved the same way: View quietly turned into a download.
+
+**Fix:** when the new tab is blocked, View now opens the file in a viewer on the page instead.
+Normal browsers still get the new tab, and Download is unchanged.
+
+| File | Change |
+|---|---|
+| `frontend/src/components/common/DocumentViewer.jsx` | New. Built on the existing `Modal`: PDF in an `<iframe>`, JPEG/PNG as `<img>`, anything else (TIFF) a "can't be shown" note; Close and Download buttons; Esc closes; the object URL is freed on close |
+| `frontend/src/utils/invoiceDocument.js` | `showOrSaveBlob` split into `saveBlob` (download) and `viewBlob` (new tab, else sends the `einv:view-document` event the viewer listens for) |
+| `frontend/src/App.jsx` | Mounts `<DocumentViewer />` once for the internal portal |
+| `frontend/src/pages/ExtractionResultsPage.jsx` | Review-page "View File" uses `viewBlob` |
+
+**Verified in the pane** (`localhost:5173`, admin, invoice #1):
+- Detail-page View shows the PDF in the viewer (screenshot). The viewer's Download saves `INV-DOC-0001.pdf`.
+- Close removes the viewer and frees the URL. Esc closes too.
+- Inbox-row View opens the viewer without opening the row.
+- A PNG renders, and a TIFF shows the note.
+- With a stubbed popup that is allowed, View still goes to the new tab.
+- `npm run build` OK. The new files lint clean; the 2 lint errors in `ExtractionResultsPage.jsx` are old.
+
+**Not covered:** the supplier portal has no viewer mounted. It has no View button today.
+
+**Correction to the note below:** the pane does render PDFs inside an `<iframe>`. It only blocks
+new tabs and top-level `blob:` navigation.
+
+**Also why a file can be missing locally:** invoice #2 (`LOCAL-SUP-0001`) has no stored file
+(`po-flip`), so it shows "—". New local uploads fail until `GEMINI_API_KEY` is set in `backend\.env`.
 
 ## Pulled 2026-11-04: supplier demo OTP moved into the database
 
@@ -55,7 +125,8 @@ their own download in `AttachmentsCard` / `routers/attachments.py`.)
 uses the same `ExtractionResultsPage.jsx`). A button next to "Raw Output" opens the uploaded file
 from browser memory (`URL.createObjectURL` on the dropped `File`), with no server request, so users can
 check the extracted fields against the document before saving. It is hidden for email-inbox
-reviews, which only carry a `{name, size}` stand-in. If a popup is blocked, it downloads instead.
+reviews, which only carry a `{name, size}` stand-in. If a popup is blocked, it opens in the in-page
+viewer (2026-11-05; it used to download instead).
 Checked in the pane with a stubbed upload response (the local Gemini key is empty): the button
 renders, and the click opens a `blob:` URL holding the exact PDF. Lint and build unchanged.
 

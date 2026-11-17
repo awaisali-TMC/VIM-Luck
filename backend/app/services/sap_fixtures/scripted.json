@@ -17,6 +17,13 @@
     "RFCHOST": "sap-fake"
   },
 
+  "workflow_errors": {
+    "_comment": "SAP_WAPI_CREATE_EVENT fails for these initiators (the VIM user's SAP id, sent as USER). Stands in for SAP's 'no approval hierarchy' refusal; the park is then rolled back.",
+    "users": {
+      "NOHIER": "No approval hierarchy is maintained for initiator NOHIER (scenario MIR7 Parked Invoice)"
+    }
+  },
+
   "park_errors": {
     "4500009002": [
       {

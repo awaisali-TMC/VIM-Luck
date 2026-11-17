@@ -25,13 +25,15 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = "sqlite+aiosqlite:///./invoices.db"
 
-    # Google Document AI
+    # Google Cloud — DEPRECATED / INERT. The Document AI extraction path and the
+    # GCP deploy pipeline were removed; no code reads these any more. They remain
+    # only so existing .env files that still list them keep loading (pydantic-
+    # settings forbids unknown keys). Remove these fields and the matching .env
+    # lines together, once every deployment's .env has dropped them.
     GCP_PROJECT_ID: str = ""
     GCP_LOCATION: str = "us"
     DOCAI_PROCESSOR_ID: str = ""
     GOOGLE_APPLICATION_CREDENTIALS: str = "./service-account-key.json"
-    # Base64-encoded service account JSON — used in cloud deployments (Render, etc.)
-    # If set, takes priority over GOOGLE_APPLICATION_CREDENTIALS file path
     GCP_CREDENTIALS_JSON: str = ""
 
     # Gemini AI
@@ -117,10 +119,33 @@ class Settings(BaseSettings):
     # undecryptable (users must re-enter them). See services/sap_credentials.py.
     SAP_CRED_KEY: str = ""
 
+    # ── SAP parking workflow (Lucky Cement, MIR7 → WS90000096) ──────────────
+    # When on, parking also raises the workflow event in the SAME SAP LUW, and
+    # commits only if the event was accepted — so an invoice is never left
+    # parked without its workflow (Naila, 2026-11-16: "if workflow initiation
+    # fails the invoice is not allowed to be parked"). SAP then approves and
+    # posts the invoice itself; VIM reads the outcome from ZMIR7_WF_LOG.
+    # Off by default: every other instance parks exactly as before.
+    SAP_WORKFLOW_ENABLED: bool = False
+    # SAP_WAPI_CREATE_EVENT arguments. The BOR object is ZMIR7_PARK (linked to
+    # WS90000096 in SWE2). The EVENT name is still to come from the ABAP team,
+    # so it has no default: parking refuses to run with the workflow on and no
+    # event set, rather than guessing a name that SAP would silently ignore.
+    SAP_WF_OBJECT_TYPE: str = "ZMIR7_PARK"
+    SAP_WF_EVENT: str = ""
+    # Workflow container values VIM supplies (MIR7_Parking_Workflow.md §2.2).
+    # SCENARIO_CHAR: the md says scenario 4, the 2026-11 meeting notes say 3 —
+    # the text value is what the container showed in SAP's own test data.
+    SAP_WF_SCENARIO: str = "MIR7 Parked Invoice"
+    SAP_WF_LEVEL: str = "01"
+    SAP_WF_TOTAL_APPROVALS: str = "01"
+    # Background status refresh for invoices waiting in the SAP workflow, in
+    # seconds. 0 turns it off (the per-invoice "Refresh" still works).
+    SAP_WF_POLL_SECONDS: int = 300
+
     # CORS — explicit allowlist (no wildcard). Override via env CORS_ORIGINS
     # (JSON list) to add/replace origins per environment.
     CORS_ORIGINS: list[str] = [
-        "https://einv-frontend-656805782370.asia-south1.run.app",
         "http://localhost:5173",
         "http://localhost:5174",
         "http://localhost:8081",

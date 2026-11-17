@@ -12,6 +12,7 @@ const FIELD_ORDER = [
   "purchase_order",
   "receiver_name",
   "receiver_address",
+  "receiver_tax_id",
   "currency",
   "net_amount",
   "subtotal",

@@ -96,6 +96,13 @@ async def run_migrations():
         "ALTER TABLE invoices ADD COLUMN sap_currency VARCHAR(10)",
         # Details-tab item text (SGTXT); header text (BKTXT) already exists
         "ALTER TABLE invoices ADD COLUMN sap_item_text VARCHAR(50)",
+        # SAP approval workflow (Lucky Cement, ZMIR7_PARK → WS90000096)
+        "ALTER TABLE invoices ADD COLUMN sap_wf_objkey VARCHAR(18)",
+        "ALTER TABLE invoices ADD COLUMN sap_wf_event_id VARCHAR(40)",
+        "ALTER TABLE invoices ADD COLUMN sap_wf_status VARCHAR(10)",
+        "ALTER TABLE invoices ADD COLUMN sap_wf_posted_doc VARCHAR(20)",
+        "ALTER TABLE invoices ADD COLUMN sap_wf_message VARCHAR(500)",
+        "ALTER TABLE invoices ADD COLUMN sap_wf_checked_at TIMESTAMP",
         # RBAC v2: per-page access level ("view" | "edit"); existing rows keep edit
         "ALTER TABLE role_permissions ADD COLUMN level VARCHAR(10) DEFAULT 'edit'",
         # SAP-backed supplier onboarding: vendor master link + account tax number
@@ -109,6 +116,8 @@ async def run_migrations():
         "ALTER TABLE invoices ADD COLUMN sap_vendor_number VARCHAR(20)",
         # SAP company code on the PO — part of the duplicate-invoice key.
         "ALTER TABLE purchase_orders ADD COLUMN company_code VARCHAR(10)",
+        # Buyer (receiver) NTN as printed on the invoice; empty when not shown.
+        "ALTER TABLE invoices ADD COLUMN receiver_ntn VARCHAR(50)",
         # Repair POs synced while the header total read EKKO RLWRT (0 for POs
         # without a release strategy): recompute from line values. Idempotent —
         # only touches rows whose stored total is still 0.

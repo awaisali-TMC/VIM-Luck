@@ -111,6 +111,7 @@ class InvoiceSaveRequest(BaseModel):
     supplier_ntn: Optional[str] = None
     receiver_name: Optional[str] = None
     receiver_address: Optional[str] = None
+    receiver_ntn: Optional[str] = None
     subtotal_amount: Optional[float] = None
     tax_amount: Optional[float] = None
     total_amount: Optional[float] = None
@@ -168,6 +169,7 @@ class InvoiceUpdateRequest(BaseModel):
     supplier_ntn: Optional[str] = None
     receiver_name: Optional[str] = None
     receiver_address: Optional[str] = None
+    receiver_ntn: Optional[str] = None
     subtotal_amount: Optional[float] = None
     tax_amount: Optional[float] = None
     total_amount: Optional[float] = None
@@ -243,6 +245,7 @@ class InvoiceResponse(BaseModel):
     source_email_from: Optional[str] = None
     fbr_verification_status: Optional[str] = "not_verified"
     sap_doc_status: Optional[str] = None  # "parked" | "posted" — used to label the status
+    sap_wf_status: Optional[str] = None   # SAP approval workflow: INIT | BLK | APP | REJ
 
     model_config = {"from_attributes": True}
 
@@ -270,6 +273,7 @@ class InvoiceDetailResponse(BaseModel):
     # Receiver info
     receiver_name: Optional[str] = None
     receiver_address: Optional[str] = None
+    receiver_ntn: Optional[str] = None
     # Financial amounts
     subtotal_amount: Optional[float] = None
     tax_amount: Optional[float] = None
@@ -323,6 +327,12 @@ class InvoiceDetailResponse(BaseModel):
     sap_item_text: Optional[str] = None
     sap_currency: Optional[str] = None
     sap_vendor_number: Optional[str] = None              # resolved LIFNR
+    # SAP approval workflow (services/sap_workflow.py)
+    sap_wf_objkey: Optional[str] = None
+    sap_wf_status: Optional[str] = None       # INIT | BLK | APP | REJ
+    sap_wf_posted_doc: Optional[str] = None
+    sap_wf_message: Optional[str] = None
+    sap_wf_checked_at: Optional[datetime] = None
     parking_line_item_ids: Optional[list[int]] = None  # lines selected for parking (locked at submit)
     # PO matching
     matched_po_id: Optional[int] = None

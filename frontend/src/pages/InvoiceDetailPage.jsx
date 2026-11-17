@@ -16,6 +16,7 @@ import FBRVerificationBadge from "../components/common/FBRVerificationBadge";
 import WorkflowStepper from "../components/detail/WorkflowStepper";
 import InvoiceDetailFields from "../components/detail/InvoiceDetailFields";
 import SAPPostingCard from "../components/detail/SAPPostingCard";
+import SAPWorkflowStatus from "../components/detail/SAPWorkflowStatus";
 import WHTComplianceCard from "../components/detail/WHTComplianceCard";
 import LineItemsTable from "../components/upload/LineItemsTable";
 import SalesTaxCard from "../components/upload/SalesTaxCard";
@@ -293,7 +294,7 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
   const INLINE_FIELD_KEYS = [
     "invoice_number", "invoice_date", "due_date", "currency", "document_type",
     "po_reference", "supplier_name", "supplier_address", "supplier_ntn",
-    "receiver_name", "receiver_address", "subtotal_amount", "tax_amount",
+    "receiver_name", "receiver_address", "receiver_ntn", "subtotal_amount", "tax_amount",
     "gst_amount", "wht_amount", "total_amount", "bank_iban",
   ];
   const [inlineFields, setInlineFields] = useState({});
@@ -882,7 +883,10 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
 
           {/* Unpark from SAP — for parked invoices. Deletes the SAP doc, then
               soft-deletes here. (Posted docs must be reversed in SAP, not here.) */}
-          {!editing && canEditInvoice && invoice.sap_document_number && invoice.sap_doc_status !== "posted" && (
+          {/* Not while SAP's approval workflow is running on it or has approved it
+              (the backend refuses that too). */}
+          {!editing && canEditInvoice && invoice.sap_document_number && invoice.sap_doc_status !== "posted" &&
+            !["BLK", "APP"].includes(invoice.sap_wf_status) && (
             <Button variant="danger" size="sm" onClick={handleUnpark} disabled={actionBusy}>
               {actionBusy ? "Unparking..." : "Unpark from SAP"}
             </Button>
@@ -930,7 +934,9 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
             <div className="text-2xs text-success-dark mt-0.5">
               SAP Document: <strong>{sapPostResult.sap_document_number}</strong> / {sapPostResult.sap_fiscal_year}
               {sapPostResult.company_code && <> &middot; Company: {sapPostResult.company_code}</>}
-              {sapPostResult.sap_doc_status !== "posted" && <> &middot; awaiting posting in SAP (MIR7)</>}
+              {sapPostResult.sap_doc_status !== "posted" && (sapPostResult.sap_wf_objkey
+                ? <> &middot; SAP approval workflow started</>
+                : <> &middot; awaiting posting in SAP (MIR7)</>)}
             </div>
           </div>
           <button className="text-neutral-400 hover:text-neutral-600 text-sm" onClick={() => setSapPostResult(null)}>&times;</button>
@@ -957,12 +963,13 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
             <div>
               <div className="text-xs font-semibold text-emerald-800">
                 {invoice.sap_doc_status === "posted" ? "Posted to SAP" : "Parked in SAP"} &mdash; Document {invoice.sap_document_number}/{invoice.sap_fiscal_year}
-                {invoice.sap_doc_status !== "posted" && <span className="font-normal"> (awaiting posting in SAP)</span>}
+                {invoice.sap_doc_status !== "posted" && !invoice.sap_wf_objkey && <span className="font-normal"> (awaiting posting in SAP)</span>}
               </div>
               <div className="text-2xs text-emerald-600 mt-0.5">
                 {invoice.sap_company_code && <>Company Code: {invoice.sap_company_code} &middot; </>}
                 {invoice.sap_posted_at && <>Sent: {new Date(invoice.sap_posted_at).toLocaleString()}</>}
               </div>
+              <SAPWorkflowStatus invoice={invoice} onChanged={refetch} />
             </div>
           </div>
         </div>
