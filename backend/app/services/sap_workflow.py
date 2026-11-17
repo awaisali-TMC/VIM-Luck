@@ -108,8 +108,10 @@ def raise_parking_event(sap, objkey: str, doc_number: str,
 
     # Diagnostic: exactly what VIM sends to SAP (no secrets here — container holds
     # objkey, scenario, initiator id/email). Lets us confirm ZWF_LOGIN et al went.
-    logger.info(
-        "SAP_WAPI_CREATE_EVENT %s.%s objkey=%s USER=%s container=%s",
+    # Logged at WARNING on purpose so it shows at the LAN box's default log level
+    # without --log-level info; revert to debug/remove once the flow is verified.
+    logger.warning(
+        "[wf-diag] SAP_WAPI_CREATE_EVENT %s.%s objkey=%s USER=%s container=%s",
         settings.SAP_WF_OBJECT_TYPE, event, objkey, kwargs.get("USER", "(none)"),
         {r["ELEMENT"]: r["VALUE"] for r in container},
     )
