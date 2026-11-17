@@ -106,7 +106,11 @@ def raise_parking_event(sap, objkey: str, doc_number: str,
         OBJECT_KEY=objkey,
         EVENT=event,
         COMMIT_WORK="",          # the caller commits park + event together
-        input_tables={"INPUT_CONTAINER": container},
+        # SIMPLE_CONTAINER (SWR_CONT: ELEMENT + VALUE), not the legacy fixed-width
+        # INPUT_CONTAINER (SWCONT) — with the old one SAP received the values but
+        # the element names (keys) came through empty, so the workflow read none
+        # of USERI/SCENARIO/etc. SIMPLE_CONTAINER carries the names reliably.
+        input_tables={"SIMPLE_CONTAINER": container},
         tables=["MESSAGE_LINES"],
         output_params=["RETURN_CODE", "EVENT_ID"],
     )
