@@ -92,7 +92,12 @@ def raise_parking_event(sap, objkey: str, doc_number: str,
     # approver resolves to 00000000 (nobody). Element names confirmed with Lucky
     # Cement's SAP team (2026-11-17). SAP user ids are upper-case.
     if initiator_sap_user:
-        container.append({"ELEMENT": "USERI", "VALUE": initiator_sap_user.strip().upper()})
+        # The approver hierarchy matches USERI against the 8-digit personnel
+        # number (PERNR, e.g. 00004007), so zero-pad a numeric id; leave an
+        # alphanumeric SAP user id as-is. Confirmed with Lucky Cement's SAP team
+        # (2026-11-17): "4007" resolved to nobody, "00004007" resolves correctly.
+        _uid = initiator_sap_user.strip()
+        container.append({"ELEMENT": "USERI", "VALUE": _uid.zfill(8) if _uid.isdigit() else _uid.upper()})
     if initiator_sap_pwd:
         container.append({"ELEMENT": "PWDI", "VALUE": initiator_sap_pwd})
 
