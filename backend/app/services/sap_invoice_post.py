@@ -55,6 +55,21 @@ def _sap_date(iso_date: str | None, default: str | None = None) -> str:
     return fallback
 
 
+def build_header_text(text: str, sap_user: str = "") -> str:
+    """HEADER_TXT (RBKP-BKTXT, CHAR 25).
+
+    Lucky Cement's ABAP team reads the parking employee from the first 8
+    characters: "<8-digit PERNR> <text, cut to 16>", e.g. "00004007 einv-HP-2026-041".
+    Without a numeric PERNR (or with SAP_HEADER_TEXT_PERNR off) the text is
+    sent as before, cut to 25.
+    """
+    text = (text or "").strip()
+    uid = (sap_user or "").strip()
+    if settings.SAP_HEADER_TEXT_PERNR and uid.isdigit() and len(uid) <= 8:
+        return f"{uid.zfill(8)} {text}"[:25].rstrip()
+    return text[:25]
+
+
 def post_invoice_to_sap(
     invoice_number: str,
     invoice_date: str,
@@ -138,7 +153,8 @@ def post_invoice_to_sap(
             # TAX_AMOUNT").
             "CALC_TAX_IND": "",
             "REF_DOC_NO": invoice_number[:16] if invoice_number else "",
-            "HEADER_TXT": header_text[:25] if header_text else f"einv-{invoice_number}"[:25],  # Basic Data "Text" (BKTXT)
+            # Basic Data "Text" (BKTXT); Lucky Cement: PERNR in chars 1-8
+            "HEADER_TXT": build_header_text(header_text or f"einv-{invoice_number}", initiator_sap_user),
         }
         if item_text:
             header_data["ITEM_TEXT"] = item_text[:50]  # Details "Text" (SGTXT)
@@ -205,6 +221,8 @@ def post_invoice_to_sap(
             f"vendor={vendor_number}, amount={gross_amount} {currency}, "
             f"{len(item_data_rows)} line items"
         )
+        logger.warning("[park-diag] %s HEADER_TXT=%r (BKTXT; chars 1-8 = employee)",
+                       bapi_name, header_data["HEADER_TXT"])
 
         # ── Call BAPI ────────────────────────────────────────────
         result = sap.call(

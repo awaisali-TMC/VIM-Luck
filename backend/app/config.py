@@ -173,6 +173,11 @@ class Settings(BaseSettings):
     # EV_FLAG values that mean "hierarchy found", comma-separated. Confirmed by
     # Lucky's ABAP team (2026-11-19): 'X' = true, space = false.
     SAP_HIERARCHY_OK_FLAGS: str = "X"
+    # Lucky's ABAP team reads the parking employee from the invoice header text
+    # (HEADER_TXT -> RBKP-BKTXT, CHAR 25): characters 1-8 = the 8-digit PERNR,
+    # then a space, then the header text cut to 16 characters (agreed
+    # 2026-11-19). Only applied when the user's SAP id is a numeric PERNR.
+    SAP_HEADER_TEXT_PERNR: bool = True
 
     # CORS — explicit allowlist (no wildcard). Override via env CORS_ORIGINS
     # (JSON list) to add/replace origins per environment.

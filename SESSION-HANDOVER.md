@@ -5,6 +5,26 @@ Handover from Claude Code sessions on this machine (`D:\VIM\VIM-Luck`). Read
 what is still open. (`HANDOFF.md` is the separate product feature-status doc.)
 Newest session first; §1–§5 below are from session 1 and are still accurate.
 
+## 2026-11-19 (latest): employee ID in the park BAPI header text (BKTXT) — NOT committed yet
+
+**Why:** Lucky's ABAP team wants the parking employee in `BAPI_INCOMINGINVOICE_PARK`
+itself, in `HEADER_TXT` (→ `RBKP-BKTXT`, CHAR 25). Agreed format: **chars 1–8 = 8-digit
+PERNR, then a space, then the header text cut to 16**, e.g. `00004007 einv-HP-2026-041`.
+ABAP reads `BKTXT(8)`. The workflow event (`USERI` / `PWDI`) is unchanged.
+
+- `sap_invoice_post.build_header_text(text, sap_user)`: prefixes only when the user's
+  `sap_username` is numeric (≤8 digits, zero-padded); otherwise the old text (cut to 25).
+  Setting `SAP_HEADER_TEXT_PERNR` (default `true`). The stored `invoices.sap_header_text`
+  stays the user's text, without the prefix.
+- Log line `[park-diag] BAPI_INCOMINGINVOICE_PARK HEADER_TXT='…'` (WARNING) shows exactly
+  what was sent.
+- Fake SAP: `RBKP` gained `BKTXT` (the connector adds the column to an older
+  `SAP_FAKE_DB_PATH` file), so `py -3 backend/sap_se16.py RBKP` shows it.
+- Test: `backend/test_header_text_pernr.py` (offline). It passes, and so do `test_sap_fake`,
+  `test_sap_workflow` and `test_sap_employee`.
+- UI: hint under Header Text on the SAP posting card.
+- **Open:** verify on AUP that the ABAP exit reads the PERNR from `BKTXT(8)`.
+
 ## 2026-11-19 (later): SAP authorization error log for the Basis team
 
 **Why:** the user is getting SAP access from the Basis team and needs evidence when SAP

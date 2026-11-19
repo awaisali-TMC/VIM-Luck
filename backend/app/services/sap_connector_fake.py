@@ -308,8 +308,11 @@ class SAPConnectorFake:
         year = (header.get("PSTNG_DATE") or "")[:4] or "2026"
         # No commit — sap_invoice_post calls BAPI_TRANSACTION_COMMIT on success and
         # BAPI_TRANSACTION_ROLLBACK for mode="validate", exactly as against real SAP.
-        conn.execute("INSERT INTO RBKP (BELNR, GJAHR, RBSTAT) VALUES (?, ?, ?)",
-                     (doc, year, "5" if post else "A"))
+        # A fixture file seeded before BKTXT existed (SAP_FAKE_DB_PATH) lacks it.
+        if "BKTXT" not in {r[1] for r in conn.execute("PRAGMA table_info(RBKP)")}:
+            conn.execute("ALTER TABLE RBKP ADD COLUMN BKTXT TEXT")
+        conn.execute("INSERT INTO RBKP (BELNR, GJAHR, RBSTAT, BKTXT) VALUES (?, ?, ?, ?)",
+                     (doc, year, "5" if post else "A", header.get("HEADER_TXT") or ""))
 
         verb = "posted" if post else "parked"
         return _shape(
