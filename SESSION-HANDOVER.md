@@ -5,7 +5,7 @@ Handover from Claude Code sessions on this machine (`D:\VIM\VIM-Luck`). Read
 what is still open. (`HANDOFF.md` is the separate product feature-status doc.)
 Newest session first; §1–§5 below are from session 1 and are still accurate.
 
-## 2026-11-19 (night): INPUT_CONTAINER rows are ELEMENT + VALUE only (SWR_CONT) — NOT committed yet
+## 2026-11-19 (night): INPUT_CONTAINER rows are ELEMENT + VALUE only (SWR_CONT) — committed `12b923b`, pushed, WORKING on AUP
 
 After `ca2a6fa` the LAN box failed with "field 'TAB_INDEX' not found". On AUP,
 `SAP_WAPI_CREATE_EVENT`'s `INPUT_CONTAINER` is typed **SWR_CONT**, whose only fields are
@@ -14,8 +14,14 @@ two. The fake connector now also refuses any other row field, and `test_sap_work
 checks that each row has exactly `ELEMENT` and `VALUE`. All SAP tests pass. `41e3a51`
 (SAP's error text in the 502 reply) is pushed.
 
-**Open:** pull and restart on the LAN box, then park again. The ABAP team should check in
-the debugger that the elements arrive with their names.
+**Verified 2026-11-19 on the LAN box (live AUP):** after the pull and restart, the park plus
+workflow event goes through. The user confirmed "working".
+
+**Still open:**
+- The ABAP team should confirm `BKTXT(8)` carries the PERNR (`81cd7f6`).
+- Basis: `S_RFC` for `ZINI_VERIFY`.
+- Network: the `ztmc_login` host from 192.168.15.10.
+- `[wf-diag]` / `[park-diag]` log at WARNING; lower them once the flow is signed off.
 
 ## 2026-11-19 (evening): workflow event container back to INPUT_CONTAINER — committed `ca2a6fa`, pushed (superseded above: the SWCONT fields were wrong)
 
