@@ -1442,12 +1442,16 @@ async def post_invoice_to_sap_endpoint(
     except Exception as exc:
         logger.exception("SAP posting call failed for invoice %s", invoice.id)
         from app.services.sap_auth_log import log_rfc_failure
-        log_rfc_failure(f"invoice {invoice.id} {req.mode}", exc, actor=f"{user.id}:{user.email}",
-                        function="BAPI_INCOMINGINVOICE_PARK" if req.mode != "post" else "BAPI_INCOMINGINVOICE_CREATE1",
-                        po=po.po_number)
+        kind = log_rfc_failure(f"invoice {invoice.id} {req.mode}", exc, actor=f"{user.id}:{user.email}",
+                               function="BAPI_INCOMINGINVOICE_PARK" if req.mode != "post" else "BAPI_INCOMINGINVOICE_CREATE1",
+                               po=po.po_number)
+        # Show SAP's own error text in the reply (Network tab / toast), so a
+        # failure can be read without shell access to the server log. RFC error
+        # texts carry no credentials; PWDI is never echoed by SAP.
+        reason = " ".join(f"{type(exc).__name__}: {exc}".split())[:400]
         raise HTTPException(
             status_code=502,
-            detail="SAP posting call failed — see server logs.",
+            detail=f"SAP posting call failed ({kind}) — {reason}",
         )
 
     # ── VALIDATE (dry run): return the outcome, never touch the DB ──
