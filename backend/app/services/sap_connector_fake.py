@@ -367,6 +367,12 @@ class SAPConnectorFake:
         discards both. RETURN_CODE 0 = event raised. Scripted failures stand in
         for "no approval hierarchy for this initiator" (scripted.json).
         """
+        # Like PyRFC (not the Windows ctypes path, which ignores it), refuse a
+        # table the FM does not have: on AUP the only container is INPUT_CONTAINER.
+        unknown = set(kwargs.get("input_tables") or {}) - {"INPUT_CONTAINER"}
+        if unknown:
+            raise RuntimeError(f"RFC_INVALID_PARAMETER: field '{sorted(unknown)[0]}' not found "
+                               "(SAP_WAPI_CREATE_EVENT tables: INPUT_CONTAINER, MESSAGE_LINES, MESSAGE_STRUCT)")
         objkey = (kwargs.get("OBJECT_KEY") or "").strip()
         user = (kwargs.get("USER") or "").strip().upper()
         failures = (_scripts().get("workflow_errors") or {}).get("users") or {}

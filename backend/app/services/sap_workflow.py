@@ -63,6 +63,15 @@ def build_objkey(company_code: str, doc_number: str, fiscal_year: str) -> str:
     return f"{cc}{doc}{fy}"
 
 
+def _swcont_row(element: str, value) -> dict:
+    """One SWCONT row (INPUT_CONTAINER of SAP_WAPI_CREATE_EVENT): a single-value
+    (TAB_INDEX 000000) character element (TYPE C) with its real length, as
+    SWC_SET_ELEMENT would build it. ELEMENT is CHAR 32, VALUE CHAR 255."""
+    v = str(value if value is not None else "")[:255]
+    return {"ELEMENT": element.upper()[:32], "TAB_INDEX": "000000",
+            "ELEMLENGTH": f"{len(v):03d}", "TYPE": "C", "VALUE": v}
+
+
 def raise_parking_event(sap, objkey: str, doc_number: str,
                         initiator_sap_user: str = "", initiator_email: str = "",
                         initiator_sap_pwd: str = "") -> dict:
@@ -106,11 +115,14 @@ def raise_parking_event(sap, objkey: str, doc_number: str,
         OBJECT_KEY=objkey,
         EVENT=event,
         COMMIT_WORK="",          # the caller commits park + event together
-        # SIMPLE_CONTAINER (SWR_CONT: ELEMENT + VALUE), not the legacy fixed-width
-        # INPUT_CONTAINER (SWCONT) — with the old one SAP received the values but
-        # the element names (keys) came through empty, so the workflow read none
-        # of USERI/SCENARIO/etc. SIMPLE_CONTAINER carries the names reliably.
-        input_tables={"SIMPLE_CONTAINER": container},
+        # INPUT_CONTAINER (SWCONT) — on AUP, SAP_WAPI_CREATE_EVENT has no
+        # SIMPLE_CONTAINER table: PyRFC refused it with RFC_INVALID_PARAMETER
+        # "field 'SIMPLE_CONTAINER' not found" (2026-11-19, LAN box). The Windows
+        # ctypes path silently ignores an unknown table, which is how commit
+        # 9aecc4b looked fine there. Each row fills every SWCONT field — with only
+        # ELEMENT + VALUE, ELEMLENGTH stays 000 and SAP read the elements back
+        # without names, the reason 9aecc4b moved away from this table.
+        input_tables={"INPUT_CONTAINER": [_swcont_row(r["ELEMENT"], r["VALUE"]) for r in container]},
         tables=["MESSAGE_LINES"],
         output_params=["RETURN_CODE", "EVENT_ID"],
     )

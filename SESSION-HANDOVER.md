@@ -5,7 +5,27 @@ Handover from Claude Code sessions on this machine (`D:\VIM\VIM-Luck`). Read
 what is still open. (`HANDOFF.md` is the separate product feature-status doc.)
 Newest session first; §1–§5 below are from session 1 and are still accurate.
 
-## 2026-11-19 (latest): employee ID in the park BAPI header text (BKTXT) — NOT committed yet
+## 2026-11-19 (evening): workflow event container back to INPUT_CONTAINER — NOT committed yet
+
+**Why:** on AUP the park failed with 502. PyRFC refused `SAP_WAPI_CREATE_EVENT` with
+`RFC_INVALID_PARAMETER` "field 'SIMPLE_CONTAINER' not found". The live interface has no
+`SIMPLE_CONTAINER` (TABLES: `INPUT_CONTAINER`, `MESSAGE_LINES`, `MESSAGE_STRUCT`). The park was
+rolled back as designed, so nothing was left parked. Commit `9aecc4b` (made on Windows, where the
+ctypes path silently ignores an unknown table) had switched to it.
+
+- `sap_workflow.py`: the container is `INPUT_CONTAINER` again. Every row now fills all SWCONT
+  fields through `_swcont_row()`: `ELEMENT`, `TAB_INDEX=000000`, `ELEMLENGTH=len(VALUE)` (3 digits),
+  `TYPE=C`, `VALUE`. The old INPUT_CONTAINER rows sent only ELEMENT and VALUE, so `ELEMLENGTH` was
+  `000`. That is the likely reason SAP then read the elements without names.
+- The fake connector now refuses any table other than `INPUT_CONTAINER` on this FM, as PyRFC
+  does. `test_sap_workflow.py` checks the table name and the full SWCONT rows.
+- All of these pass: `test_sap_workflow`, `test_sap_fake`, `test_sap_employee` and
+  `test_header_text_pernr`.
+- **Open:** pull and restart on the LAN box. Then have the ABAP team check in the debugger that
+  `USERI`, `SCENARIO_CHAR` and the other elements arrive **with their names**. If they don't, the
+  fallback is to build the container on the ABAP side (`SWC_SET_ELEMENT`).
+
+## 2026-11-19 (latest): employee ID in the park BAPI header text (BKTXT) — committed `81cd7f6`, pushed
 
 **Why:** Lucky's ABAP team wants the parking employee in `BAPI_INCOMINGINVOICE_PARK`
 itself, in `HEADER_TXT` (→ `RBKP-BKTXT`, CHAR 25). Agreed format: **chars 1–8 = 8-digit
