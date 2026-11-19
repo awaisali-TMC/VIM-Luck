@@ -52,32 +52,43 @@ def _fake_login(pernr: str, password: str) -> dict:
             "message": "Employee not found"}
 
 
-def verify_employee_login(user_id: str, password: str) -> dict:
+def verify_employee_login(user_id: str, password: str, actor: str = "") -> dict:
     """Check an employee ID + password with Lucky's login service.
 
     Returns {ok, pernr, name, error_code, message, unreachable}. ``unreachable``
     is True when the service could not be asked at all (network, TLS, a non-JSON
     reply), so the caller can tell "wrong password" from "service down".
-    Never logs the password.
+    ``actor`` (the VIM user) is only for the log. Every attempt goes to the SAP
+    auth log (services/sap_auth_log.py); passwords never do.
     """
+    import time
+    from app.services.sap_auth_log import auth_logger, log_http_failure
+
     pernr = normalize_pernr(user_id)
     if not pernr or not password:
         return {"ok": False, "pernr": pernr, "name": "", "error_code": "MISSING",
                 "message": "Enter your SAP employee ID and password.", "unreachable": False}
 
     if is_fake():
-        return {**_fake_login(pernr, password), "unreachable": False}
+        r = {**_fake_login(pernr, password), "unreachable": False}
+        auth_logger().info("LOGIN-SERVICE %s pernr=%r vim_user=%r error_code=%r (fixture SAP)",
+                           "OK" if r["ok"] else "REFUSED", pernr, actor, r["error_code"])
+        return r
 
     import httpx
 
     url = (settings.SAP_LOGIN_API_URL or "").strip()
-    if not url:
-        return {"ok": False, "pernr": pernr, "name": "", "error_code": "NOT_CONFIGURED",
-                "message": "SAP_LOGIN_API_URL is not set.", "unreachable": True}
     basic_user = settings.SAP_LOGIN_API_USER or settings.SAP_USER
     basic_pwd = settings.SAP_LOGIN_API_PASSWORD or settings.SAP_PASSWD
+    ctx = dict(pernr=pernr, actor=actor, url=url, basic_user=basic_user,
+               basic_pwd_set=bool(basic_pwd))
+    if not url:
+        log_http_failure(**ctx, kind="NOT_CONFIGURED", message="SAP_LOGIN_API_URL is empty")
+        return {"ok": False, "pernr": pernr, "name": "", "error_code": "NOT_CONFIGURED",
+                "message": "SAP_LOGIN_API_URL is not set.", "unreachable": True}
     verify = settings.SAP_LOGIN_API_CA_BUNDLE.strip() or True
 
+    t0 = time.monotonic()
     try:
         with httpx.Client(timeout=settings.SAP_LOGIN_API_TIMEOUT_SECONDS, verify=verify) as client:
             resp = client.post(
@@ -87,10 +98,14 @@ def verify_employee_login(user_id: str, password: str) -> dict:
                 headers={"Accept": "application/json"},
             )
     except httpx.HTTPError as exc:
-        logger.warning("SAP login service unreachable for %s: %s", pernr, exc)
-        return {"ok": False, "pernr": pernr, "name": "", "error_code": "UNREACHABLE",
-                "message": f"Could not reach the SAP login service ({type(exc).__name__}).",
+        text = f"{exc} {exc.__cause__ or ''} {exc.__context__ or ''}".upper()
+        kind = ("TLS" if ("CERTIFICATE" in text or "SSL" in text) else
+                "TIMEOUT" if isinstance(exc, httpx.TimeoutException) else "CONNECT")
+        log_http_failure(**ctx, exc=exc, kind=kind, elapsed_ms=int((time.monotonic() - t0) * 1000))
+        return {"ok": False, "pernr": pernr, "name": "", "error_code": kind,
+                "message": f"Could not reach the SAP login service ({kind.lower()}: {type(exc).__name__}).",
                 "unreachable": True}
+    elapsed = int((time.monotonic() - t0) * 1000)
 
     try:
         body = resp.json()
@@ -99,8 +114,8 @@ def verify_employee_login(user_id: str, password: str) -> dict:
     if not isinstance(body, dict):
         # A 401 with an HTML page here means the Basic-auth (technical) login was
         # refused, not the employee's password.
-        logger.warning("SAP login service returned HTTP %s with no JSON body for %s",
-                       resp.status_code, pernr)
+        log_http_failure(**ctx, status=resp.status_code, headers=resp.headers, body=resp.text,
+                         elapsed_ms=elapsed)
         hint = (" — the service's Basic-auth login (SAP_LOGIN_API_USER) was refused"
                 if resp.status_code in (401, 403) else "")
         return {"ok": False, "pernr": pernr, "name": "", "error_code": f"HTTP_{resp.status_code}",
@@ -116,8 +131,13 @@ def verify_employee_login(user_id: str, password: str) -> dict:
         "message": str(body.get("message") or ("Login successful" if ok else "SAP login failed")),
         "unreachable": False,
     }
-    if not ok:
-        logger.info("SAP employee login refused for %s: %s", pernr, result["error_code"])
+    if ok:
+        auth_logger().info("LOGIN-SERVICE OK pernr=%r name=%r vim_user=%r http_status=%s elapsed_ms=%s",
+                           result["pernr"], result["name"], actor, resp.status_code, elapsed)
+    else:
+        log_http_failure(**ctx, status=resp.status_code, headers=resp.headers, json_body=True,
+                         error_code=result["error_code"], message=result["message"],
+                         elapsed_ms=elapsed)
     return result
 
 
@@ -162,15 +182,27 @@ def check_hierarchy(sap, pernr: str, amount, currency: str = "") -> dict:
     }
 
 
-def check_hierarchy_now(pernr: str, amount, currency: str = "") -> dict:
-    """Open a connection (as the technical user), run the check, close it."""
+def check_hierarchy_now(pernr: str, amount, currency: str = "", actor: str = "") -> dict:
+    """Open a connection (as the technical user), run the check, close it.
+    An RFC failure (logon, S_RFC, missing FM, ...) goes to the SAP auth log, then re-raises."""
+    from app.services.sap_auth_log import auth_logger, log_rfc_failure
     from app.services.sap_connector import SAPConnector
     sap = SAPConnector()
-    sap.connect()
     try:
-        return check_hierarchy(sap, pernr, amount, currency)
+        sap.connect()
+        result = check_hierarchy(sap, pernr, amount, currency)
+    except Exception as exc:
+        log_rfc_failure("hierarchy check", exc, actor=actor, function=settings.SAP_HIERARCHY_RFC,
+                        pernr=normalize_pernr(pernr), amount=amount, currency=currency)
+        raise
     finally:
         try:
             sap.disconnect()
         except Exception:
             pass
+    if not result["ok"]:
+        auth_logger().warning(
+            "HIERARCHY NOT FOUND function=%r pernr=%r amount=%s currency=%r EV_FLAG=%r ok_flags=%r vim_user=%r",
+            settings.SAP_HIERARCHY_RFC, result["pernr"], result["amount"], result["currency"],
+            result["flag"], settings.SAP_HIERARCHY_OK_FLAGS, actor)
+    return result

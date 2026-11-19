@@ -161,6 +161,10 @@ class Settings(BaseSettings):
     # trust store, which also honours SSL_CERT_FILE (set on the LAN box).
     SAP_LOGIN_API_CA_BUNDLE: str = ""
     SAP_LOGIN_API_TIMEOUT_SECONDS: float = 15.0
+    # SAP authorization log (services/sap_auth_log.py): every login-service and
+    # RFC auth failure, with a hint for Basis. Relative to the backend's working
+    # directory; empty = console only. Rotates at 5 MB, keeps 5 files.
+    SAP_AUTH_LOG_FILE: str = "logs/sap_auth.log"
     # ZINI_VERIFY(IV_PERNR, IV_WAERS, IV_AMOUNT) -> EV_FLAG: does an approval
     # hierarchy exist for this employee and amount? When on, it is shown on the
     # review screen and parking (and the submit dry run) refuses on a failed check.

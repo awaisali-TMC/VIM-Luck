@@ -5,7 +5,42 @@ Handover from Claude Code sessions on this machine (`D:\VIM\VIM-Luck`). Read
 what is still open. (`HANDOFF.md` is the separate product feature-status doc.)
 Newest session first; §1–§5 below are from session 1 and are still accurate.
 
-## 2026-11-19: SAP employee login + ZINI_VERIFY hierarchy check (branch `dev-shahzaib`, UNCOMMITTED)
+## 2026-11-19 (later): SAP authorization error log for the Basis team
+
+**Why:** the user is getting SAP access from the Basis team and needs evidence when SAP
+authorization fails.
+
+- **New `backend/app/services/sap_auth_log.py`:** a dedicated `sap_auth` logger.
+  - It writes timestamped lines to the console (the `start-lan.sh` output) and to
+    **`backend/logs/sap_auth.log`**, which rotates at 5 MB and keeps 5 files.
+    `SAP_AUTH_LOG_FILE` changes the path; empty means console only. `*.log` is git-ignored.
+  - The app has no logging config, which is why it has its own handlers.
+- **What gets logged:**
+  - **Login service (`ztmc_login`):** every attempt. Success is logged at INFO with the name.
+    Failures are logged at WARNING with:
+    - a `kind`: `EMPLOYEE_REFUSED`, `BASIC_AUTH_REFUSED`, `SERVICE_NOT_FOUND`, `SERVER_ERROR`,
+      `GATEWAY_ERROR`, `TLS`, `TIMEOUT`, `CONNECT` or `NOT_CONFIGURED`;
+    - the PERNR, the VIM user (`id:email`), the URL, the Basic-auth user **name**, and whether its
+      password is set;
+    - the HTTP status, elapsed ms, errorCode/message, selected response headers (`sap-server`,
+      `www-authenticate`, …) and a 600-character body excerpt;
+    - a `hint` naming the Basis transaction to check (SU01, SU53, S_ICF/S_SERVICE, SICF, STRUST,
+      ST22, SM21, SMICM).
+  - **RFC failures:** for `ZINI_VERIFY`, the per-user RFC login test (`POST /api/sap/users/{id}/login-test`)
+    and park/post. Each line has the kind (`RFC_LOGON_FAILURE`, `RFC_AUTHORIZATION_FAILURE` → S_RFC/SU53,
+    `FUNCTION_NOT_FOUND`, `RFC_COMMUNICATION_FAILURE`), PyRFC's key/msg_class/msg_number/msg_v1-4,
+    the RFC user, ashost/client/sysnr and the function.
+  - **`HIERARCHY NOT FOUND`:** logged with the PERNR, amount, currency, the raw `EV_FLAG` and the
+    configured OK flags (useful for confirming what `EV_FLAG` really returns).
+- **No passwords or cookies are ever logged.** The test checks this.
+- **Admin endpoint:** `GET /api/sap/auth-log?lines=200` returns the file's tail.
+- `test_sap_employee.py` now also covers the log: all pass. `test_sap_fake`, `test_sap_workflow`
+  and `test_duplicate_check` were re-run and pass.
+
+**To send Basis on the LAN box:** `tail -n 100 backend/logs/sap_auth.log`, or grep for `FAILURE`.
+Share the lines as they are; they contain no secrets.
+
+## 2026-11-19: SAP employee login + ZINI_VERIFY hierarchy check (committed `d542e2c`, pushed)
 
 **Requirement (Lucky Cement):** while uploading an invoice in Verity, (1) the user signs in
 with their SAP employee ID via Lucky's login service, and (2) SAP's RFC `ZINI_VERIFY` checks

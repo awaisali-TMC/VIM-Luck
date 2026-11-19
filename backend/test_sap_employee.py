@@ -17,6 +17,7 @@ Uses its own throwaway SQLite database, recreated on every run.
 """
 
 import json
+import logging
 import os
 import sys
 import tempfile
@@ -31,6 +32,11 @@ os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{SCRATCH}"
 os.environ["DEBUG"] = "true"
 os.environ["SAP_MODE"] = "fake"
 os.environ["GEMINI_API_KEY"] = ""
+AUTH_LOG = os.path.join(tempfile.gettempdir(), "sap_employee_test_auth.log")
+for _f in (AUTH_LOG,):
+    if os.path.exists(_f):
+        os.remove(_f)
+os.environ["SAP_AUTH_LOG_FILE"] = AUTH_LOG
 
 from app.config import settings  # noqa: E402
 
@@ -86,6 +92,8 @@ def test_login_client():
             return httpx.Response(401, text="<html>Logon failed</html>")
         if seen["body"]["paswrd"] == "down":
             raise httpx.ConnectError("no route", request=request)
+        if seen["body"]["paswrd"] == "tls":
+            raise httpx.ConnectError("[SSL: CERTIFICATE_VERIFY_FAILED] self-signed certificate", request=request)
         return httpx.Response(401, json={"success": False, "code": 401, "errorCode": "INVALID_PASSWORD",
                                          "message": "Verification key does not match",
                                          "userid": "", "name": ""})
@@ -117,11 +125,56 @@ def test_login_client():
 
         r = sap_employee.verify_employee_login("00004007", "down")
         expect("network error -> unreachable", not r["ok"] and r["unreachable"], r)
+
+        r = sap_employee.verify_employee_login("00004007", "tls", actor="1:admin@test")
+        expect("TLS error -> error_code TLS", r["error_code"] == "TLS", r)
     finally:
         httpx.Client = real_client
         settings.SAP_MODE, settings.SAP_LOGIN_API_USER, settings.SAP_LOGIN_API_PASSWORD = saved
 
     expect("PERNR padding", sap_employee.normalize_pernr(" 4007 ") == "00004007")
+
+
+def _log_text():
+    for h in logging.getLogger("sap_auth").handlers:
+        h.flush()
+    return open(AUTH_LOG, encoding="utf-8").read() if os.path.exists(AUTH_LOG) else ""
+
+
+def test_auth_log():
+    print("\nUNIT: SAP authorization log (for Basis)")
+    from app.services.sap_auth_log import log_rfc_failure
+    text = _log_text()
+    expect("log file written", bool(text), AUTH_LOG)
+    expect("successful login logged at INFO with the name", "LOGIN-SERVICE OK" in text and "WASEEM QURESHI" in text)
+    expect("wrong password -> EMPLOYEE_REFUSED + errorCode",
+           "kind='EMPLOYEE_REFUSED'" in text and "INVALID_PASSWORD" in text)
+    expect("HTML 401 -> BASIC_AUTH_REFUSED with an SU01/SU53 hint",
+           "kind='BASIC_AUTH_REFUSED'" in text and "SU53" in text)
+    expect("network -> CONNECT, certificate -> TLS (STRUST hint)",
+           "kind='CONNECT'" in text and "kind='TLS'" in text and "STRUST" in text)
+    expect("logs the technical user name and the VIM user",
+           "basic_user='TMC_VIM'" in text and "vim_user='1:admin@test'" in text)
+    for secret in ("tech-secret", "'123'", "basic-refused", "paswrd\": "):
+        expect(f"no password in the log ({secret})", secret not in text)
+
+    class FakeRfcError(Exception):
+        key = "RFC_AUTHORIZATION_FAILURE"
+        message = "User TMC_VIM has no RFC authorization for function module ZINI_VERIFY"
+        msg_class, msg_number = "00", "001"
+
+    kind = log_rfc_failure("hierarchy check", FakeRfcError(), actor="1:admin@test",
+                           function="ZINI_VERIFY", pernr="00009001")
+    text = _log_text()
+    expect("RFC auth failure classified", kind == "RFC_AUTHORIZATION_FAILURE", kind)
+    expect("RFC line carries key, message class, function and S_RFC hint",
+           "RFC FAILURE" in text and "msg_class='00'" in text and "function='ZINI_VERIFY'" in text
+           and "S_RFC" in text)
+
+    class Logon(Exception):
+        key = "RFC_LOGON_FAILURE"
+    expect("RFC logon failure classified",
+           log_rfc_failure("x", Logon("Name or password is incorrect")) == "RFC_LOGON_FAILURE")
 
 
 # ── 2. ZINI_VERIFY on the fixture connector ──────────────────────────────────
@@ -239,11 +292,17 @@ def test_http(client):
     inv = _new_invoice(client)
     r = _post(client, inv, "park")
     expect("amount over the employee's limit -> 422", r.status_code == 422, r.text[:200])
+    expect("...and logged as HIERARCHY NOT FOUND", "HIERARCHY NOT FOUND" in _log_text()
+           and "pernr='00009002'" in _log_text())
+
+    r = client.get("/api/sap/auth-log?lines=50")
+    expect("admin reads the log tail over HTTP", r.status_code == 200 and len(r.json()["lines"]) > 0, r.text[:200])
 
 
 if __name__ == "__main__":
     test_login_client()
     test_hierarchy_unit()
+    test_auth_log()
 
     async def _real_admin(db=Depends(get_db)):
         # The real row, in the request's own session, so a sign-in persists.

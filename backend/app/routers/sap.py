@@ -164,6 +164,9 @@ async def test_user_sap_login(
         logger.warning(
             "SAP login test failed for user %s (%s): %s", user_id, target.sap_username, exc
         )
+        from app.services.sap_auth_log import log_rfc_failure
+        log_rfc_failure("per-user RFC login test", exc, rfc_user=target.sap_username,
+                        actor=f"{target.id}:{target.email}", function="RFC_PING")
         return {
             "ok": False,
             "sap_username": target.sap_username,
@@ -217,7 +220,8 @@ async def get_employee_login(
     if not (user.sap_username or "").strip() or not user.sap_password_enc:
         return _employee_status(True, user)
     check = await asyncio.to_thread(
-        verify_employee_login, user.sap_username, decrypt_sap_password(user.sap_password_enc)
+        verify_employee_login, user.sap_username, decrypt_sap_password(user.sap_password_enc),
+        f"{user.id}:{user.email}",
     )
     return _employee_status(True, user, check)
 
@@ -240,7 +244,8 @@ async def employee_login(
 
     if not settings.SAP_EMPLOYEE_LOGIN_ENABLED:
         raise HTTPException(status_code=400, detail="SAP employee login is not enabled on this instance.")
-    check = await asyncio.to_thread(verify_employee_login, req.user_id, req.password)
+    check = await asyncio.to_thread(verify_employee_login, req.user_id, req.password,
+                                    f"{user.id}:{user.email}")
     if not check["ok"]:
         raise HTTPException(
             status_code=502 if check.get("unreachable") else 401,
@@ -266,7 +271,8 @@ async def _hierarchy_or_error(user: InternalUser, amount, currency: str) -> dict
         )
     _ensure_dll()
     try:
-        return await asyncio.to_thread(check_hierarchy_now, user.sap_username, amount, currency)
+        return await asyncio.to_thread(check_hierarchy_now, user.sap_username, amount, currency,
+                                       f"{user.id}:{user.email}")
     except Exception as exc:
         logger.exception("%s failed for %s", settings.SAP_HIERARCHY_RFC, user.sap_username)
         raise HTTPException(
@@ -274,6 +280,15 @@ async def _hierarchy_or_error(user: InternalUser, amount, currency: str) -> dict
             detail=f"SAP approval-hierarchy check ({settings.SAP_HIERARCHY_RFC}) failed: "
                    f"{_sap_error_detail(exc)}",
         )
+
+
+@router.get("/auth-log", dependencies=[Depends(require_admin)])
+async def sap_auth_log(lines: int = Query(200, ge=1, le=2000)):
+    """Admin: the tail of the SAP authorization log (services/sap_auth_log.py) —
+    login-service and RFC auth failures with a hint for the Basis team.
+    Contains no passwords."""
+    from app.services.sap_auth_log import log_file_path, tail
+    return {"file": log_file_path() or None, "lines": tail(lines)}
 
 
 @router.post("/hierarchy-check")
@@ -1424,8 +1439,12 @@ async def post_invoice_to_sap_endpoint(
             # needs this user's SAP password (decrypted from the stored token).
             initiator_sap_pwd=decrypt_sap_password(user.sap_password_enc),
         )
-    except Exception:
+    except Exception as exc:
         logger.exception("SAP posting call failed for invoice %s", invoice.id)
+        from app.services.sap_auth_log import log_rfc_failure
+        log_rfc_failure(f"invoice {invoice.id} {req.mode}", exc, actor=f"{user.id}:{user.email}",
+                        function="BAPI_INCOMINGINVOICE_PARK" if req.mode != "post" else "BAPI_INCOMINGINVOICE_CREATE1",
+                        po=po.po_number)
         raise HTTPException(
             status_code=502,
             detail="SAP posting call failed — see server logs.",
