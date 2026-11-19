@@ -11,6 +11,7 @@ import DocumentViewer from "./components/common/DocumentViewer";
 import AdminPermissionsPage from "./pages/AdminPermissionsPage";
 import LoginPage from "./pages/LoginPage";
 import UploadInvoicePage from "./pages/UploadInvoicePage";
+import SapEmployeeLogin from "./components/upload/SapEmployeeLogin";
 import ExtractionResultsPage from "./pages/ExtractionResultsPage";
 import InvoiceListPage from "./pages/InvoiceListPage";
 import InvoiceDetailPage from "./pages/InvoiceDetailPage";
@@ -80,11 +81,14 @@ function UploadRoute() {
       state: { newInvoiceIds: ids, uploadErrors: result.errors || [] },
     });
   };
+  // Lucky Cement: SAP employee sign-in first (a pass-through when it is off).
   return (
-    <UploadInvoicePage
-      onExtractionComplete={handleExtractionComplete}
-      onBatchComplete={handleBatchComplete}
-    />
+    <SapEmployeeLogin>
+      <UploadInvoicePage
+        onExtractionComplete={handleExtractionComplete}
+        onBatchComplete={handleBatchComplete}
+      />
+    </SapEmployeeLogin>
   );
 }
 
@@ -116,6 +120,7 @@ function ResultsRoute() {
       onSave={handleSave}
       onDiscard={handleDiscardResults}
       onLineItemOverridesChange={setLineItemOverrides}
+      checkSapHierarchy
     />
   );
 }

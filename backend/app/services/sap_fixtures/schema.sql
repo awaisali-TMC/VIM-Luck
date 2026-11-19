@@ -106,7 +106,8 @@ CREATE TABLE LFB1 (
 CREATE TABLE RBKP (
     BELNR TEXT,   -- invoice document number
     GJAHR TEXT,
-    RBSTAT TEXT   -- A = parked, 5 = posted
+    RBSTAT TEXT,  -- A = parked, 5 = posted
+    BKTXT TEXT    -- header text (HEADER_TXT); Lucky: chars 1-8 = PERNR
 );
 
 -- ── Configuration / master data ─────────────────────────────────────────────

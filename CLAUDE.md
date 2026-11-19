@@ -23,6 +23,7 @@ Three deployable apps live in one repo:
 | Cloud Run services | `lucky-cement-vim-api` (backend), `lucky-cement-vim-web` (frontend) |
 | Database | `lucky-cement-vim` on the **shared** Cloud SQL instance `presales-shared-pg` (Postgres 16), user `lucky-cement-vim-app` |
 | Posture | **Demo**: `DEBUG=true`, `SAP_ENABLED=true` + `SAP_MODE=fake` (fixture SAP, no real SAP anywhere), ~8.5M `atl_taxpayers` rows loaded |
+| Uploaded files | Bucket `gs://lucky-cement-vim-uploads`, mounted on the API as a Cloud Storage volume at `/mnt/uploads` (`UPLOAD_DIR=/mnt/uploads`), so invoice files survive new revisions — unlike the fixture SAP store. Added 2026-11-04; not yet in `CONTEXT.md` (`SESSION-HANDOVER.md` has the deploy record) |
 
 Full environment table, secrets inventory and outstanding items: `CONTEXT.md`.
 
@@ -36,6 +37,7 @@ py -3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000   # add --reload for de
 pip install -r requirements.txt                            # deps (no venv is committed)
 # Config: copy backend/.env.example to backend/.env. Its defaults are local dev (SQLite, SAP off);
 # to reproduce this instance's demo behaviour locally set DEBUG=true, SAP_ENABLED=true, SAP_MODE=fake.
+# Local AI extraction needs GEMINI_API_KEY in backend/.env.
 
 # Frontend (from frontend/) — runs on :5173
 npm install
@@ -46,6 +48,8 @@ npm run lint         # eslint (flat config in eslint.config.js)
 # Mobile (from mobile/)
 npx expo start --web --port 8085
 ```
+
+`start-lan.sh` (repo root) is a local-only helper for the office **Linux** LAN box, not for this Windows machine. It starts both servers from `backend/.venv` and sets `SSL_CERT_FILE` to the system CA bundle, because without it every Gemini call fails behind the Fortinet proxy (`CERTIFICATE_VERIFY_FAILED`). Laptops reach that box over a PuTTY SSH tunnel for ports 5173 and 8000.
 
 ### Tests
 
@@ -60,6 +64,8 @@ py -3 backend/test_role_labels.py           # role display-name renames, offline
 py -3 backend/test_invoice_document.py      # original invoice file view/download + path guard, offline; own temp DB + upload dir
 py -3 backend/test_duplicate_check.py       # duplicate-invoice key blocks approval/SAP, offline; fake SAP, own throwaway DB
 py -3 backend/test_sap_workflow.py          # SAP approval workflow: park+event in one LUW, ZMIR7 status read-back, offline; own throwaway DB
+py -3 backend/test_sap_employee.py          # SAP employee login (ztmc_login) + ZINI_VERIFY hierarchy gate, offline (mock HTTP, fake SAP); own DB
+py -3 backend/test_header_text_pernr.py     # park HEADER_TXT (BKTXT) = 8-digit PERNR + space + text(16), offline; fake SAP
 py -3 backend/test_receiver_ntn.py          # receiver NTN: extracted when printed, stored, shown, editable; own DB
 py -3 backend/test_po_regression.py         # PO-lane BASELINE: live SAP validate dry-run (needs SAP env)
 ```
@@ -187,6 +193,7 @@ Platform-split connector, both paths through a SAProuter: on Windows a direct **
 - **Supplier OTP**: there is no SMS gateway — a fixed, always-valid demo OTP stored in the app DB (`app_settings` row `supplier_demo_otp`, model `models/app_setting.py`, admin-only API `routers/app_settings.py` at `/api/admin/settings/supplier-demo-otp`) is the **only** way a supplier can log in on this instance. Admins set or disable it under **Admin → Suppliers**. It is not an env setting any more; don't put `SUPPLIER_DEMO_OTP` back in `.env` (pydantic-settings rejects unknown dotenv keys, so startup fails) (`CONTEXT.md` §5).
 - **Logins**: only the `admin` user is ever seeded (`INITIAL_ADMIN_EMAIL`, default `admin@tmcltd.com`). `ap_manager`, `ap_operator`, `finance_director` and every supplier must be created through the admin UI (**Admin → Users** / **Suppliers**) or `POST /api/admin/users` / `POST /api/admin/suppliers`. Because the seeded default workflow routes **AP Manager → Finance Director**, no invoice can clear approval until those two accounts exist. `content/VIM-PRD-CREDENTIALS.md` (git-ignored) is the credential sheet — infra secrets, the account list and the Secret Manager fetch commands. Any `@ogdcl.com` login you find in an inherited doc or in git history belongs to the OGDCL instance and does not exist here.
 - **Operational scripts** (in `backend/`, all `py -3`, all targeting `DATABASE_URL` — so a cloud run needs cloud-sql-proxy): `import_atl.py <file> --type IT|ST` re-imports FBR's Active Taxpayer List from its published multi-sheet Excel workbooks into `atl_taxpayers`, **replacing** the snapshot for that list type. `update_fbr_data.py`, `add_sap_posting_columns.py` and `update_file_paths.py` are one-off maintenance scripts, not part of any pipeline.
+- **Uploaded invoice files**: `save_uploaded_file()` (`services/file_storage.py`) writes `<32 hex>.<ext>` into `UPLOAD_DIR`. `GET /api/invoices/{id}/document` serves the original (`?download=true` for an attachment). The frontend fetches it as a Blob with the auth header, so no `?token=` ends up in a URL. `Invoice.stored_filepath` is **client-supplied** on `/api/invoices/save`, so never open it as a path: go through `resolve_stored_file()`, which keeps only a name `save_uploaded_file()` could have produced and looks it up inside `UPLOAD_DIR`. Without that, a supplier could point an invoice at `/proc/self/environ` (which holds the Cloud Run secrets) and download it. Supporting documents are a separate feature (`routers/attachments.py`).
 - **DB**: SQLite (`sqlite+aiosqlite`) in dev, Postgres-capable (`asyncpg` is a dependency) in prod via `DATABASE_URL`. All DB access is async.
 - **CORS**: explicit allowlist in `settings.CORS_ORIGINS` (no wildcard); override per-env via the `CORS_ORIGINS` env var (JSON list).
 - **Frontend styling**: Tailwind v4 with custom tokens. Design tokens live in `src/index.css` (CSS theme) and `src/styles/tokens.js` (JS palettes). The display brand comes from `brand.js` (a fixed string — see above).

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { listUsers, createUser, updateUser, resetUserPassword } from "../services/authService";
+import { listUsers, createUser, updateUser, resetUserPassword, testUserSapLogin } from "../services/authService";
 import { listRoles } from "../services/permissionService";
 import Card from "../components/common/Card";
 import Button from "../components/common/Button";
@@ -52,6 +52,7 @@ export default function AdminUsersPage() {
   });
   const [resetPw, setResetPw] = useState("");
   const [saving, setSaving] = useState(false);
+  const [sapTest, setSapTest] = useState(null);   // { ok, detail, mode } | "loading" | null
 
   const fetchUsers = useCallback(async () => {
     setLoading(true);
@@ -72,18 +73,33 @@ export default function AdminUsersPage() {
 
   const handleCreate = () => {
     setEditingUser(null);
+    setSapTest(null);
     setFormData({ email: "", display_name: "", password: "", role: "ap_operator", department: "", is_active: 1, sap_username: "", sap_password: "" });
     setShowModal(true);
   };
 
   const handleEdit = (user) => {
     setEditingUser(user);
+    setSapTest(null);
     setFormData({
       email: user.email, display_name: user.display_name, password: "",
       role: user.role, department: user.department || "", is_active: user.is_active,
       sap_username: user.sap_username || "", sap_password: "",
     });
     setShowModal(true);
+  };
+
+  // Verify the user's SAVED SAP login over RFC. Tests stored credentials, so the
+  // user must be saved first (and have an SAP username on record).
+  const handleTestSapLogin = async () => {
+    if (!editingUser) return;
+    setSapTest("loading");
+    try {
+      const res = await testUserSapLogin(editingUser.id);
+      setSapTest(res);
+    } catch (err) {
+      setSapTest({ ok: false, detail: err.response?.data?.detail || "SAP login test failed." });
+    }
   };
 
   const handleSave = async () => {
@@ -288,7 +304,7 @@ export default function AdminUsersPage() {
             <div className="border-t border-neutral-100 pt-3 mt-1">
               <div className="text-2xs font-semibold text-neutral-500 mb-2 uppercase tracking-wide">SAP Login (optional)</div>
               <p className="text-2xs text-neutral-400 mb-2">
-                Used to log in to SAP when this user parks or posts an invoice. Leave blank to use the system SAP account.
+                This user's own SAP employee ID + password, used to start the SAP workflow on their behalf. The invoice document itself is parked/posted by the system SAP account.
               </p>
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -314,6 +330,21 @@ export default function AdminUsersPage() {
                   />
                 </div>
               </div>
+              {editingUser && editingUser.sap_username && (
+                <div className="mt-2 flex items-center gap-2 flex-wrap">
+                  <Button type="button" variant="secondary" size="sm" onClick={handleTestSapLogin} disabled={sapTest === "loading"}>
+                    {sapTest === "loading" ? "Testing…" : "Test SAP login"}
+                  </Button>
+                  {sapTest && sapTest !== "loading" && (
+                    <span className={`text-2xs font-medium ${sapTest.ok ? "text-success-dark" : "text-danger-dark"}`}>
+                      {sapTest.ok
+                        ? `✓ SAP login OK${sapTest.mode === "fake" ? " (fake mode — no real RFC)" : ""}`
+                        : `✗ ${sapTest.detail || "SAP rejected this login."}`}
+                    </span>
+                  )}
+                  <span className="text-2xs text-neutral-400 w-full">Tests the saved SAP password — save the user first, then test.</span>
+                </div>
+              )}
             </div>
             {editingUser && (
               <div className="flex items-center gap-2">

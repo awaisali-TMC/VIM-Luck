@@ -224,6 +224,7 @@ class SAPConnectorFake:
             "BAPI_EXCHANGERATE_CREATEMULTIPLE": self._exchange_rate,
             "BAPI_EXCHANGERATE_CREATE": self._exchange_rate,
             "SAP_WAPI_CREATE_EVENT": self._create_event,
+            "ZINI_VERIFY": self._ini_verify,
         }.get(function_name)
 
         if handler is None:
@@ -307,8 +308,11 @@ class SAPConnectorFake:
         year = (header.get("PSTNG_DATE") or "")[:4] or "2026"
         # No commit — sap_invoice_post calls BAPI_TRANSACTION_COMMIT on success and
         # BAPI_TRANSACTION_ROLLBACK for mode="validate", exactly as against real SAP.
-        conn.execute("INSERT INTO RBKP (BELNR, GJAHR, RBSTAT) VALUES (?, ?, ?)",
-                     (doc, year, "5" if post else "A"))
+        # A fixture file seeded before BKTXT existed (SAP_FAKE_DB_PATH) lacks it.
+        if "BKTXT" not in {r[1] for r in conn.execute("PRAGMA table_info(RBKP)")}:
+            conn.execute("ALTER TABLE RBKP ADD COLUMN BKTXT TEXT")
+        conn.execute("INSERT INTO RBKP (BELNR, GJAHR, RBSTAT, BKTXT) VALUES (?, ?, ?, ?)",
+                     (doc, year, "5" if post else "A", header.get("HEADER_TXT") or ""))
 
         verb = "posted" if post else "parked"
         return _shape(
@@ -363,6 +367,18 @@ class SAPConnectorFake:
         discards both. RETURN_CODE 0 = event raised. Scripted failures stand in
         for "no approval hierarchy for this initiator" (scripted.json).
         """
+        # Like PyRFC (not the Windows ctypes path, which ignores it), refuse a
+        # table the FM does not have: on AUP the only container is INPUT_CONTAINER.
+        unknown = set(kwargs.get("input_tables") or {}) - {"INPUT_CONTAINER"}
+        if unknown:
+            raise RuntimeError(f"RFC_INVALID_PARAMETER: field '{sorted(unknown)[0]}' not found "
+                               "(SAP_WAPI_CREATE_EVENT tables: INPUT_CONTAINER, MESSAGE_LINES, MESSAGE_STRUCT)")
+        # ... and a row field SWR_CONT does not have (ELEMENT, VALUE only).
+        for row in (kwargs.get("input_tables") or {}).get("INPUT_CONTAINER") or []:
+            extra = set(row) - {"ELEMENT", "VALUE"}
+            if extra:
+                raise RuntimeError(f"RFC_INVALID_PARAMETER: field '{sorted(extra)[0]}' not found "
+                                   "(INPUT_CONTAINER is SWR_CONT: ELEMENT, VALUE)")
         objkey = (kwargs.get("OBJECT_KEY") or "").strip()
         user = (kwargs.get("USER") or "").strip().upper()
         failures = (_scripts().get("workflow_errors") or {}).get("users") or {}
@@ -379,6 +395,22 @@ class SAPConnectorFake:
                      (objkey,))
         return _shape({"MESSAGE_LINES": []},
                       {"RETURN_CODE": "0", "EVENT_ID": f"EVT{objkey[4:14]}"}, {}, kwargs)
+
+    def _ini_verify(self, kwargs) -> dict:
+        """ZINI_VERIFY — is there an approval hierarchy for this employee and
+        amount? EV_FLAG 'X' = yes, '' = no. Rules in scripted.json
+        ("hierarchy"): employees without one, and per-employee amount limits.
+        """
+        pernr = (kwargs.get("IV_PERNR") or "").strip()
+        try:
+            amount = float(kwargs.get("IV_AMOUNT") or 0)
+        except ValueError:
+            amount = 0.0
+        rules = _scripts().get("hierarchy") or {}
+        limit = (rules.get("limits") or {}).get(pernr)
+        ok = (pernr not in (rules.get("none") or [])
+              and (limit is None or amount <= float(limit)))
+        return _shape({}, {"EV_FLAG": "X" if ok else ""}, {}, kwargs)
 
     def _commit(self, kwargs) -> dict:
         _store().commit()

@@ -219,7 +219,12 @@ def test_flow(client):
     expect("event: object ZMIR7_PARK, our OBJKEY, event name from settings",
            (ev["OBJECT_TYPE"], ev["OBJECT_KEY"], ev["EVENT"]) == ("ZMIR7_PARK", objkey, "PARKED"), ev)
     expect("event does NOT commit by itself", ev["COMMIT_WORK"] == "", ev["COMMIT_WORK"])
-    container = {r["ELEMENT"]: r["VALUE"] for r in ev["input_tables"]["INPUT_CONTAINER"]}
+    rows = ev["input_tables"]["INPUT_CONTAINER"]
+    expect("event sends INPUT_CONTAINER (AUP has no SIMPLE_CONTAINER)",
+           "SIMPLE_CONTAINER" not in ev["input_tables"], list(ev["input_tables"]))
+    expect("every row is SWR_CONT: exactly ELEMENT + VALUE (AUP refuses TAB_INDEX etc.)",
+           all(set(r) == {"ELEMENT", "VALUE"} and r["ELEMENT"] for r in rows), rows)
+    container = {r["ELEMENT"]: r["VALUE"] for r in rows}
     expect("container carries OBJKEY, D_NO, LEVEL, TOTALAPP, SCENARIO_CHAR, INIEMAIL",
            container.get("OBJKEY") == objkey and container.get("D_NO") == d["sap_document_number"].zfill(10)
            and {"LEVEL", "TOTALAPP", "SCENARIO_CHAR"} <= set(container)

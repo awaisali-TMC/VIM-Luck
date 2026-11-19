@@ -11,7 +11,7 @@ import InvoiceInfoCard from "../components/upload/InvoiceInfoCard";
 import RawOutputViewer from "../components/upload/RawOutputViewer";
 import SalesTaxCard from "../components/upload/SalesTaxCard";
 import { verifyNTN } from "../services/fbrService";
-import { lookupSAPVendor } from "../services/sapService";
+import { lookupSAPVendor, checkSAPHierarchy } from "../services/sapService";
 import { viewBlob } from "../utils/invoiceDocument";
 
 // Field names that belong to the Supplier Information section
@@ -99,6 +99,51 @@ function buildTaxSummary(result) {
  *  - onSave: (status) => void
  *  - onDiscard: () => void  (goes back to upload)
  */
+/**
+ * Lucky Cement: does SAP have an approval hierarchy for the signed-in employee
+ * at this invoice's amount (ZINI_VERIFY)? Parking is refused without one, so
+ * say so here, before the invoice is saved. Renders nothing when the check is
+ * off on this instance.
+ */
+function SapHierarchyBanner({ amount, currency }) {
+  const [res, setRes] = useState({ state: "checking" });
+
+  useEffect(() => {
+    let alive = true;
+    checkSAPHierarchy(amount, currency)
+      .then((r) => alive && setRes(r.enabled ? { state: r.ok ? "ok" : "fail", ...r } : { state: "off" }))
+      .catch((err) => {
+        const d = err?.response?.data?.detail;
+        alive && setRes({ state: "error", message: typeof d === "string" ? d : d?.message || "Could not check the SAP approval hierarchy." });
+      });
+    return () => { alive = false; };
+  }, [amount, currency]);
+
+  if (res.state === "off") return null;
+  const amt = Number(amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  if (res.state === "checking") {
+    return (
+      <div className="bg-neutral-50 border border-neutral-100 rounded-md px-4 py-2.5 text-xs text-neutral-600">
+        Checking SAP approval hierarchy for {amt} {currency}…
+      </div>
+    );
+  }
+  const ok = res.state === "ok";
+  return (
+    <div className={`${ok ? "bg-success-bg border-success-base text-success-dark" : "bg-danger-bg border-danger-base text-danger-dark"} border rounded-md px-4 py-2.5 text-xs`}>
+      <strong>{ok ? "✓ SAP approval hierarchy found" : "SAP approval hierarchy check failed"}</strong>
+      <span className="ml-2">
+        {ok ? `Employee ${res.pernr} · ${amt} ${currency}` : res.message}
+      </span>
+      {!ok && res.state === "fail" && (
+        <div className="mt-1 text-2xs opacity-80">
+          You can still save this invoice, but it cannot be parked to SAP until a hierarchy exists for this amount.
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ExtractionResultsPage({
   extractionResult,
   file,
@@ -108,6 +153,7 @@ export default function ExtractionResultsPage({
   onSave,
   onDiscard,
   onLineItemOverridesChange,
+  checkSapHierarchy = false,   // internal portal only (suppliers have no SAP login)
 }) {
   const [rawDrawerOpen, setRawDrawerOpen] = useState(false);
 
@@ -256,6 +302,12 @@ export default function ExtractionResultsPage({
         onClose={() => setRawDrawerOpen(false)}
         data={extractionResult}
       />
+
+      {checkSapHierarchy && (() => {
+        const fv = (n) => extractionResult.fields?.find((f) => f.field_name === n)?.value;
+        const amount = parseFloat(String(fv("total_amount") || "").replace(/,/g, "")) || 0;
+        return <SapHierarchyBanner amount={amount} currency={(fv("currency") || "PKR").trim().toUpperCase()} />;
+      })()}
 
       {/* Items needing attention — anomalies detected during extraction */}
       <AttentionFlagsPanel flags={extractionResult.attention_flags} />

@@ -134,14 +134,50 @@ class Settings(BaseSettings):
     SAP_WF_OBJECT_TYPE: str = "ZMIR7_PARK"
     SAP_WF_EVENT: str = ""
     # Workflow container values VIM supplies (MIR7_Parking_Workflow.md §2.2).
-    # SCENARIO_CHAR: the md says scenario 4, the 2026-11 meeting notes say 3 —
-    # the text value is what the container showed in SAP's own test data.
-    SAP_WF_SCENARIO: str = "MIR7 Parked Invoice"
+    # SCENARIO_CHAR is the WF scenario the Approval Matrix keys on; Lucky Cement's
+    # SAP team confirmed it is "3" (2026-11-17). The workflow derives the Group
+    # Key itself from the invoice — VIM does not send it — but it needs the right
+    # scenario, or the approver resolves to 00000000 (nobody).
+    SAP_WF_SCENARIO: str = "3"
     SAP_WF_LEVEL: str = "01"
     SAP_WF_TOTAL_APPROVALS: str = "01"
     # Background status refresh for invoices waiting in the SAP workflow, in
     # seconds. 0 turns it off (the per-invoice "Refresh" still works).
     SAP_WF_POLL_SECONDS: int = 300
+
+    # ── SAP employee login + approval-hierarchy check (Lucky Cement) ─────────
+    # Before uploading, the user signs in with their SAP employee ID (PERNR) and
+    # password; Lucky's login service checks them (services/sap_employee.py) and
+    # they are stored as the user's sap_username / sap_password_enc, which the
+    # workflow event then sends as USERI / PWDI. Off by default.
+    SAP_EMPLOYEE_LOGIN_ENABLED: bool = False
+    # ICF service: POST {"userId": "<8-digit PERNR>", "paswrd": "<password>"}.
+    # Append ?sap-client=NNN here if the service needs it.
+    SAP_LOGIN_API_URL: str = "https://upgapp2023.lucky-cement.net/sap/bc/ztmc_login"
+    # The service also needs HTTP Basic auth. Empty = use SAP_USER / SAP_PASSWD.
+    SAP_LOGIN_API_USER: str = ""
+    SAP_LOGIN_API_PASSWORD: str = ""
+    # CA bundle (PEM path) for the service's TLS certificate. Empty = the default
+    # trust store, which also honours SSL_CERT_FILE (set on the LAN box).
+    SAP_LOGIN_API_CA_BUNDLE: str = ""
+    SAP_LOGIN_API_TIMEOUT_SECONDS: float = 15.0
+    # SAP authorization log (services/sap_auth_log.py): every login-service and
+    # RFC auth failure, with a hint for Basis. Relative to the backend's working
+    # directory; empty = console only. Rotates at 5 MB, keeps 5 files.
+    SAP_AUTH_LOG_FILE: str = "logs/sap_auth.log"
+    # ZINI_VERIFY(IV_PERNR, IV_WAERS, IV_AMOUNT) -> EV_FLAG: does an approval
+    # hierarchy exist for this employee and amount? When on, it is shown on the
+    # review screen and parking (and the submit dry run) refuses on a failed check.
+    SAP_HIERARCHY_CHECK_ENABLED: bool = False
+    SAP_HIERARCHY_RFC: str = "ZINI_VERIFY"
+    # EV_FLAG values that mean "hierarchy found", comma-separated. Confirmed by
+    # Lucky's ABAP team (2026-11-19): 'X' = true, space = false.
+    SAP_HIERARCHY_OK_FLAGS: str = "X"
+    # Lucky's ABAP team reads the parking employee from the invoice header text
+    # (HEADER_TXT -> RBKP-BKTXT, CHAR 25): characters 1-8 = the 8-digit PERNR,
+    # then a space, then the header text cut to 16 characters (agreed
+    # 2026-11-19). Only applied when the user's SAP id is a numeric PERNR.
+    SAP_HEADER_TEXT_PERNR: bool = True
 
     # CORS — explicit allowlist (no wildcard). Override via env CORS_ORIGINS
     # (JSON list) to add/replace origins per environment.

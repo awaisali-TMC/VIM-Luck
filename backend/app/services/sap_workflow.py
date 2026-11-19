@@ -63,8 +63,17 @@ def build_objkey(company_code: str, doc_number: str, fiscal_year: str) -> str:
     return f"{cc}{doc}{fy}"
 
 
+def _container_row(element: str, value) -> dict:
+    """One INPUT_CONTAINER row of SAP_WAPI_CREATE_EVENT. On AUP the table is
+    typed SWR_CONT, whose only fields are ELEMENT (CHAR 32) and VALUE (CHAR 255):
+    PyRFC refuses any other (TAB_INDEX / ELEMLENGTH / TYPE belong to the old
+    SWCONT and were rejected, "field 'TAB_INDEX' not found", 2026-11-19)."""
+    return {"ELEMENT": element.upper()[:32], "VALUE": str(value if value is not None else "")[:255]}
+
+
 def raise_parking_event(sap, objkey: str, doc_number: str,
-                        initiator_sap_user: str = "", initiator_email: str = "") -> dict:
+                        initiator_sap_user: str = "", initiator_email: str = "",
+                        initiator_sap_pwd: str = "") -> dict:
     """Raise the workflow event on an OPEN connection, without committing.
 
     The caller owns the LUW: it commits after a success and rolls back after a
@@ -85,13 +94,33 @@ def raise_parking_event(sap, objkey: str, doc_number: str,
     ]
     if initiator_email:
         container.append({"ELEMENT": "INIEMAIL", "VALUE": initiator_email})
+    # The MIR7 workflow (exit ZXM08U30 / ZWF_LOGIN) authenticates the initiator
+    # from the container: USERI = SAP user id, PWDI = that user's SAP password.
+    # Both come from the logged-in VIM user (Admin -> Users). Without them the
+    # approver resolves to 00000000 (nobody). Element names confirmed with Lucky
+    # Cement's SAP team (2026-11-17). SAP user ids are upper-case.
+    if initiator_sap_user:
+        # The approver hierarchy matches USERI against the 8-digit personnel
+        # number (PERNR, e.g. 00004007), so zero-pad a numeric id; leave an
+        # alphanumeric SAP user id as-is. Confirmed with Lucky Cement's SAP team
+        # (2026-11-17): "4007" resolved to nobody, "00004007" resolves correctly.
+        _uid = initiator_sap_user.strip()
+        container.append({"ELEMENT": "USERI", "VALUE": _uid.zfill(8) if _uid.isdigit() else _uid.upper()})
+    if initiator_sap_pwd:
+        container.append({"ELEMENT": "PWDI", "VALUE": initiator_sap_pwd})
 
     kwargs = dict(
         OBJECT_TYPE=settings.SAP_WF_OBJECT_TYPE,
         OBJECT_KEY=objkey,
         EVENT=event,
         COMMIT_WORK="",          # the caller commits park + event together
-        input_tables={"INPUT_CONTAINER": container},
+        # INPUT_CONTAINER, typed SWR_CONT (ELEMENT + VALUE) on AUP — the live
+        # interface (2026-11-19, LAN box): TABLES INPUT_CONTAINER, MESSAGE_LINES,
+        # MESSAGE_STRUCT. There is no SIMPLE_CONTAINER, and the rows take no
+        # SWCONT fields (TAB_INDEX etc.); PyRFC refuses both. Commit 9aecc4b used
+        # SIMPLE_CONTAINER, which only "worked" on Windows because the ctypes
+        # path silently ignores an unknown table or field.
+        input_tables={"INPUT_CONTAINER": [_container_row(r["ELEMENT"], r["VALUE"]) for r in container]},
         tables=["MESSAGE_LINES"],
         output_params=["RETURN_CODE", "EVENT_ID"],
     )
@@ -99,6 +128,19 @@ def raise_parking_event(sap, objkey: str, doc_number: str,
     # whose SAP id becomes the event creator (and so the workflow initiator).
     if initiator_sap_user:
         kwargs["USER"] = initiator_sap_user.strip().upper()
+
+    # Diagnostic: exactly what VIM sends to SAP. PWDI (the initiator's SAP
+    # password) is masked — never log it. Logged at WARNING on purpose so it
+    # shows at the LAN box's default log level without --log-level info; revert
+    # to debug/remove once the flow is verified.
+    safe_container = {
+        r["ELEMENT"]: ("***" if r["ELEMENT"] == "PWDI" else r["VALUE"]) for r in container
+    }
+    logger.warning(
+        "[wf-diag] SAP_WAPI_CREATE_EVENT %s.%s objkey=%s USER=%s container=%s",
+        settings.SAP_WF_OBJECT_TYPE, event, objkey, kwargs.get("USER", "(none)"),
+        safe_container,
+    )
 
     result = sap.call("SAP_WAPI_CREATE_EVENT", **kwargs)
     rc = (result.get("RETURN_CODE") or "").strip()

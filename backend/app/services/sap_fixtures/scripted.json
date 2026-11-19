@@ -24,6 +24,19 @@
     }
   },
 
+  "employees": {
+    "_comment": "Answers for the SAP employee login service (/sap/bc/ztmc_login) in fake mode. Invented ids and names, not Lucky Cement staff.",
+    "00009001": {"password": "demo123", "name": "DEMO PURCHASER"},
+    "00009002": {"password": "demo123", "name": "DEMO LIMITED BUYER"},
+    "00009099": {"password": "demo123", "name": "DEMO NO HIERARCHY"}
+  },
+
+  "hierarchy": {
+    "_comment": "ZINI_VERIFY in fake mode: EV_FLAG is '' (no hierarchy) for employees in 'none', or above their amount limit; 'X' otherwise.",
+    "none": ["00009099"],
+    "limits": {"00009002": 100000}
+  },
+
   "park_errors": {
     "4500009002": [
       {

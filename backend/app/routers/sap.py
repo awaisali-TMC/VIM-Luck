@@ -28,6 +28,7 @@ from app.models.internal_user import InternalUser
 from app.security import get_current_internal_user, require_admin
 from app.routers.role_permissions import role_labels, humanize_role
 from app.services.duplicate_detection import duplicate_block_message, find_key_duplicates
+from app.services.sap_credentials import decrypt_sap_password
 from app.services.invoice_line_rules import (
     find_zero_quantity_goods,
     route_invoice_lines,
@@ -38,6 +39,20 @@ from app.services.invoice_line_rules import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/sap", tags=["sap"])
+
+
+def _sap_error_detail(exc: Exception) -> str:
+    """One-line, safe summary of an RFC/SAP exception for the UI banner.
+
+    PyRFC/ctypes RFC errors carry the SAP key (e.g. ``RFC_LOGON_FAILURE``) and a
+    short message; surface that instead of a bare "see server logs" so staff can
+    act on it without opening the console. Never includes credentials — RFC error
+    messages carry none — and is capped to one line.
+    """
+    key = getattr(exc, "key", None)  # pyrfc sets .key, e.g. "RFC_LOGON_FAILURE"
+    raw = (getattr(exc, "message", None) or str(exc) or "").strip()
+    msg = raw.splitlines()[0][:300] if raw else type(exc).__name__
+    return f"{key}: {msg}" if key and key not in msg else msg
 
 # Only these roles may park/post (or dry-run validate) an invoice to SAP.
 SAP_PARK_ROLES = ("admin", "ap_operator")
@@ -99,6 +114,195 @@ async def test_connection():
             "error": "SAP connection failed — see server logs for details.",
             **_sap_target(),
         }
+
+
+@router.post("/users/{user_id}/login-test")
+async def test_user_sap_login(
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+    _admin: InternalUser = Depends(require_admin),
+):
+    """Admin: verify a user's stored SAP employee login actually authenticates
+    over RFC.
+
+    The workflow step logs into SAP *as this user* (their SAP ID + password), so
+    those credentials must succeed over RFC before that can run — the document
+    park itself uses TMC_VIM and is unaffected. This pings SAP under the user's
+    identity and reports the real RFC reason (e.g. RFC_LOGON_FAILURE) on failure,
+    so a wrong/expired password or missing S_RFC authorization is obvious here
+    rather than surfacing only when a park tries to start the workflow.
+    """
+    from app.services.sap_credentials import set_sap_identity, decrypt_sap_password
+
+    result = await db.execute(select(InternalUser).where(InternalUser.id == user_id))
+    target = result.scalar_one_or_none()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if not (target.sap_username or "").strip():
+        raise HTTPException(status_code=400, detail="This user has no SAP username set.")
+    if not target.sap_password_enc:
+        raise HTTPException(status_code=400, detail="This user has no SAP password saved.")
+
+    if _sap_mode() == "fake":
+        return {
+            "ok": True,
+            "sap_username": target.sap_username,
+            "detail": "Fake SAP mode — no real RFC logon is performed on this instance.",
+            **_sap_target(),
+        }
+
+    _ensure_dll()
+    set_sap_identity(target.sap_username, decrypt_sap_password(target.sap_password_enc))
+    try:
+        from app.services.sap_connector import SAPConnector
+        sap = SAPConnector()
+        sap.connect()
+        ok = sap.ping()
+        sap.disconnect()
+        return {"ok": bool(ok), "sap_username": target.sap_username, **_sap_target()}
+    except Exception as exc:
+        logger.warning(
+            "SAP login test failed for user %s (%s): %s", user_id, target.sap_username, exc
+        )
+        from app.services.sap_auth_log import log_rfc_failure
+        log_rfc_failure("per-user RFC login test", exc, rfc_user=target.sap_username,
+                        actor=f"{target.id}:{target.email}", function="RFC_PING")
+        return {
+            "ok": False,
+            "sap_username": target.sap_username,
+            "detail": _sap_error_detail(exc),
+            **_sap_target(),
+        }
+    finally:
+        set_sap_identity(None, None)
+
+
+# ── SAP employee login + approval-hierarchy check (services/sap_employee.py) ──
+
+class EmployeeLoginRequest(BaseModel):
+    user_id: str
+    password: str
+
+
+class HierarchyCheckRequest(BaseModel):
+    amount: float
+    currency: Optional[str] = None
+
+
+def _employee_status(enabled: bool, user: InternalUser, check: dict | None = None) -> dict:
+    return {
+        "enabled": enabled,
+        "hierarchy_check_enabled": settings.SAP_HIERARCHY_CHECK_ENABLED,
+        "signed_in": bool(check and check.get("ok")),
+        "pernr": (check or {}).get("pernr") or user.sap_username or "",
+        "name": (check or {}).get("name", ""),
+        "message": (check or {}).get("message", ""),
+        "unreachable": bool((check or {}).get("unreachable")),
+        "mode": _sap_mode(),
+    }
+
+
+@router.get("/employee-login")
+async def get_employee_login(
+    user: InternalUser = Depends(get_current_internal_user),
+):
+    """Is the current user signed in to SAP as an employee?
+
+    Re-checks the stored SAP ID + password with the login service each time, so a
+    changed or expired SAP password shows up on the Upload page rather than as a
+    workflow that resolves to no approver.
+    """
+    import asyncio
+    from app.services.sap_employee import verify_employee_login
+
+    if not settings.SAP_EMPLOYEE_LOGIN_ENABLED:
+        return _employee_status(False, user)
+    if not (user.sap_username or "").strip() or not user.sap_password_enc:
+        return _employee_status(True, user)
+    check = await asyncio.to_thread(
+        verify_employee_login, user.sap_username, decrypt_sap_password(user.sap_password_enc),
+        f"{user.id}:{user.email}",
+    )
+    return _employee_status(True, user, check)
+
+
+@router.post("/employee-login")
+async def employee_login(
+    req: EmployeeLoginRequest,
+    db: AsyncSession = Depends(get_db),
+    user: InternalUser = Depends(get_current_internal_user),
+):
+    """Sign the current user in to SAP with their employee ID + password.
+
+    On success the ID (as an 8-digit PERNR) and the encrypted password are
+    stored on the user — the same fields Admin → Users sets — so the parking
+    workflow sends them as USERI / PWDI. A failed login changes nothing.
+    """
+    import asyncio
+    from app.services.sap_credentials import encrypt_sap_password
+    from app.services.sap_employee import verify_employee_login
+
+    if not settings.SAP_EMPLOYEE_LOGIN_ENABLED:
+        raise HTTPException(status_code=400, detail="SAP employee login is not enabled on this instance.")
+    check = await asyncio.to_thread(verify_employee_login, req.user_id, req.password,
+                                    f"{user.id}:{user.email}")
+    if not check["ok"]:
+        raise HTTPException(
+            status_code=502 if check.get("unreachable") else 401,
+            detail=check["message"] or "SAP login failed.",
+        )
+    user.sap_username = check["pernr"]
+    user.sap_password_enc = encrypt_sap_password(req.password)
+    await db.commit()
+    logger.info("User %s signed in to SAP as employee %s", user.id, check["pernr"])
+    return _employee_status(True, user, check)
+
+
+async def _hierarchy_or_error(user: InternalUser, amount, currency: str) -> dict:
+    """Run ZINI_VERIFY for the user's SAP employee ID. Raises when it cannot run."""
+    import asyncio
+    from app.services.sap_employee import check_hierarchy_now
+
+    if not (user.sap_username or "").strip():
+        raise HTTPException(
+            status_code=422,
+            detail="Sign in with your SAP employee ID (Upload Invoice page) before the "
+                   "SAP approval hierarchy can be checked.",
+        )
+    _ensure_dll()
+    try:
+        return await asyncio.to_thread(check_hierarchy_now, user.sap_username, amount, currency,
+                                       f"{user.id}:{user.email}")
+    except Exception as exc:
+        logger.exception("%s failed for %s", settings.SAP_HIERARCHY_RFC, user.sap_username)
+        raise HTTPException(
+            status_code=502,
+            detail=f"SAP approval-hierarchy check ({settings.SAP_HIERARCHY_RFC}) failed: "
+                   f"{_sap_error_detail(exc)}",
+        )
+
+
+@router.get("/auth-log", dependencies=[Depends(require_admin)])
+async def sap_auth_log(lines: int = Query(200, ge=1, le=2000)):
+    """Admin: the tail of the SAP authorization log (services/sap_auth_log.py) —
+    login-service and RFC auth failures with a hint for the Basis team.
+    Contains no passwords."""
+    from app.services.sap_auth_log import log_file_path, tail
+    return {"file": log_file_path() or None, "lines": tail(lines)}
+
+
+@router.post("/hierarchy-check")
+async def hierarchy_check(
+    req: HierarchyCheckRequest,
+    user: InternalUser = Depends(get_current_internal_user),
+):
+    """ZINI_VERIFY for the current user and an amount — shown on the review screen."""
+    if not settings.SAP_HIERARCHY_CHECK_ENABLED:
+        return {"enabled": False}
+    if not settings.SAP_ENABLED:
+        return {"enabled": False}
+    result = await _hierarchy_or_error(user, req.amount, req.currency or "")
+    return {"enabled": True, **result, **_sap_target()}
 
 
 class ExchangeRateRequest(BaseModel):
@@ -507,9 +711,9 @@ async def sync_sap_grn(po_number: str, db: AsyncSession = Depends(get_db)):
     else:
         try:
             sap_po = fetch_po_detail(ponum)
-        except Exception:
+        except Exception as exc:
             logger.exception("SAP PO fetch failed for %s", ponum)
-            raise HTTPException(status_code=502, detail="Failed to fetch PO from SAP — see server logs.")
+            raise HTTPException(status_code=502, detail=f"Failed to fetch PO from SAP: {_sap_error_detail(exc)}")
         if not sap_po:
             raise HTTPException(status_code=404, detail=f"PO {ponum} not found in SAP.")
         po_data = sync_po_to_db(sap_po, None)
@@ -854,12 +1058,12 @@ async def post_invoice_to_sap_endpoint(
             detail=f"Only these roles can park invoices to SAP: {allowed}.",
         )
 
-    # Log in to SAP as this user when they have their own SAP credentials;
-    # otherwise the connector falls back to the global SAP_USER. Scoped to this
-    # request. Covers the PO fetch and park/post below (both run in-context).
-    from app.services.sap_credentials import set_sap_identity, decrypt_sap_password
-    if (user.sap_username or "").strip():
-        set_sap_identity(user.sap_username, decrypt_sap_password(user.sap_password_enc))
+    # RFC (PO fetch + park/post) always runs as the technical user TMC_VIM
+    # (settings.SAP_USER/SAP_PASSWD) — it holds the RFC authorizations. A user's
+    # own SAP employee ID + password (internal_users.sap_username/_enc) is NOT
+    # used for the RFC logon; it is reserved for initiating the SAP workflow on
+    # the employee's behalf (see below). Logging RFC in as the employee breaks
+    # park when that account lacks RFC rights (RFC_LOGON_FAILURE).
 
     # ── Load invoice with line items ────────────────────────────
     result = await db.execute(
@@ -942,11 +1146,11 @@ async def post_invoice_to_sap_endpoint(
     try:
         from app.services.sap_po_service import fetch_po_detail
         sap_po = fetch_po_detail(po.po_number)
-    except Exception:
+    except Exception as exc:
         logger.exception("Failed to fetch PO %s from SAP", po.po_number)
         raise HTTPException(
             status_code=502,
-            detail=f"Failed to fetch PO {po.po_number} from SAP — see server logs.",
+            detail=f"Failed to fetch PO {po.po_number} from SAP: {_sap_error_detail(exc)}",
         )
 
     if not sap_po:
@@ -1195,6 +1399,16 @@ async def post_invoice_to_sap_endpoint(
 
     gross_amount = round(sent_net + (tax_amount_used or 0), 2)
 
+    # ── Lucky Cement: approval hierarchy must exist (ZINI_VERIFY) ──
+    # For the parking user's SAP employee ID and the gross amount actually sent.
+    # Runs in validate mode too, so the submit dialog shows it before parking.
+    if settings.SAP_HIERARCHY_CHECK_ENABLED and req.mode in ("park", "validate"):
+        hier = await _hierarchy_or_error(user, gross_amount, eff_currency)
+        if not hier["ok"]:
+            if req.mode == "validate":
+                return {"ok": False, "message": hier["message"], "sap_return": []}
+            raise HTTPException(status_code=422, detail={"message": hier["message"], "sap_return": []})
+
     # ── Call SAP posting service ───────────────────────────────
     try:
         from app.services.sap_invoice_post import post_invoice_to_sap
@@ -1221,12 +1435,23 @@ async def post_invoice_to_sap_endpoint(
             workflow=settings.SAP_WORKFLOW_ENABLED,
             initiator_sap_user=(user.sap_username or ""),
             initiator_email=(user.email or ""),
+            # The MIR7 workflow authenticates the initiator via USERI/PWDI, so it
+            # needs this user's SAP password (decrypted from the stored token).
+            initiator_sap_pwd=decrypt_sap_password(user.sap_password_enc),
         )
-    except Exception:
+    except Exception as exc:
         logger.exception("SAP posting call failed for invoice %s", invoice.id)
+        from app.services.sap_auth_log import log_rfc_failure
+        kind = log_rfc_failure(f"invoice {invoice.id} {req.mode}", exc, actor=f"{user.id}:{user.email}",
+                               function="BAPI_INCOMINGINVOICE_PARK" if req.mode != "post" else "BAPI_INCOMINGINVOICE_CREATE1",
+                               po=po.po_number)
+        # Show SAP's own error text in the reply (Network tab / toast), so a
+        # failure can be read without shell access to the server log. RFC error
+        # texts carry no credentials; PWDI is never echoed by SAP.
+        reason = " ".join(f"{type(exc).__name__}: {exc}".split())[:400]
         raise HTTPException(
             status_code=502,
-            detail="SAP posting call failed — see server logs.",
+            detail=f"SAP posting call failed ({kind}) — {reason}",
         )
 
     # ── VALIDATE (dry run): return the outcome, never touch the DB ──

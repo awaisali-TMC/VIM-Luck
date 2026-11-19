@@ -274,7 +274,7 @@ export default function SAPPostingCard({
               </div>
             )}
             {errMsg("headerText")}
-            <span className="text-2xs text-neutral-400 mt-0.5 block">Basic Data tab — document header text.</span>
+            <span className="text-2xs text-neutral-400 mt-0.5 block">Basic Data tab — sent to SAP as your 8-digit employee ID + space + first 16 characters (e.g. 00004007 einv-HP-2026-041).</span>
           </div>
 
           {/* Item Text — Details tab → ITEM_TEXT (SGTXT) */}
