@@ -76,8 +76,10 @@ hierarchy for employee … (ZINI_VERIFY returned EV_FLAG '')" appears there and 
 Nothing has been run against the real login service or the real `ZINI_VERIFY` (both need the LAN box).
 
 **Open, to confirm with Lucky's SAP team:**
-1. **The meaning of `EV_FLAG`.** The code assumes `'X'` = hierarchy found. If SAP returns something
-   else (for example `'S'`/`'Y'`), set `SAP_HIERARCHY_OK_FLAGS`. No code change is needed.
+1. ~~The meaning of `EV_FLAG`~~ **Confirmed by Lucky's ABAP team (2026-11-19):** `'X'` = hierarchy
+   exists, space = none. This matches the default `SAP_HIERARCHY_OK_FLAGS=X`. Their example call:
+   `IV_PERNR='00001234'`, `IV_WAERS='pkr'`, `IV_AMOUNT='63764.6'`. Verity sends the currency upper-case
+   and the amount with 2 decimals.
 2. **The Basic-auth user for the login service.** It defaults to the RFC technical user. Set
    `SAP_LOGIN_API_USER`/`_PASSWORD` if it differs. If `sap-client` is needed, append `?sap-client=NNN` to the URL.
 3. **TLS:** if the service's certificate is from an internal CA, set `SAP_LOGIN_API_CA_BUNDLE`.

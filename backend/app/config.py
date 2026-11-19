@@ -170,8 +170,8 @@ class Settings(BaseSettings):
     # review screen and parking (and the submit dry run) refuses on a failed check.
     SAP_HIERARCHY_CHECK_ENABLED: bool = False
     SAP_HIERARCHY_RFC: str = "ZINI_VERIFY"
-    # EV_FLAG values that mean "hierarchy found", comma-separated. NOT YET
-    # CONFIRMED by Lucky's SAP team — 'X' is SAP's usual "true".
+    # EV_FLAG values that mean "hierarchy found", comma-separated. Confirmed by
+    # Lucky's ABAP team (2026-11-19): 'X' = true, space = false.
     SAP_HIERARCHY_OK_FLAGS: str = "X"
 
     # CORS — explicit allowlist (no wildcard). Override via env CORS_ORIGINS

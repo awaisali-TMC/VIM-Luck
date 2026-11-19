@@ -11,8 +11,8 @@ Two checks run before an invoice can start the SAP parking workflow
        -> {"success": false, "code": 401, "errorCode": "INVALID_PASSWORD", "message": "Verification key does not match", ...}
 
 2. **Hierarchy check**: RFC ``ZINI_VERIFY`` (IV_PERNR NUMC8, IV_WAERS optional,
-   IV_AMOUNT WRBTR) -> EV_FLAG CHAR1. Which EV_FLAG values mean "a hierarchy
-   exists" is not yet confirmed; see settings.SAP_HIERARCHY_OK_FLAGS.
+   IV_AMOUNT WRBTR) -> EV_FLAG CHAR1: 'X' = hierarchy exists, space = none
+   (confirmed by Lucky's ABAP team, 2026-11-19; settings.SAP_HIERARCHY_OK_FLAGS).
 
 With SAP_MODE=fake (DEBUG only) both are answered from fixtures: the login from
 ``sap_fixtures/scripted.json`` ("employees"), ZINI_VERIFY by the fake connector.
