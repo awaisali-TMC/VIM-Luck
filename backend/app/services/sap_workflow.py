@@ -63,13 +63,12 @@ def build_objkey(company_code: str, doc_number: str, fiscal_year: str) -> str:
     return f"{cc}{doc}{fy}"
 
 
-def _swcont_row(element: str, value) -> dict:
-    """One SWCONT row (INPUT_CONTAINER of SAP_WAPI_CREATE_EVENT): a single-value
-    (TAB_INDEX 000000) character element (TYPE C) with its real length, as
-    SWC_SET_ELEMENT would build it. ELEMENT is CHAR 32, VALUE CHAR 255."""
-    v = str(value if value is not None else "")[:255]
-    return {"ELEMENT": element.upper()[:32], "TAB_INDEX": "000000",
-            "ELEMLENGTH": f"{len(v):03d}", "TYPE": "C", "VALUE": v}
+def _container_row(element: str, value) -> dict:
+    """One INPUT_CONTAINER row of SAP_WAPI_CREATE_EVENT. On AUP the table is
+    typed SWR_CONT, whose only fields are ELEMENT (CHAR 32) and VALUE (CHAR 255):
+    PyRFC refuses any other (TAB_INDEX / ELEMLENGTH / TYPE belong to the old
+    SWCONT and were rejected, "field 'TAB_INDEX' not found", 2026-11-19)."""
+    return {"ELEMENT": element.upper()[:32], "VALUE": str(value if value is not None else "")[:255]}
 
 
 def raise_parking_event(sap, objkey: str, doc_number: str,
@@ -115,14 +114,13 @@ def raise_parking_event(sap, objkey: str, doc_number: str,
         OBJECT_KEY=objkey,
         EVENT=event,
         COMMIT_WORK="",          # the caller commits park + event together
-        # INPUT_CONTAINER (SWCONT) — on AUP, SAP_WAPI_CREATE_EVENT has no
-        # SIMPLE_CONTAINER table: PyRFC refused it with RFC_INVALID_PARAMETER
-        # "field 'SIMPLE_CONTAINER' not found" (2026-11-19, LAN box). The Windows
-        # ctypes path silently ignores an unknown table, which is how commit
-        # 9aecc4b looked fine there. Each row fills every SWCONT field — with only
-        # ELEMENT + VALUE, ELEMLENGTH stays 000 and SAP read the elements back
-        # without names, the reason 9aecc4b moved away from this table.
-        input_tables={"INPUT_CONTAINER": [_swcont_row(r["ELEMENT"], r["VALUE"]) for r in container]},
+        # INPUT_CONTAINER, typed SWR_CONT (ELEMENT + VALUE) on AUP — the live
+        # interface (2026-11-19, LAN box): TABLES INPUT_CONTAINER, MESSAGE_LINES,
+        # MESSAGE_STRUCT. There is no SIMPLE_CONTAINER, and the rows take no
+        # SWCONT fields (TAB_INDEX etc.); PyRFC refuses both. Commit 9aecc4b used
+        # SIMPLE_CONTAINER, which only "worked" on Windows because the ctypes
+        # path silently ignores an unknown table or field.
+        input_tables={"INPUT_CONTAINER": [_container_row(r["ELEMENT"], r["VALUE"]) for r in container]},
         tables=["MESSAGE_LINES"],
         output_params=["RETURN_CODE", "EVENT_ID"],
     )

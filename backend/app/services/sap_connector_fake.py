@@ -373,6 +373,12 @@ class SAPConnectorFake:
         if unknown:
             raise RuntimeError(f"RFC_INVALID_PARAMETER: field '{sorted(unknown)[0]}' not found "
                                "(SAP_WAPI_CREATE_EVENT tables: INPUT_CONTAINER, MESSAGE_LINES, MESSAGE_STRUCT)")
+        # ... and a row field SWR_CONT does not have (ELEMENT, VALUE only).
+        for row in (kwargs.get("input_tables") or {}).get("INPUT_CONTAINER") or []:
+            extra = set(row) - {"ELEMENT", "VALUE"}
+            if extra:
+                raise RuntimeError(f"RFC_INVALID_PARAMETER: field '{sorted(extra)[0]}' not found "
+                                   "(INPUT_CONTAINER is SWR_CONT: ELEMENT, VALUE)")
         objkey = (kwargs.get("OBJECT_KEY") or "").strip()
         user = (kwargs.get("USER") or "").strip().upper()
         failures = (_scripts().get("workflow_errors") or {}).get("users") or {}

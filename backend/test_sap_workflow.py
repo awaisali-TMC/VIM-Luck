@@ -222,10 +222,8 @@ def test_flow(client):
     rows = ev["input_tables"]["INPUT_CONTAINER"]
     expect("event sends INPUT_CONTAINER (AUP has no SIMPLE_CONTAINER)",
            "SIMPLE_CONTAINER" not in ev["input_tables"], list(ev["input_tables"]))
-    expect("every SWCONT row is complete: TAB_INDEX 000000, TYPE C, ELEMLENGTH = len(VALUE)",
-           all(r["TAB_INDEX"] == "000000" and r["TYPE"] == "C"
-               and r["ELEMLENGTH"] == f"{len(r['VALUE']):03d}" and r["ELEMENT"] for r in rows),
-           rows)
+    expect("every row is SWR_CONT: exactly ELEMENT + VALUE (AUP refuses TAB_INDEX etc.)",
+           all(set(r) == {"ELEMENT", "VALUE"} and r["ELEMENT"] for r in rows), rows)
     container = {r["ELEMENT"]: r["VALUE"] for r in rows}
     expect("container carries OBJKEY, D_NO, LEVEL, TOTALAPP, SCENARIO_CHAR, INIEMAIL",
            container.get("OBJKEY") == objkey and container.get("D_NO") == d["sap_document_number"].zfill(10)

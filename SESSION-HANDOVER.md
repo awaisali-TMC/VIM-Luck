@@ -5,7 +5,19 @@ Handover from Claude Code sessions on this machine (`D:\VIM\VIM-Luck`). Read
 what is still open. (`HANDOFF.md` is the separate product feature-status doc.)
 Newest session first; §1–§5 below are from session 1 and are still accurate.
 
-## 2026-11-19 (evening): workflow event container back to INPUT_CONTAINER — NOT committed yet
+## 2026-11-19 (night): INPUT_CONTAINER rows are ELEMENT + VALUE only (SWR_CONT) — NOT committed yet
+
+After `ca2a6fa` the LAN box failed with "field 'TAB_INDEX' not found". On AUP,
+`SAP_WAPI_CREATE_EVENT`'s `INPUT_CONTAINER` is typed **SWR_CONT**, whose only fields are
+`ELEMENT` and `VALUE`. So `_swcont_row()` became `_container_row()`, which sends just those
+two. The fake connector now also refuses any other row field, and `test_sap_workflow.py`
+checks that each row has exactly `ELEMENT` and `VALUE`. All SAP tests pass. `41e3a51`
+(SAP's error text in the 502 reply) is pushed.
+
+**Open:** pull and restart on the LAN box, then park again. The ABAP team should check in
+the debugger that the elements arrive with their names.
+
+## 2026-11-19 (evening): workflow event container back to INPUT_CONTAINER — committed `ca2a6fa`, pushed (superseded above: the SWCONT fields were wrong)
 
 **Why:** on AUP the park failed with 502. PyRFC refused `SAP_WAPI_CREATE_EVENT` with
 `RFC_INVALID_PARAMETER` "field 'SIMPLE_CONTAINER' not found". The live interface has no
