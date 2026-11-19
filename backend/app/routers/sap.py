@@ -174,6 +174,122 @@ async def test_user_sap_login(
         set_sap_identity(None, None)
 
 
+# ── SAP employee login + approval-hierarchy check (services/sap_employee.py) ──
+
+class EmployeeLoginRequest(BaseModel):
+    user_id: str
+    password: str
+
+
+class HierarchyCheckRequest(BaseModel):
+    amount: float
+    currency: Optional[str] = None
+
+
+def _employee_status(enabled: bool, user: InternalUser, check: dict | None = None) -> dict:
+    return {
+        "enabled": enabled,
+        "hierarchy_check_enabled": settings.SAP_HIERARCHY_CHECK_ENABLED,
+        "signed_in": bool(check and check.get("ok")),
+        "pernr": (check or {}).get("pernr") or user.sap_username or "",
+        "name": (check or {}).get("name", ""),
+        "message": (check or {}).get("message", ""),
+        "unreachable": bool((check or {}).get("unreachable")),
+        "mode": _sap_mode(),
+    }
+
+
+@router.get("/employee-login")
+async def get_employee_login(
+    user: InternalUser = Depends(get_current_internal_user),
+):
+    """Is the current user signed in to SAP as an employee?
+
+    Re-checks the stored SAP ID + password with the login service each time, so a
+    changed or expired SAP password shows up on the Upload page rather than as a
+    workflow that resolves to no approver.
+    """
+    import asyncio
+    from app.services.sap_employee import verify_employee_login
+
+    if not settings.SAP_EMPLOYEE_LOGIN_ENABLED:
+        return _employee_status(False, user)
+    if not (user.sap_username or "").strip() or not user.sap_password_enc:
+        return _employee_status(True, user)
+    check = await asyncio.to_thread(
+        verify_employee_login, user.sap_username, decrypt_sap_password(user.sap_password_enc)
+    )
+    return _employee_status(True, user, check)
+
+
+@router.post("/employee-login")
+async def employee_login(
+    req: EmployeeLoginRequest,
+    db: AsyncSession = Depends(get_db),
+    user: InternalUser = Depends(get_current_internal_user),
+):
+    """Sign the current user in to SAP with their employee ID + password.
+
+    On success the ID (as an 8-digit PERNR) and the encrypted password are
+    stored on the user — the same fields Admin → Users sets — so the parking
+    workflow sends them as USERI / PWDI. A failed login changes nothing.
+    """
+    import asyncio
+    from app.services.sap_credentials import encrypt_sap_password
+    from app.services.sap_employee import verify_employee_login
+
+    if not settings.SAP_EMPLOYEE_LOGIN_ENABLED:
+        raise HTTPException(status_code=400, detail="SAP employee login is not enabled on this instance.")
+    check = await asyncio.to_thread(verify_employee_login, req.user_id, req.password)
+    if not check["ok"]:
+        raise HTTPException(
+            status_code=502 if check.get("unreachable") else 401,
+            detail=check["message"] or "SAP login failed.",
+        )
+    user.sap_username = check["pernr"]
+    user.sap_password_enc = encrypt_sap_password(req.password)
+    await db.commit()
+    logger.info("User %s signed in to SAP as employee %s", user.id, check["pernr"])
+    return _employee_status(True, user, check)
+
+
+async def _hierarchy_or_error(user: InternalUser, amount, currency: str) -> dict:
+    """Run ZINI_VERIFY for the user's SAP employee ID. Raises when it cannot run."""
+    import asyncio
+    from app.services.sap_employee import check_hierarchy_now
+
+    if not (user.sap_username or "").strip():
+        raise HTTPException(
+            status_code=422,
+            detail="Sign in with your SAP employee ID (Upload Invoice page) before the "
+                   "SAP approval hierarchy can be checked.",
+        )
+    _ensure_dll()
+    try:
+        return await asyncio.to_thread(check_hierarchy_now, user.sap_username, amount, currency)
+    except Exception as exc:
+        logger.exception("%s failed for %s", settings.SAP_HIERARCHY_RFC, user.sap_username)
+        raise HTTPException(
+            status_code=502,
+            detail=f"SAP approval-hierarchy check ({settings.SAP_HIERARCHY_RFC}) failed: "
+                   f"{_sap_error_detail(exc)}",
+        )
+
+
+@router.post("/hierarchy-check")
+async def hierarchy_check(
+    req: HierarchyCheckRequest,
+    user: InternalUser = Depends(get_current_internal_user),
+):
+    """ZINI_VERIFY for the current user and an amount — shown on the review screen."""
+    if not settings.SAP_HIERARCHY_CHECK_ENABLED:
+        return {"enabled": False}
+    if not settings.SAP_ENABLED:
+        return {"enabled": False}
+    result = await _hierarchy_or_error(user, req.amount, req.currency or "")
+    return {"enabled": True, **result, **_sap_target()}
+
+
 class ExchangeRateRequest(BaseModel):
     from_currency: str          # e.g. "CAD"
     to_currency: str            # e.g. "USD"
@@ -1267,6 +1383,16 @@ async def post_invoice_to_sap_endpoint(
         tax_amount_used = round(sent_net * (code_rate / 100.0), 2) if code_rate else 0
 
     gross_amount = round(sent_net + (tax_amount_used or 0), 2)
+
+    # ── Lucky Cement: approval hierarchy must exist (ZINI_VERIFY) ──
+    # For the parking user's SAP employee ID and the gross amount actually sent.
+    # Runs in validate mode too, so the submit dialog shows it before parking.
+    if settings.SAP_HIERARCHY_CHECK_ENABLED and req.mode in ("park", "validate"):
+        hier = await _hierarchy_or_error(user, gross_amount, eff_currency)
+        if not hier["ok"]:
+            if req.mode == "validate":
+                return {"ok": False, "message": hier["message"], "sap_return": []}
+            raise HTTPException(status_code=422, detail={"message": hier["message"], "sap_return": []})
 
     # ── Call SAP posting service ───────────────────────────────
     try:

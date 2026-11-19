@@ -99,3 +99,21 @@ export async function validateInvoiceForSAP(invoiceId, lineItemIds = null) {
   });
   return response.data;
 }
+
+// ── SAP employee login + approval-hierarchy check (Lucky Cement) ──
+// { enabled, hierarchy_check_enabled, signed_in, pernr, name, message, unreachable, mode }
+export async function getSAPEmployeeLogin() {
+  const response = await api.get(`${BASE}/employee-login`);
+  return response.data;
+}
+
+export async function signInSAPEmployee(userId, password) {
+  const response = await api.post(`${BASE}/employee-login`, { user_id: userId, password });
+  return response.data;
+}
+
+// ZINI_VERIFY for the signed-in employee: { enabled, ok, flag, pernr, amount, currency, message }
+export async function checkSAPHierarchy(amount, currency) {
+  const response = await api.post(`${BASE}/hierarchy-check`, { amount, currency: currency || null });
+  return response.data;
+}

@@ -16,3 +16,4 @@ pypdf>=4.0
 openpyxl>=3.1
 Pillow>=10.0
 cryptography>=43.0  # encrypt per-user SAP passwords at rest (services/sap_credentials.py)
+httpx>=0.27  # SAP employee login service (services/sap_employee.py)

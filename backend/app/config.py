@@ -145,6 +145,31 @@ class Settings(BaseSettings):
     # seconds. 0 turns it off (the per-invoice "Refresh" still works).
     SAP_WF_POLL_SECONDS: int = 300
 
+    # ── SAP employee login + approval-hierarchy check (Lucky Cement) ─────────
+    # Before uploading, the user signs in with their SAP employee ID (PERNR) and
+    # password; Lucky's login service checks them (services/sap_employee.py) and
+    # they are stored as the user's sap_username / sap_password_enc, which the
+    # workflow event then sends as USERI / PWDI. Off by default.
+    SAP_EMPLOYEE_LOGIN_ENABLED: bool = False
+    # ICF service: POST {"userId": "<8-digit PERNR>", "paswrd": "<password>"}.
+    # Append ?sap-client=NNN here if the service needs it.
+    SAP_LOGIN_API_URL: str = "https://upgapp2023.lucky-cement.net/sap/bc/ztmc_login"
+    # The service also needs HTTP Basic auth. Empty = use SAP_USER / SAP_PASSWD.
+    SAP_LOGIN_API_USER: str = ""
+    SAP_LOGIN_API_PASSWORD: str = ""
+    # CA bundle (PEM path) for the service's TLS certificate. Empty = the default
+    # trust store, which also honours SSL_CERT_FILE (set on the LAN box).
+    SAP_LOGIN_API_CA_BUNDLE: str = ""
+    SAP_LOGIN_API_TIMEOUT_SECONDS: float = 15.0
+    # ZINI_VERIFY(IV_PERNR, IV_WAERS, IV_AMOUNT) -> EV_FLAG: does an approval
+    # hierarchy exist for this employee and amount? When on, it is shown on the
+    # review screen and parking (and the submit dry run) refuses on a failed check.
+    SAP_HIERARCHY_CHECK_ENABLED: bool = False
+    SAP_HIERARCHY_RFC: str = "ZINI_VERIFY"
+    # EV_FLAG values that mean "hierarchy found", comma-separated. NOT YET
+    # CONFIRMED by Lucky's SAP team — 'X' is SAP's usual "true".
+    SAP_HIERARCHY_OK_FLAGS: str = "X"
+
     # CORS — explicit allowlist (no wildcard). Override via env CORS_ORIGINS
     # (JSON list) to add/replace origins per environment.
     CORS_ORIGINS: list[str] = [

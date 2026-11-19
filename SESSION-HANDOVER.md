@@ -5,6 +5,57 @@ Handover from Claude Code sessions on this machine (`D:\VIM\VIM-Luck`). Read
 what is still open. (`HANDOFF.md` is the separate product feature-status doc.)
 Newest session first; §1–§5 below are from session 1 and are still accurate.
 
+## 2026-11-19: SAP employee login + ZINI_VERIFY hierarchy check (branch `dev-shahzaib`, UNCOMMITTED)
+
+**Requirement (Lucky Cement):** while uploading an invoice in Verity, (1) the user signs in
+with their SAP employee ID via Lucky's login service, and (2) SAP's RFC `ZINI_VERIFY` checks
+that an approval hierarchy exists for that employee and amount.
+
+- Login service: `POST https://upgapp2023.lucky-cement.net/sap/bc/ztmc_login`, HTTP Basic auth,
+  body `{"userId": "00004007", "paswrd": "..."}`. Success → `{"success": true, "errorCode": "OK",
+  "userid", "name"}`. Failure → `{"success": false, "code": 401, "errorCode": "INVALID_PASSWORD"}`.
+- `ZINI_VERIFY`: imports `IV_PERNR` (PERNR_D), `IV_WAERS` (WAERS, optional), `IV_AMOUNT` (WRBTR);
+  export `EV_FLAG` (CHAR1).
+
+**What was built** (all behind two switches, both **off** by default):
+
+| File | Change |
+|---|---|
+| `backend/app/config.py`, `backend/.env.example` | `SAP_EMPLOYEE_LOGIN_ENABLED`, `SAP_LOGIN_API_URL/_USER/_PASSWORD/_CA_BUNDLE/_TIMEOUT_SECONDS`, `SAP_HIERARCHY_CHECK_ENABLED`, `SAP_HIERARCHY_RFC`, `SAP_HIERARCHY_OK_FLAGS` |
+| `backend/app/services/sap_employee.py` | New. `verify_employee_login()` (httpx; Basic auth defaults to `SAP_USER`/`SAP_PASSWD`; it tells a wrong password apart from the service being unreachable) and `check_hierarchy()` (ZINI_VERIFY; PERNR zero-padded to 8; `IV_WAERS` is sent only when it looks like a currency key) |
+| `backend/app/routers/sap.py` | `GET /api/sap/employee-login`: re-checks the stored login and returns the name. `POST /api/sap/employee-login`: on success it stores the PERNR plus the encrypted password in `sap_username`/`sap_password_enc`, so the workflow's USERI/PWDI use it. `POST /api/sap/hierarchy-check`. **Park gate**: when the check is on, `park` returns 422 and `validate` returns `ok:false` if there is no hierarchy for the parking user at the gross amount sent to SAP |
+| `backend/app/services/sap_connector_fake.py`, `sap_fixtures/scripted.json` | Fake `ZINI_VERIFY` and fake employees: `00009001` (ok), `00009002` (limit 100,000), `00009099` (no hierarchy), password `demo123` |
+| `frontend/src/components/upload/SapEmployeeLogin.jsx` | New. An "SAP Employee Login" card on the Upload page; the upload zone appears only after sign-in. Once signed in, a green bar shows "Signed in to SAP as NAME (PERNR) · Change". When the feature is off, it passes the page through unchanged |
+| `frontend/src/App.jsx` | Wraps the internal `/upload` route with that card, and turns on `checkSapHierarchy` on `/results` (the supplier portal is untouched) |
+| `frontend/src/pages/ExtractionResultsPage.jsx` | `SapHierarchyBanner`: a green or red banner with the ZINI_VERIFY result for the extracted total and currency. Saving is still allowed |
+| `frontend/src/services/sapService.js` | `getSAPEmployeeLogin`, `signInSAPEmployee`, `checkSAPHierarchy` |
+| `frontend/src/components/common/Button.jsx` | Optional `type` prop (default unchanged) |
+| `backend/test_sap_employee.py` | New, offline: **38/38 pass** (mock HTTP for the login client, fake ZINI_VERIFY, the HTTP flow, the park gate) |
+
+The submit dialog on the invoice page already shows the dry-run message, so "No SAP approval
+hierarchy for employee … (ZINI_VERIFY returned EV_FLAG '')" appears there and blocks Confirm & Park.
+
+**Verified:** all 9 other offline suites pass. `npm run build` OK. Lint: the new code is clean; the
+2 `set-state-in-effect` errors in `ExtractionResultsPage.jsx` are old.
+**Not verified:** the UI was not clicked through, because this checkout has no `backend/.env`.
+Nothing has been run against the real login service or the real `ZINI_VERIFY` (both need the LAN box).
+
+**Open, to confirm with Lucky's SAP team:**
+1. **The meaning of `EV_FLAG`.** The code assumes `'X'` = hierarchy found. If SAP returns something
+   else (for example `'S'`/`'Y'`), set `SAP_HIERARCHY_OK_FLAGS`. No code change is needed.
+2. **The Basic-auth user for the login service.** It defaults to the RFC technical user. Set
+   `SAP_LOGIN_API_USER`/`_PASSWORD` if it differs. If `sap-client` is needed, append `?sap-client=NNN` to the URL.
+3. **TLS:** if the service's certificate is from an internal CA, set `SAP_LOGIN_API_CA_BUNDLE`.
+
+**To enable on the LAN box:** `git pull`, `backend/.venv/bin/pip install -r backend/requirements.txt`,
+add `SAP_EMPLOYEE_LOGIN_ENABLED=true` and `SAP_HIERARCHY_CHECK_ENABLED=true` to `backend/.env`,
+then restart `./start-lan.sh`. `httpx` was added to `requirements.txt`; it was already installed as a google-genai dependency.
+
+**Local setup note:** this checkout is `D:\TMC\VIM-Luck`, not `D:\VIM\VIM-Luck`. A fresh
+`backend\.venv` was created here (`py -3 -m venv`, requirements installed). Node is at
+`%LOCALAPPDATA%\Programs
+odejs`. In PowerShell, use `npm.cmd`/`npx.cmd`, because script execution is blocked.
+
 ## 2026-11-16: dev-shahzaib merged, pushed, and deployed to Cloud Run (`52e90b9`)
 
 - **Merged into `main` and pushed:** `origin/dev-shahzaib` (14 commits: Inbox filters/sort,

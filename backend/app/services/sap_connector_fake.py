@@ -224,6 +224,7 @@ class SAPConnectorFake:
             "BAPI_EXCHANGERATE_CREATEMULTIPLE": self._exchange_rate,
             "BAPI_EXCHANGERATE_CREATE": self._exchange_rate,
             "SAP_WAPI_CREATE_EVENT": self._create_event,
+            "ZINI_VERIFY": self._ini_verify,
         }.get(function_name)
 
         if handler is None:
@@ -379,6 +380,22 @@ class SAPConnectorFake:
                      (objkey,))
         return _shape({"MESSAGE_LINES": []},
                       {"RETURN_CODE": "0", "EVENT_ID": f"EVT{objkey[4:14]}"}, {}, kwargs)
+
+    def _ini_verify(self, kwargs) -> dict:
+        """ZINI_VERIFY — is there an approval hierarchy for this employee and
+        amount? EV_FLAG 'X' = yes, '' = no. Rules in scripted.json
+        ("hierarchy"): employees without one, and per-employee amount limits.
+        """
+        pernr = (kwargs.get("IV_PERNR") or "").strip()
+        try:
+            amount = float(kwargs.get("IV_AMOUNT") or 0)
+        except ValueError:
+            amount = 0.0
+        rules = _scripts().get("hierarchy") or {}
+        limit = (rules.get("limits") or {}).get(pernr)
+        ok = (pernr not in (rules.get("none") or [])
+              and (limit is None or amount <= float(limit)))
+        return _shape({}, {"EV_FLAG": "X" if ok else ""}, {}, kwargs)
 
     def _commit(self, kwargs) -> dict:
         _store().commit()
