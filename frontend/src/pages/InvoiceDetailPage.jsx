@@ -601,6 +601,35 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
     }
   };
 
+  // ── Resubmit a REJECTED parked invoice: change the same SAP document ──
+  // SAP's ZMIR7_PARK restarts its approval workflow (REJ -> BLK).
+  const handleResubmit = async () => {
+    if (!window.confirm(
+      `Resubmit to SAP?\n\nSAP document ${invoice.sap_document_number}/${invoice.sap_fiscal_year} is updated ` +
+      `with your corrections (same document number) and SAP restarts its approval workflow.`
+    )) return;
+    setActionBusy(true);
+    setActionError(null);
+    try {
+      await postInvoiceToSAP(invoice.id, {
+        mode: "change",
+        taxCode: invoice.sap_tax_code || effectiveTaxCode || "I0",
+        postingDate: invoice.sap_posting_date || todayIso(),
+        headerText: invoice.sap_header_text || null,
+        exchangeRate: invoice.exchange_rate || null,
+        layout: invoice.sap_layout || "goods",
+        lineItemIds: selectedLineIdArray(),
+      });
+      await refetch();
+    } catch (err) {
+      const msg = await parkFailureMessage(err);
+      if (msg) setActionError(msg.replace("Failed to park invoice in SAP", "Failed to resubmit to SAP"));
+      await refetch();
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
   // ── Original uploaded document: view in a new tab / download ──
   const [docBusy, setDocBusy] = useState(null); // "view" | "download" | null
 
@@ -646,8 +675,13 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
 
   // SAP parking fields are editable only during review — locked once the
   // invoice is submitted for approval (pending_approval) and beyond.
+  // ...or while SAP's workflow has REJECTED the parked document: it is then
+  // corrected here and resubmitted in place (handleResubmit).
+  const rejectedInSap =
+    !!invoice && invoice.status === "parked" && invoice.sap_wf_status === "REJ" && invoice.sap_doc_status !== "posted";
   const sapFieldsEditable =
-    canEditInvoice && !!invoice && ["draft", "pending_processing", "validated", "rejected", "exception"].includes(invoice.status);
+    canEditInvoice && !!invoice &&
+    (["draft", "pending_processing", "validated", "rejected", "exception"].includes(invoice.status) || rejectedInSap);
 
   // Chosen document currency drives whether an exchange rate is required.
   const currencyVal = (liveSap ? liveSap.currency : (invoice?.sap_currency || invoice?.currency)) || "PKR";
@@ -774,9 +808,11 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
   // Inline-editable while pre-approval, the user has edit rights, and it's not
   // in SAP. Locks automatically once approved/parked/posted.
   const editable =
-    canEditInvoice &&
-    !invoice.sap_document_number &&
-    ["draft", "pending_processing", "validated", "rejected", "exception"].includes(invoice.status);
+    canEditInvoice && (
+      rejectedInSap ||
+      (!invoice.sap_document_number &&
+        ["draft", "pending_processing", "validated", "rejected", "exception"].includes(invoice.status))
+    );
 
   return (
     <div className="flex flex-col gap-5">
@@ -902,6 +938,14 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
                 {sapPosting ? "Parking..." : "Park to SAP"}
               </Button>
             </span>
+          )}
+
+          {/* Resubmit — SAP rejected it: send the corrections on the same document. */}
+          {!editing && canEditInvoice && canParkToSAP && rejectedInSap && (
+            <Button variant="primary" size="sm" onClick={handleResubmit} disabled={actionBusy || !!blockedMessage}
+              title={blockedMessage ? "Some selected lines are not on the PO. Uncheck or delete them first." : undefined}>
+              {actionBusy ? "Resubmitting..." : "Resubmit to SAP"}
+            </Button>
           )}
 
           {/* Unpark from SAP — for parked invoices. Deletes the SAP doc, then

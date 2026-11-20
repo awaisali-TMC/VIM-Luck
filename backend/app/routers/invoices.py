@@ -172,6 +172,16 @@ def _scope_query_to_principal(query, principal: Principal):
     return query
 
 
+def _locked_in_sap(invoice: Invoice) -> bool:
+    """In SAP and not editable. A parked document that SAP's workflow REJECTED is
+    the exception: it is corrected here and resubmitted in place
+    (POST /api/sap/invoices/{id}/post, mode="change")."""
+    if not invoice.sap_document_number:
+        return False
+    rejected = (invoice.sap_wf_status or "").upper() == "REJ" and invoice.sap_doc_status != "posted"
+    return not rejected
+
+
 def _assert_can_access(invoice: Invoice, principal: Principal) -> None:
     """Raise 404 if a supplier tries to touch an invoice that isn't theirs.
 
@@ -1282,7 +1292,7 @@ async def add_line_item(
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
     _assert_can_access(invoice, principal)
-    if invoice.sap_document_number:
+    if _locked_in_sap(invoice):
         raise HTTPException(status_code=409, detail="Invoice is in SAP — unpark it before editing line items.")
 
     line = InvoiceLineItem(
@@ -1319,7 +1329,7 @@ async def patch_line_item(
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
     _assert_can_access(invoice, principal)
-    if invoice.sap_document_number:
+    if _locked_in_sap(invoice):
         raise HTTPException(status_code=409, detail="Invoice is in SAP — unpark it before editing line items.")
 
     line = next((li for li in invoice.line_items if li.id == line_item_id), None)
@@ -1388,7 +1398,7 @@ async def delete_line_item(
         raise HTTPException(status_code=404, detail="Invoice not found")
     _assert_can_access(invoice, principal)
 
-    if invoice.sap_document_number:
+    if _locked_in_sap(invoice):
         raise HTTPException(
             status_code=409,
             detail=(

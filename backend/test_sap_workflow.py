@@ -371,6 +371,52 @@ def test_sap_raises(client):
         settings.SAP_WF_DRY_RUN_SAFE = False
 
 
+def test_resubmit(client):
+    """A REJECTED parked invoice is changed in place (same document) and SAP
+    restarts its workflow: REJ -> BLK. Anything not rejected can't be."""
+    print("\nRESUBMIT A REJECTED INVOICE (BAPI_INCOMINGINVOICE_CHANGE)")
+    settings.SAP_WORKFLOW_ENABLED = True
+    settings.SAP_WF_RAISE_EVENT = False
+    try:
+        inv = _new_invoice(client)
+        r = _park(client, inv)
+        expect(f"park -> 200 (got {r.status_code})", r.status_code == 200, r.text[:200])
+        d = _detail(client, inv)
+        doc, objkey = d["sap_document_number"], d["sap_wf_objkey"]
+
+        _calls.clear()
+        c = client.post(f"/api/sap/invoices/{inv}/post", json={"mode": "change", "tax_code": "I1"})
+        expect(f"change while BLK -> 409 (got {c.status_code})", c.status_code == 409, c.text[:200])
+        expect("...and nothing sent to SAP", "BAPI_INCOMINGINVOICE_CHANGE" not in _names(), _names())
+
+        fake.decide_workflow(objkey, approve=False)
+        expect("SAP rejected it", _refresh(client, inv).json().get("sap_wf_status") == "REJ")
+
+        _calls.clear()
+        c = client.post(f"/api/sap/invoices/{inv}/post", json={"mode": "change", "tax_code": "I1"})
+        expect(f"change while REJ -> 200 (got {c.status_code})", c.status_code == 200, c.text[:300])
+        names = _names()
+        expect("change BAPI then one commit, no park, no event",
+               "BAPI_INCOMINGINVOICE_CHANGE" in names and "BAPI_TRANSACTION_COMMIT" in names
+               and "BAPI_INCOMINGINVOICE_PARK" not in names and "SAP_WAPI_CREATE_EVENT" not in names, names)
+        kw = next(k for n, k in _calls if n == "BAPI_INCOMINGINVOICE_CHANGE")
+        expect("same document and year", (kw["INVOICEDOCNUMBER"], kw["FISCALYEAR"]) == (doc.zfill(10), d["sap_fiscal_year"]),
+               (kw["INVOICEDOCNUMBER"], kw["FISCALYEAR"]))
+        hdr = kw["input_structures"]["HEADERDATA_CHANGE"]
+        expect("header has no company code / doc type, and every field is flagged in CHANGEX",
+               "COMP_CODE" not in hdr and "DOC_TYPE" not in hdr
+               and set(kw["input_structures"]["HEADERDATA_CHANGEX"]) == set(hdr), hdr)
+        expect("items and tax replaced (TABLE_CHANGE)",
+               kw["input_structures"]["TABLE_CHANGE"] == {"ITEMDATA": "X", "TAXDATA": "X"})
+        expect("BKTXT is not the dry-run marker", hdr.get("HEADER_TXT") != "VALIDATE", hdr.get("HEADER_TXT"))
+        d2 = _detail(client, inv)
+        expect("still parked, same document", d2["status"] == "parked" and d2["sap_document_number"] == doc,
+               (d2["status"], d2["sap_document_number"]))
+        expect("SAP restarted the workflow: BLK", _refresh(client, inv).json().get("sap_wf_status") == "BLK")
+    finally:
+        settings.SAP_WF_RAISE_EVENT = True
+
+
 def test_t100_text():
     """A ZMIR7_ERROR_LOG row with only a message code is shown with its T100 text."""
     print("\nERROR LOG WITH A CODE ONLY -> T100 TEXT")
@@ -413,6 +459,7 @@ if __name__ == "__main__":
         test_flow(client)
         test_poller_selection(client)
         test_sap_raises(client)
+        test_resubmit(client)
 
     print("\n" + "=" * 60)
     if _failures:

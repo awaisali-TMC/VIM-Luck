@@ -5,6 +5,51 @@ Handover from Claude Code sessions on this machine (`D:\VIM\VIM-Luck`). Read
 what is still open. (`HANDOFF.md` is the separate product feature-status doc.)
 Newest session first; §1–§5 below are from session 1 and are still accurate.
 
+## 2026-11-21 (later): resubmit a REJECTED invoice on the same SAP document — committed, pushed
+
+**Requirement:** when SAP's workflow rejects an invoice, the user corrects it in VIM and sends it
+again. It must be the **same parked document**, which is Lucky's own functionality.
+
+**ABAP confirmed:** changing and saving a rejected parked document makes `ZMIR7_PARK` restart the
+workflow itself, and the `ZMIR7_WF_LOG` row turns from `REJ` back to `BLK`.
+
+**`BAPI_INCOMINGINVOICE_CHANGE` on AUP** (SE37/SE11 screenshots from the user):
+- IMPORT: `INVOICEDOCNUMBER`, `FISCALYEAR`, `INVOICE_DOC_STATUS` (optional), `TABLE_CHANGE`
+  (`BAPI_INCINV_CHNG_TABLES`: `ITEMDATA`, `GLACCOUNTDATA`, `MATERIALDATA`, `TAXDATA`, …, 'X' =
+  replace), `HEADERDATA_CHANGE` (`BAPI_INCINV_CHNG_HEADER`, same field names as the park header),
+  `HEADERDATA_CHANGEX`, `ADRESSDATA_CHANGE(X)`.
+- EXPORT: `INVOICEDOCNUMBER_NEW`, `FISCALYEAR_NEW`.
+- TABLES: `ITEMDATA` (`BAPI_INCINV_CREATE_ITEM`) and `TAXDATA` (`BAPI_INCINV_CREATE_TAX`), the same
+  structures as the park.
+
+**Code:**
+- `sap_invoice_post.post_invoice_to_sap(mode="change", change_doc_number=, change_fiscal_year=)`
+  builds the same header, items and tax as a park, then calls `_change_parked()`.
+- `_change_parked()` sends header fields `_CHANGE_HEADER_FIELDS` (never doc type, company code or
+  currency) with `CHANGEX` 'X' and `TABLE_CHANGE` `ITEMDATA`/`TAXDATA` = 'X'. It commits on
+  success and rolls back on E/A.
+- Router `POST /api/sap/invoices/{id}/post` accepts `mode="change"` only for a parked invoice with
+  workflow `REJ`; otherwise it returns 409. It runs the same gates as a park (duplicate,
+  `ZINI_VERIFY`) and keeps the invoice parked on the same document.
+- `invoices.py` adds `_locked_in_sap()`: line add, patch and delete are allowed when the workflow is
+  `REJ`.
+- Frontend: for a `REJ` invoice the fields, SAP card and lines are editable again, and a
+  **"Resubmit to SAP"** button appears. The `REJ` hint in `SAPWorkflowStatus` now says so.
+  "Unpark from SAP" stays.
+- Fake SAP: `BAPI_INCOMINGINVOICE_CHANGE` refuses unknown structures, runs the park's item checks,
+  rewrites BKTXT and flips `REJ` to `BLK`.
+
+**Tests:** `test_sap_workflow.py` gains a `RESUBMIT` section. All SAP suites, `test_bulk_delete`
+and `test_line_item_guards` pass. The frontend builds. **Not tried on AUP and not checked in a
+browser.**
+
+**Open on AUP:**
+- `TMC_VIM` needs `S_RFC` for `BAPI_INCOMINGINVOICE_CHANGE`.
+- Confirm the workflow restarts when the change comes **through the BAPI** (RFC), not only from
+  MIR7.
+- Find which header fields SAP lets change on a parked document; a refused field shows SAP's
+  RETURN text.
+
 ## 2026-11-21: Inbox bulk delete (admin can drop SAP invoices from VIM only) — committed with sap_dd03l.py --fm
 
 **Why:** many duplicate test invoices piled up, some of them parked in SAP. The user wants them

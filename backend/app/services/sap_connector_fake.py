@@ -226,6 +226,7 @@ class SAPConnectorFake:
             "RFC_SYSTEM_INFO": self._system_info,
             "BAPI_INCOMINGINVOICE_PARK": lambda kw: self._invoice(kw, post=False),
             "BAPI_INCOMINGINVOICE_CREATE1": lambda kw: self._invoice(kw, post=True),
+            "BAPI_INCOMINGINVOICE_CHANGE": self._invoice_change,
             "BAPI_INCOMINGINVOICE_DELETE": self._invoice_delete,
             "BAPI_TRANSACTION_COMMIT": self._commit,
             "BAPI_TRANSACTION_ROLLBACK": self._rollback,
@@ -335,6 +336,46 @@ class SAPConnectorFake:
         return _shape(
             {"RETURN": [_msg("S", "M8", "060", f"Document no. {doc} {verb}", doc)]},
             {"INVOICEDOCNUMBER": doc, "FISCALYEAR": year}, {}, kwargs)
+
+    def _invoice_change(self, kwargs) -> dict:
+        """BAPI_INCOMINGINVOICE_CHANGE on a parked document, in the open LUW.
+
+        Refuses the parameters AUP's interface doesn't have (as PyRFC would),
+        runs the park's item checks, rewrites BKTXT, and — like Lucky's
+        ZMIR7_PARK on AUP — restarts the rejected workflow: REJ -> BLK.
+        """
+        structs = kwargs.get("input_structures") or {}
+        allowed = {"HEADERDATA_CHANGE", "HEADERDATA_CHANGEX", "TABLE_CHANGE",
+                   "ADRESSDATA_CHANGE", "ADRESSDATA_CHANGEX"}
+        unknown = set(structs) - allowed
+        if unknown:
+            raise RuntimeError(f"RFC_INVALID_PARAMETER: field '{sorted(unknown)[0]}' not found")
+        doc = (kwargs.get("INVOICEDOCNUMBER") or "").strip()
+        year = (kwargs.get("FISCALYEAR") or "").strip()
+        conn = _store()
+        row = conn.execute("SELECT RBSTAT FROM RBKP WHERE BELNR = ? AND GJAHR = ?", (doc, year)).fetchone()
+        out = {"INVOICEDOCNUMBER_NEW": "", "FISCALYEAR_NEW": ""}
+        if not row:
+            return _shape({"RETURN": [_msg("E", "M8", "002", f"Document {doc} {year} does not exist", doc)]},
+                          out, {}, kwargs)
+        if row["RBSTAT"] != "A":
+            return _shape({"RETURN": [_msg("E", "M8", "411", f"Document {doc} is not parked", doc)]},
+                          out, {}, kwargs)
+        header = structs.get("HEADERDATA_CHANGE") or {}
+        items = (kwargs.get("input_tables") or {}).get("ITEMDATA") or []
+        errors = self._invoice_errors(header, items)
+        if errors:
+            return _shape({"RETURN": errors}, out, {}, kwargs)
+        if "HEADER_TXT" in header:
+            conn.execute("UPDATE RBKP SET BKTXT = ? WHERE BELNR = ? AND GJAHR = ?",
+                         (header["HEADER_TXT"], doc, year))
+        for (objkey,) in conn.execute(
+                "SELECT DISTINCT OBJKEY FROM ZMIR7_WF_LOG WHERE BELNR = ? AND GJAHR = ? AND WF_STATUS = 'REJ'",
+                (doc, year)).fetchall():
+            conn.execute("UPDATE ZMIR7_WF_LOG SET WF_STATUS = 'BLK' WHERE OBJKEY = ? AND WF_STATUS = 'REJ'",
+                         (objkey,))
+        return _shape({"RETURN": [_msg("S", "M8", "060", f"Document no. {doc} changed", doc)]},
+                      {"INVOICEDOCNUMBER_NEW": doc, "FISCALYEAR_NEW": year}, {}, kwargs)
 
     def _invoice_errors(self, header: dict, items: list) -> list:
         """Scripted failures first, then one honest structural check."""

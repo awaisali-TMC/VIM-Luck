@@ -9,7 +9,7 @@ const STATES = {
   INIT: { label: "Workflow not started in SAP", tone: "text-danger-dark", hint: "SAP saved the document but did not start its approval. Unpark it and park again, or check in SAP." },
   BLK: { label: "In SAP approval", tone: "text-warning-dark", hint: "Approvers are working on it in SAP." },
   APP: { label: "Approved in SAP", tone: "text-success-dark" },
-  REJ: { label: "Rejected in SAP", tone: "text-danger-dark", hint: "Unpark it to correct and send again." },
+  REJ: { label: "Rejected in SAP", tone: "text-danger-dark", hint: "Correct the invoice below, then click Resubmit to SAP (same document; SAP restarts its approval)." },
 };
 
 export default function SAPWorkflowStatus({ invoice, onChanged }) {

@@ -971,6 +971,7 @@ async def sync_sap_currencies(db: AsyncSession = Depends(get_db)):
 class SAPPostRequest(BaseModel):
     """Optional overrides when sending an invoice to SAP."""
     mode: str = "park"                     # "park" (MIR7, held — default) | "post" (MIRO, final)
+    #                                        | "validate" (dry run) | "change" (resubmit a REJECTED parked doc)
     company_code: Optional[str] = None     # defaults to PO's company code from SAP
     posting_date: Optional[str] = None     # defaults to today
     tax_code: str = "I0"                   # SAP tax code (I0 = Exempt from Input Sales Tax; valid in TAXPK)
@@ -1075,15 +1076,29 @@ async def post_invoice_to_sap_endpoint(
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
 
+    if req.mode not in ("park", "post", "validate", "change"):
+        raise HTTPException(status_code=400, detail=f"Unknown mode '{req.mode}'.")
+
+    if req.mode == "change":
+        # Resubmit: update the SAME parked document after SAP's workflow
+        # rejected it; ZMIR7_PARK then restarts the workflow (REJ -> BLK).
+        if not (invoice.status == "parked" and invoice.sap_document_number
+                and invoice.sap_doc_status != "posted"):
+            raise HTTPException(status_code=409, detail="Only an invoice parked in SAP can be resubmitted.")
+        if (invoice.sap_wf_status or "").upper() != "REJ":
+            raise HTTPException(status_code=409,
+                                detail="Only an invoice REJECTED in the SAP workflow can be changed and resubmitted.")
+        if not settings.SAP_ENABLED:
+            raise HTTPException(status_code=409, detail="SAP is not enabled on this instance.")
     # Check status — must be validated or approved
-    if invoice.status not in ("validated", "approved"):
+    elif invoice.status not in ("validated", "approved"):
         raise HTTPException(
             status_code=400,
             detail=f"Invoice status is '{invoice.status}'. Must be 'validated' or 'approved' to post to SAP.",
         )
 
     # Check already sent (parked or posted)
-    if invoice.sap_document_number:
+    if invoice.sap_document_number and req.mode != "change":
         raise HTTPException(
             status_code=409,
             detail=f"Invoice already sent to SAP as document {invoice.sap_document_number}/{invoice.sap_fiscal_year} ({invoice.sap_doc_status or 'posted'})",
@@ -1402,7 +1417,7 @@ async def post_invoice_to_sap_endpoint(
     # ── Lucky Cement: approval hierarchy must exist (ZINI_VERIFY) ──
     # For the parking user's SAP employee ID and the gross amount actually sent.
     # Runs in validate mode too, so the submit dialog shows it before parking.
-    if settings.SAP_HIERARCHY_CHECK_ENABLED and req.mode in ("park", "validate"):
+    if settings.SAP_HIERARCHY_CHECK_ENABLED and req.mode in ("park", "validate", "change"):
         hier = await _hierarchy_or_error(user, gross_amount, eff_currency)
         if not hier["ok"]:
             if req.mode == "validate":
@@ -1457,12 +1472,15 @@ async def post_invoice_to_sap_endpoint(
             # The MIR7 workflow authenticates the initiator via USERI/PWDI, so it
             # needs this user's SAP password (decrypted from the stored token).
             initiator_sap_pwd=decrypt_sap_password(user.sap_password_enc),
+            change_doc_number=(invoice.sap_document_number or "") if req.mode == "change" else "",
+            change_fiscal_year=(invoice.sap_fiscal_year or "") if req.mode == "change" else "",
         )
     except Exception as exc:
         logger.exception("SAP posting call failed for invoice %s", invoice.id)
         from app.services.sap_auth_log import log_rfc_failure
         kind = log_rfc_failure(f"invoice {invoice.id} {req.mode}", exc, actor=f"{user.id}:{user.email}",
-                               function="BAPI_INCOMINGINVOICE_PARK" if req.mode != "post" else "BAPI_INCOMINGINVOICE_CREATE1",
+                               function={"post": "BAPI_INCOMINGINVOICE_CREATE1",
+                                         "change": "BAPI_INCOMINGINVOICE_CHANGE"}.get(req.mode, "BAPI_INCOMINGINVOICE_PARK"),
                                po=po.po_number)
         # Show SAP's own error text in the reply (Network tab / toast), so a
         # failure can be read without shell access to the server log. RFC error
@@ -1491,7 +1509,7 @@ async def post_invoice_to_sap_endpoint(
         )
 
     # ── Update invoice in local DB ─────────────────────────────
-    doc_status = "parked" if req.mode == "park" else "posted"
+    doc_status = "posted" if req.mode == "post" else "parked"   # park / change -> parked
     invoice.sap_document_number = sap_result["invoice_doc_number"]
     invoice.sap_fiscal_year = sap_result["fiscal_year"]
     invoice.sap_company_code = company_code

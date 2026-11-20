@@ -55,6 +55,67 @@ def _sap_date(iso_date: str | None, default: str | None = None) -> str:
     return fallback
 
 
+# BAPI_INCOMINGINVOICE_CHANGE: the header fields a resubmit updates, all present
+# in BAPI_INCINV_CHNG_HEADER / ..._HEADERX on AUP (SE11, 2026-11-20). Document
+# type, company code and currency are never changed on a parked invoice.
+_CHANGE_HEADER_FIELDS = ("DOC_DATE", "PSTNG_DATE", "BLINE_DATE", "REF_DOC_NO", "GROSS_AMOUNT",
+                         "CALC_TAX_IND", "HEADER_TXT", "ITEM_TEXT", "EXCH_RATE", "EXCH_RATE_V")
+
+
+def _change_parked(sap, doc_number: str, fiscal_year: str, header_data: dict,
+                   item_rows: list, tax_rows: list, company_code: str) -> dict:
+    """Update a parked invoice in place; commit on success, roll back on error."""
+    doc = (doc_number or "").strip().zfill(10)
+    year = (fiscal_year or "").strip()
+    if not doc.strip("0") or len(year) != 4:
+        return {"success": False, "invoice_doc_number": "", "fiscal_year": "",
+                "message": "No parked SAP document to change.", "return_messages": []}
+    header_change = {k: header_data[k] for k in _CHANGE_HEADER_FIELDS if k in header_data}
+    logger.warning("[park-diag] BAPI_INCOMINGINVOICE_CHANGE %s/%s HEADER_TXT=%r, %d items",
+                   doc, year, header_change.get("HEADER_TXT"), len(item_rows))
+    result = sap.call(
+        "BAPI_INCOMINGINVOICE_CHANGE",
+        INVOICEDOCNUMBER=doc,
+        FISCALYEAR=year,
+        input_structures={
+            "HEADERDATA_CHANGE": header_change,
+            "HEADERDATA_CHANGEX": {k: "X" for k in header_change},
+            # 'X' = the table sent REPLACES the document's table
+            "TABLE_CHANGE": {"ITEMDATA": "X", "TAXDATA": "X"},
+        },
+        input_tables={"ITEMDATA": item_rows, "TAXDATA": tax_rows},
+        tables=["RETURN"],
+        table_fields={"RETURN": ["TYPE", "ID", "NUMBER", "MESSAGE", "MESSAGE_V1", "MESSAGE_V2"]},
+        output_params=["INVOICEDOCNUMBER_NEW", "FISCALYEAR_NEW"],
+    )
+    messages = result.get("RETURN", [])
+    errors = [m for m in messages if (m.get("TYPE") or "").strip() in ("E", "A")]
+    if errors:
+        try:
+            sap.call("BAPI_TRANSACTION_ROLLBACK")
+        except Exception:
+            pass
+        text = "; ".join(m.get("MESSAGE", "Unknown error") for m in errors)
+        logger.error("SAP change of %s/%s failed: %s", doc, year, text)
+        return {"success": False, "invoice_doc_number": "", "fiscal_year": "",
+                "message": text, "return_messages": messages}
+    sap.call("BAPI_TRANSACTION_COMMIT", WAIT="X")
+    new_doc = (result.get("INVOICEDOCNUMBER_NEW") or "").strip() or doc
+    new_year = (result.get("FISCALYEAR_NEW") or "").strip() or year
+    from app.services.sap_workflow import build_objkey
+    logger.info("SAP invoice %s/%s changed and resubmitted (now %s/%s)", doc, year, new_doc, new_year)
+    return {
+        "success": True,
+        "invoice_doc_number": new_doc,
+        "fiscal_year": new_year,
+        "mode": "change",
+        "message": f"Invoice {new_doc}/{new_year} changed in SAP — SAP restarts its approval workflow",
+        "return_messages": messages,
+        "workflow_objkey": build_objkey(company_code, new_doc, new_year),
+        "workflow_event_id": "",
+    }
+
+
 def build_header_text(text: str, sap_user: str = "") -> str:
     """HEADER_TXT (RBKP-BKTXT, CHAR 25).
 
@@ -91,9 +152,16 @@ def post_invoice_to_sap(
     initiator_sap_user: str = "",
     initiator_email: str = "",
     initiator_sap_pwd: str = "",
+    change_doc_number: str = "",
+    change_fiscal_year: str = "",
 ) -> dict:
     """
     Post a vendor invoice to SAP via BAPI_INCOMINGINVOICE_CREATE1.
+
+    mode="change" instead updates the PARKED document change_doc_number /
+    change_fiscal_year in place (BAPI_INCOMINGINVOICE_CHANGE) — used to resubmit
+    an invoice SAP's workflow rejected. Same header, items and tax as a park;
+    ZMIR7_PARK restarts the workflow itself (REJ -> BLK), VIM raises nothing.
 
     Parameters:
         invoice_number: vendor's invoice reference
@@ -226,6 +294,10 @@ def post_invoice_to_sap(
         )
         logger.warning("[park-diag] %s HEADER_TXT=%r (BKTXT; chars 1-8 = employee)",
                        bapi_name, header_data["HEADER_TXT"])
+
+        if mode == "change":
+            return _change_parked(sap, change_doc_number, change_fiscal_year, header_data,
+                                  item_data_rows, tax_data_rows, company_code)
 
         # ── Call BAPI ────────────────────────────────────────────
         result = sap.call(
