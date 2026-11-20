@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { usePermissions } from "../context/PermissionsContext";
 import useInvoiceDetail from "../hooks/useInvoiceDetail";
-import { updateInvoice, deleteInvoice, deleteInvoiceLineItem, patchInvoiceLineItem, addInvoiceLineItem, setParkingSelection, matchProducts } from "../services/invoiceService";
+import { getInvoice, updateInvoice, deleteInvoice, deleteInvoiceLineItem, patchInvoiceLineItem, addInvoiceLineItem, setParkingSelection, matchProducts } from "../services/invoiceService";
 import { openInvoiceDocument } from "../utils/invoiceDocument";
 import { getInvoiceMatches } from "../services/purchaseOrderService";
 import { verifyNTN } from "../services/fbrService";
@@ -402,6 +402,9 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
   const [showApprovalConfirm, setShowApprovalConfirm] = useState(false);
   const [sapValidationError, setSapValidationError] = useState(null); // SAP dry-run error(s) at submit time
   const [validatingSap, setValidatingSap] = useState(false);
+  // Set when the backend skipped the SAP dry run (SAP starts its approval
+  // workflow on every park, so a test park would leave a stray workflow).
+  const [sapDryRunSkipped, setSapDryRunSkipped] = useState(null);
   const [submittingApproval, setSubmittingApproval] = useState(false);
 
   const handleSubmitForApproval = async () => {
@@ -417,6 +420,7 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
       return;
     }
     setSapValidationError(null);
+    setSapDryRunSkipped(null);
 
     // Pre-flight the SAP park (dry run) so parking errors — duplicate check,
     // missing entry sheet, dates, tax — surface NOW, in the dialog, instead of
@@ -427,6 +431,8 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
         const res = await validateInvoiceForSAP(invoice.id, selectedLineIdArray());
         if (!res.ok) {
           setSapValidationError(res.message || "SAP validation failed.");
+        } else if (res.skipped_sap) {
+          setSapDryRunSkipped(res.message || "VIM checks passed. SAP checks the invoice when you park.");
         }
       } catch (err) {
         const detail = err.response?.data?.detail;
@@ -463,6 +469,23 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
     changeStatus("validated");
   };
 
+  // A park request that got NO reply (client timeout / dropped connection) may
+  // still have parked in SAP — the server keeps going. Re-read the invoice
+  // before calling it a failure. Returns the message to show, or null when the
+  // invoice did park.
+  const parkFailureMessage = async (err) => {
+    const detail = err.response?.data?.detail;
+    if (err.response) {
+      return typeof detail === "object" ? detail.message || JSON.stringify(detail) : detail || "Failed to park invoice in SAP";
+    }
+    try {
+      const fresh = await getInvoice(invoice.id);
+      if (fresh?.sap_document_number) return null;
+    } catch { /* fall through */ }
+    return "No reply from the server while parking (it may still be working). " +
+      "Reload this page in a minute and check the SAP status before trying again.";
+  };
+
   // Approval is skipped on this instance: confirming a validated invoice parks
   // it straight to SAP (the backend allows validated → parked for parker roles).
   const confirmApproval = async () => {
@@ -483,10 +506,9 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
       await refetch();
     } catch (err) {
       setShowApprovalConfirm(false);
-      const detail = err.response?.data?.detail;
-      setActionError(
-        typeof detail === "object" ? detail.message || JSON.stringify(detail) : detail || "Failed to park invoice in SAP"
-      );
+      const msg = await parkFailureMessage(err);
+      if (msg) setActionError(msg);
+      await refetch();
     } finally {
       setSubmittingApproval(false);
     }
@@ -579,6 +601,35 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
     }
   };
 
+  // ── Resubmit a REJECTED parked invoice: change the same SAP document ──
+  // SAP's ZMIR7_PARK restarts its approval workflow (REJ -> BLK).
+  const handleResubmit = async () => {
+    if (!window.confirm(
+      `Resubmit to SAP?\n\nSAP document ${invoice.sap_document_number}/${invoice.sap_fiscal_year} is updated ` +
+      `with your corrections (same document number) and SAP restarts its approval workflow.`
+    )) return;
+    setActionBusy(true);
+    setActionError(null);
+    try {
+      await postInvoiceToSAP(invoice.id, {
+        mode: "change",
+        taxCode: invoice.sap_tax_code || effectiveTaxCode || "I0",
+        postingDate: invoice.sap_posting_date || todayIso(),
+        headerText: invoice.sap_header_text || null,
+        exchangeRate: invoice.exchange_rate || null,
+        layout: invoice.sap_layout || "goods",
+        lineItemIds: selectedLineIdArray(),
+      });
+      await refetch();
+    } catch (err) {
+      const msg = await parkFailureMessage(err);
+      if (msg) setActionError(msg.replace("Failed to park invoice in SAP", "Failed to resubmit to SAP"));
+      await refetch();
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
   // ── Original uploaded document: view in a new tab / download ──
   const [docBusy, setDocBusy] = useState(null); // "view" | "download" | null
 
@@ -624,8 +675,13 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
 
   // SAP parking fields are editable only during review — locked once the
   // invoice is submitted for approval (pending_approval) and beyond.
+  // ...or while SAP's workflow has REJECTED the parked document: it is then
+  // corrected here and resubmitted in place (handleResubmit).
+  const rejectedInSap =
+    !!invoice && invoice.status === "parked" && invoice.sap_wf_status === "REJ" && invoice.sap_doc_status !== "posted";
   const sapFieldsEditable =
-    canEditInvoice && !!invoice && ["draft", "pending_processing", "validated", "rejected", "exception"].includes(invoice.status);
+    canEditInvoice && !!invoice &&
+    (["draft", "pending_processing", "validated", "rejected", "exception"].includes(invoice.status) || rejectedInSap);
 
   // Chosen document currency drives whether an exchange rate is required.
   const currencyVal = (liveSap ? liveSap.currency : (invoice?.sap_currency || invoice?.currency)) || "PKR";
@@ -708,7 +764,8 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
       await refetch();
     } catch (err) {
       const detail = err.response?.data?.detail;
-      const base = typeof detail === "object" ? detail.message || JSON.stringify(detail) : detail || "Failed to park invoice in SAP";
+      const base = await parkFailureMessage(err);
+      if (!base) { setShowSAPPostConfirm(false); await refetch(); return; }
       // An approved invoice is locked: the way back to editing its lines is Flag Exception.
       const hint = invoice.status === "approved" && typeof detail === "string" && detail.includes("Uncheck or delete")
         ? " This invoice is approved, so use Flag Exception to edit its lines first."
@@ -751,9 +808,11 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
   // Inline-editable while pre-approval, the user has edit rights, and it's not
   // in SAP. Locks automatically once approved/parked/posted.
   const editable =
-    canEditInvoice &&
-    !invoice.sap_document_number &&
-    ["draft", "pending_processing", "validated", "rejected", "exception"].includes(invoice.status);
+    canEditInvoice && (
+      rejectedInSap ||
+      (!invoice.sap_document_number &&
+        ["draft", "pending_processing", "validated", "rejected", "exception"].includes(invoice.status))
+    );
 
   return (
     <div className="flex flex-col gap-5">
@@ -879,6 +938,14 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
                 {sapPosting ? "Parking..." : "Park to SAP"}
               </Button>
             </span>
+          )}
+
+          {/* Resubmit — SAP rejected it: send the corrections on the same document. */}
+          {!editing && canEditInvoice && canParkToSAP && rejectedInSap && (
+            <Button variant="primary" size="sm" onClick={handleResubmit} disabled={actionBusy || !!blockedMessage}
+              title={blockedMessage ? "Some selected lines are not on the PO. Uncheck or delete them first." : undefined}>
+              {actionBusy ? "Resubmitting..." : "Resubmit to SAP"}
+            </Button>
           )}
 
           {/* Unpark from SAP — for parked invoices. Deletes the SAP doc, then
@@ -1472,7 +1539,13 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
             </div>
           )}
 
-          {canParkToSAP && !sapValidationError && (
+          {canParkToSAP && !sapValidationError && sapDryRunSkipped && (
+            <div className="bg-warning-bg border border-warning-base rounded-md px-3 py-2 text-2xs text-warning-dark">
+              ✓ {sapDryRunSkipped}
+            </div>
+          )}
+
+          {canParkToSAP && !sapValidationError && !sapDryRunSkipped && (
             <div className="bg-success-bg border border-success-base rounded-md px-3 py-2 text-2xs text-success-dark">
               ✓ SAP validation passed — this invoice will park cleanly when you submit.
             </div>

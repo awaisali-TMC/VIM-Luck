@@ -55,6 +55,75 @@ def _sap_date(iso_date: str | None, default: str | None = None) -> str:
     return fallback
 
 
+# BAPI_INCOMINGINVOICE_CHANGE: the header fields a resubmit updates, all present
+# in BAPI_INCINV_CHNG_HEADER / ..._HEADERX on AUP (SE11, 2026-11-20). Document
+# type, company code and currency are never changed on a parked invoice.
+_CHANGE_HEADER_FIELDS = ("DOC_DATE", "PSTNG_DATE", "BLINE_DATE", "REF_DOC_NO", "GROSS_AMOUNT",
+                         "CALC_TAX_IND", "HEADER_TXT", "ITEM_TEXT", "EXCH_RATE", "EXCH_RATE_V")
+
+
+def _change_parked(sap, doc_number: str, fiscal_year: str, header_data: dict,
+                   item_rows: list, tax_rows: list, company_code: str) -> dict:
+    """Update a parked invoice in place; commit on success, roll back on error."""
+    doc = (doc_number or "").strip().zfill(10)
+    year = (fiscal_year or "").strip()
+    if not doc.strip("0") or len(year) != 4:
+        return {"success": False, "invoice_doc_number": "", "fiscal_year": "",
+                "message": "No parked SAP document to change.", "return_messages": []}
+    header_change = {k: header_data[k] for k in _CHANGE_HEADER_FIELDS if k in header_data}
+    logger.warning("[park-diag] BAPI_INCOMINGINVOICE_CHANGE %s/%s HEADER_TXT=%r, %d items",
+                   doc, year, header_change.get("HEADER_TXT"), len(item_rows))
+    result = sap.call(
+        "BAPI_INCOMINGINVOICE_CHANGE",
+        INVOICEDOCNUMBER=doc,
+        FISCALYEAR=year,
+        input_structures={
+            "HEADERDATA_CHANGE": header_change,
+            "HEADERDATA_CHANGEX": {k: "X" for k in header_change},
+            # 'X' = the table sent REPLACES the document's table
+            "TABLE_CHANGE": {"ITEMDATA": "X", "TAXDATA": "X"},
+        },
+        input_tables={"ITEMDATA": item_rows, "TAXDATA": tax_rows},
+        tables=["RETURN"],
+        table_fields={"RETURN": ["TYPE", "ID", "NUMBER", "MESSAGE", "MESSAGE_V1", "MESSAGE_V2"]},
+        output_params=["INVOICEDOCNUMBER_NEW", "FISCALYEAR_NEW"],
+    )
+    messages = result.get("RETURN", [])
+    errors = [m for m in messages if (m.get("TYPE") or "").strip() in ("E", "A")]
+    if errors:
+        try:
+            sap.call("BAPI_TRANSACTION_ROLLBACK")
+        except Exception:
+            pass
+        text = "; ".join(m.get("MESSAGE", "Unknown error") for m in errors)
+        logger.error("SAP change of %s/%s failed: %s", doc, year, text)
+        return {"success": False, "invoice_doc_number": "", "fiscal_year": "",
+                "message": text, "return_messages": messages}
+    sap.call("BAPI_TRANSACTION_COMMIT", WAIT="X")
+    # The *_NEW exports are only filled when SAP gives the document a new number.
+    # Otherwise AUP returns an initial NUMC — "0000000000" / "0000" (seen
+    # 2026-11-20: storing "0000" broke the OBJKEY, so the workflow was never
+    # found again). Keep the original document in that case.
+    new_doc = (result.get("INVOICEDOCNUMBER_NEW") or "").strip()
+    new_year = (result.get("FISCALYEAR_NEW") or "").strip()
+    if not new_doc.strip("0"):
+        new_doc = doc
+    if not (len(new_year) == 4 and new_year.isdigit() and new_year.strip("0")):
+        new_year = year
+    from app.services.sap_workflow import build_objkey
+    logger.info("SAP invoice %s/%s changed and resubmitted (now %s/%s)", doc, year, new_doc, new_year)
+    return {
+        "success": True,
+        "invoice_doc_number": new_doc,
+        "fiscal_year": new_year,
+        "mode": "change",
+        "message": f"Invoice {new_doc}/{new_year} changed in SAP — SAP restarts its approval workflow",
+        "return_messages": messages,
+        "workflow_objkey": build_objkey(company_code, new_doc, new_year),
+        "workflow_event_id": "",
+    }
+
+
 def build_header_text(text: str, sap_user: str = "") -> str:
     """HEADER_TXT (RBKP-BKTXT, CHAR 25).
 
@@ -91,9 +160,16 @@ def post_invoice_to_sap(
     initiator_sap_user: str = "",
     initiator_email: str = "",
     initiator_sap_pwd: str = "",
+    change_doc_number: str = "",
+    change_fiscal_year: str = "",
 ) -> dict:
     """
     Post a vendor invoice to SAP via BAPI_INCOMINGINVOICE_CREATE1.
+
+    mode="change" instead updates the PARKED document change_doc_number /
+    change_fiscal_year in place (BAPI_INCOMINGINVOICE_CHANGE) — used to resubmit
+    an invoice SAP's workflow rejected. Same header, items and tax as a park;
+    ZMIR7_PARK restarts the workflow itself (REJ -> BLK), VIM raises nothing.
 
     Parameters:
         invoice_number: vendor's invoice reference
@@ -154,7 +230,10 @@ def post_invoice_to_sap(
             "CALC_TAX_IND": "",
             "REF_DOC_NO": invoice_number[:16] if invoice_number else "",
             # Basic Data "Text" (BKTXT); Lucky Cement: PERNR in chars 1-8
-            "HEADER_TXT": build_header_text(header_text or f"einv-{invoice_number}", initiator_sap_user),
+            # A dry run sends the marker instead, so SAP raises no workflow for
+            # a park that is rolled back (Lucky ABAP team, 2026-11-20).
+            "HEADER_TXT": ((settings.SAP_DRY_RUN_HEADER_TEXT or "VALIDATE")[:25] if mode == "validate"
+                           else build_header_text(header_text or f"einv-{invoice_number}", initiator_sap_user)),
         }
         if item_text:
             header_data["ITEM_TEXT"] = item_text[:50]  # Details "Text" (SGTXT)
@@ -223,6 +302,10 @@ def post_invoice_to_sap(
         )
         logger.warning("[park-diag] %s HEADER_TXT=%r (BKTXT; chars 1-8 = employee)",
                        bapi_name, header_data["HEADER_TXT"])
+
+        if mode == "change":
+            return _change_parked(sap, change_doc_number, change_fiscal_year, header_data,
+                                  item_data_rows, tax_data_rows, company_code)
 
         # ── Call BAPI ────────────────────────────────────────────
         result = sap.call(
@@ -295,8 +378,18 @@ def post_invoice_to_sap(
         # ── SAP workflow (park only): raise the event in the SAME LUW ──
         # Committed together with the park below, or rolled back with it, so an
         # invoice never stays parked without its approval workflow.
+        # Unless SAP raises the event itself during the park (the default,
+        # SAP_WF_RAISE_EVENT=false): then VIM raises nothing, which would start
+        # a second workflow, and only keeps the OBJKEY to read the status by.
         wf = {}
-        if workflow and mode == "park":
+        if workflow and mode == "park" and not settings.SAP_WF_RAISE_EVENT:
+            from app.services.sap_workflow import build_objkey
+            wf = {"ok": True, "event_id": "", "message": "Raised by SAP during the park",
+                  "objkey": build_objkey(company_code, doc_number, fiscal_year)}
+            logger.warning("[wf-diag] %s/%s parked; SAP raises the workflow event itself "
+                           "(SAP_WF_RAISE_EVENT=false), objkey=%s",
+                           doc_number, fiscal_year, wf["objkey"])
+        elif workflow and mode == "park":
             from app.services.sap_workflow import build_objkey, raise_parking_event
             objkey = build_objkey(company_code, doc_number, fiscal_year)
             wf = raise_parking_event(sap, objkey, doc_number,

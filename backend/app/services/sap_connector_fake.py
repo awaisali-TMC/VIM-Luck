@@ -101,6 +101,14 @@ def _store() -> sqlite3.Connection:
             conn.executescript((_FIXTURES / "data.sql").read_text(encoding="utf-8"))
             conn.commit()
         # Every start, IF NOT EXISTS: older file-backed stores gain these too.
+        # A store made with the old guessed ZMIR7_WF_LOG (STATUS / POSTED_DOC)
+        # is rebuilt in AUP's real shape; it only ever held fixture rows.
+        old = {c[1] for c in conn.execute("PRAGMA table_info(ZMIR7_WF_LOG)")}
+        if old and "WF_STATUS" not in old:
+            conn.execute("DROP TABLE ZMIR7_WF_LOG")
+        old = {c[1] for c in conn.execute("PRAGMA table_info(ZMIR7_ERROR_LOG)")}
+        if old and "ZMESSAGE_V1" not in old:
+            conn.execute("DROP TABLE ZMIR7_ERROR_LOG")
         conn.executescript((_FIXTURES / "workflow_schema.sql").read_text(encoding="utf-8"))
         conn.commit()
 
@@ -218,6 +226,7 @@ class SAPConnectorFake:
             "RFC_SYSTEM_INFO": self._system_info,
             "BAPI_INCOMINGINVOICE_PARK": lambda kw: self._invoice(kw, post=False),
             "BAPI_INCOMINGINVOICE_CREATE1": lambda kw: self._invoice(kw, post=True),
+            "BAPI_INCOMINGINVOICE_CHANGE": self._invoice_change,
             "BAPI_INCOMINGINVOICE_DELETE": self._invoice_delete,
             "BAPI_TRANSACTION_COMMIT": self._commit,
             "BAPI_TRANSACTION_ROLLBACK": self._rollback,
@@ -313,11 +322,61 @@ class SAPConnectorFake:
             conn.execute("ALTER TABLE RBKP ADD COLUMN BKTXT TEXT")
         conn.execute("INSERT INTO RBKP (BELNR, GJAHR, RBSTAT, BKTXT) VALUES (?, ?, ?, ?)",
                      (doc, year, "5" if post else "A", header.get("HEADER_TXT") or ""))
+        # Lucky Cement: parking itself raises ZMIR7_PARK's event inside SAP, in
+        # the same LUW (VIM raises nothing unless SAP_WF_RAISE_EVENT is on).
+        from app.config import settings as _s
+        # ... except for a dry run, which marks BKTXT (SAP_DRY_RUN_HEADER_TEXT).
+        dry_run = (header.get("HEADER_TXT") or "") == (_s.SAP_DRY_RUN_HEADER_TEXT or "VALIDATE")[:25]
+        if not post and not dry_run and _s.SAP_WORKFLOW_ENABLED and not _s.SAP_WF_RAISE_EVENT:
+            objkey = f"{(header.get('COMP_CODE') or '').strip()}{doc}{year}"
+            conn.execute("DELETE FROM ZMIR7_WF_LOG WHERE OBJKEY = ?", (objkey,))
+            wf_log_step(conn, objkey, "BLK")
 
         verb = "posted" if post else "parked"
         return _shape(
             {"RETURN": [_msg("S", "M8", "060", f"Document no. {doc} {verb}", doc)]},
             {"INVOICEDOCNUMBER": doc, "FISCALYEAR": year}, {}, kwargs)
+
+    def _invoice_change(self, kwargs) -> dict:
+        """BAPI_INCOMINGINVOICE_CHANGE on a parked document, in the open LUW.
+
+        Refuses the parameters AUP's interface doesn't have (as PyRFC would),
+        runs the park's item checks, rewrites BKTXT, and — like Lucky's
+        ZMIR7_PARK on AUP — restarts the rejected workflow: REJ -> BLK.
+        """
+        structs = kwargs.get("input_structures") or {}
+        allowed = {"HEADERDATA_CHANGE", "HEADERDATA_CHANGEX", "TABLE_CHANGE",
+                   "ADRESSDATA_CHANGE", "ADRESSDATA_CHANGEX"}
+        unknown = set(structs) - allowed
+        if unknown:
+            raise RuntimeError(f"RFC_INVALID_PARAMETER: field '{sorted(unknown)[0]}' not found")
+        doc = (kwargs.get("INVOICEDOCNUMBER") or "").strip()
+        year = (kwargs.get("FISCALYEAR") or "").strip()
+        conn = _store()
+        row = conn.execute("SELECT RBSTAT FROM RBKP WHERE BELNR = ? AND GJAHR = ?", (doc, year)).fetchone()
+        out = {"INVOICEDOCNUMBER_NEW": "", "FISCALYEAR_NEW": ""}
+        if not row:
+            return _shape({"RETURN": [_msg("E", "M8", "002", f"Document {doc} {year} does not exist", doc)]},
+                          out, {}, kwargs)
+        if row["RBSTAT"] != "A":
+            return _shape({"RETURN": [_msg("E", "M8", "411", f"Document {doc} is not parked", doc)]},
+                          out, {}, kwargs)
+        header = structs.get("HEADERDATA_CHANGE") or {}
+        items = (kwargs.get("input_tables") or {}).get("ITEMDATA") or []
+        errors = self._invoice_errors(header, items)
+        if errors:
+            return _shape({"RETURN": errors}, out, {}, kwargs)
+        if "HEADER_TXT" in header:
+            conn.execute("UPDATE RBKP SET BKTXT = ? WHERE BELNR = ? AND GJAHR = ?",
+                         (header["HEADER_TXT"], doc, year))
+        for (objkey,) in conn.execute(
+                "SELECT DISTINCT OBJKEY FROM ZMIR7_WF_LOG WHERE BELNR = ? AND GJAHR = ? AND WF_STATUS = 'REJ'",
+                (doc, year)).fetchall():
+            conn.execute("UPDATE ZMIR7_WF_LOG SET WF_STATUS = 'BLK' WHERE OBJKEY = ? AND WF_STATUS = 'REJ'",
+                         (objkey,))
+        return _shape({"RETURN": [_msg("S", "M8", "060", f"Document no. {doc} changed", doc)]},
+                      # As on AUP: no new number, so the exports come back initial.
+                      {"INVOICEDOCNUMBER_NEW": "0000000000", "FISCALYEAR_NEW": "0000"}, {}, kwargs)
 
     def _invoice_errors(self, header: dict, items: list) -> list:
         """Scripted failures first, then one honest structural check."""
@@ -391,8 +450,7 @@ class SAPConnectorFake:
 
         conn = _store()
         conn.execute("DELETE FROM ZMIR7_WF_LOG WHERE OBJKEY = ?", (objkey,))
-        conn.execute("INSERT INTO ZMIR7_WF_LOG (OBJKEY, STATUS, POSTED_DOC) VALUES (?, 'BLK', '')",
-                     (objkey,))
+        wf_log_step(conn, objkey, "BLK")
         return _shape({"MESSAGE_LINES": []},
                       {"RETURN_CODE": "0", "EVENT_ID": f"EVT{objkey[4:14]}"}, {}, kwargs)
 
@@ -448,6 +506,28 @@ def _rowcount(value) -> int:
     return n if n > 0 else 0
 
 
+def wf_log_step(conn, objkey: str, status: str) -> None:
+    """Append one ZMIR7_WF_LOG step, as SAP's workflow does (ITEM + 1)."""
+    from datetime import datetime
+    n = conn.execute("SELECT count(*) AS n FROM ZMIR7_WF_LOG WHERE OBJKEY = ?", (objkey,)).fetchone()["n"]
+    now = datetime.now()
+    conn.execute("INSERT INTO ZMIR7_WF_LOG (OBJKEY, ITEM, BELNR, GJAHR, BUKRS, WF_STATUS, PERNR, ERDAT, ERZET) "
+                 "VALUES (?, ?, ?, ?, ?, ?, '', ?, ?)",
+                 (objkey, f"{n + 1:04d}", objkey[4:14], objkey[14:18], objkey[:4],
+                  "INI" if status == "INIT" else status, now.strftime("%Y%m%d"), now.strftime("%H%M%S")))
+
+
+def error_log_row(conn, objkey: str, kind: str, text: str) -> None:
+    """Append one ZMIR7_ERROR_LOG message for the document behind objkey."""
+    from datetime import datetime
+    n = conn.execute("SELECT count(*) AS n FROM ZMIR7_ERROR_LOG").fetchone()["n"]
+    now = datetime.now()
+    conn.execute("INSERT INTO ZMIR7_ERROR_LOG (SR_NO, BELNR, GJAHR, TYPE, ZMESSAGE, CDATE, CTIME, Z_FROM) "
+                 "VALUES (?, ?, ?, ?, ?, ?, ?, 'Bus')",
+                 (n + 1, objkey[4:14], objkey[14:18], kind, text,
+                  now.strftime("%Y%m%d"), now.strftime("%H%M%S")))
+
+
 def decide_workflow(objkey: str, approve: bool, error: str = "") -> dict:
     """Play the SAP approver for one parked invoice (demos and tests).
 
@@ -458,25 +538,22 @@ def decide_workflow(objkey: str, approve: bool, error: str = "") -> dict:
     approve=False → STATUS REJ.
     """
     conn = _store()
-    row = conn.execute("SELECT STATUS FROM ZMIR7_WF_LOG WHERE OBJKEY = ?", (objkey,)).fetchone()
+    row = conn.execute("SELECT WF_STATUS FROM ZMIR7_WF_LOG WHERE OBJKEY = ?", (objkey,)).fetchone()
     if not row:
         raise LookupError(f"No workflow record for OBJKEY {objkey}")
     if not approve:
-        conn.execute("UPDATE ZMIR7_WF_LOG SET STATUS = 'REJ' WHERE OBJKEY = ?", (objkey,))
+        wf_log_step(conn, objkey, "REJ")
         conn.commit()
         return {"objkey": objkey, "status": "REJ"}
     if error:
-        conn.execute("UPDATE ZMIR7_WF_LOG SET STATUS = 'APP' WHERE OBJKEY = ?", (objkey,))
-        conn.execute("INSERT INTO ZMIR7_ERROR_LOG (OBJKEY, TYPE, MESSAGE) VALUES (?, 'E', ?)",
-                     (objkey, error))
+        wf_log_step(conn, objkey, "APP")
+        error_log_row(conn, objkey, "E", error)
         conn.commit()
         return {"objkey": objkey, "status": "APP", "error": error}
     # A parked invoice keeps its number when posted (MIR4 shows the same BELNR).
     doc, year = objkey[4:14], objkey[14:18]
     conn.execute("UPDATE RBKP SET RBSTAT = '5' WHERE BELNR = ? AND GJAHR = ?", (doc, year))
-    conn.execute("UPDATE ZMIR7_WF_LOG SET STATUS = 'APP', POSTED_DOC = ? WHERE OBJKEY = ?",
-                 (doc, objkey))
-    conn.execute("INSERT INTO ZMIR7_ERROR_LOG (OBJKEY, TYPE, MESSAGE) VALUES (?, 'S', ?)",
-                 (objkey, f"Document {doc} posted"))
+    wf_log_step(conn, objkey, "APP")
+    error_log_row(conn, objkey, "S", "Document Posted")
     conn.commit()
     return {"objkey": objkey, "status": "APP", "posted_doc": doc}

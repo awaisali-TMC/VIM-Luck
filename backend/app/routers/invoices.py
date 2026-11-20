@@ -172,6 +172,16 @@ def _scope_query_to_principal(query, principal: Principal):
     return query
 
 
+def _locked_in_sap(invoice: Invoice) -> bool:
+    """In SAP and not editable. A parked document that SAP's workflow REJECTED is
+    the exception: it is corrected here and resubmitted in place
+    (POST /api/sap/invoices/{id}/post, mode="change")."""
+    if not invoice.sap_document_number:
+        return False
+    rejected = (invoice.sap_wf_status or "").upper() == "REJ" and invoice.sap_doc_status != "posted"
+    return not rejected
+
+
 def _assert_can_access(invoice: Invoice, principal: Principal) -> None:
     """Raise 404 if a supplier tries to touch an invoice that isn't theirs.
 
@@ -1183,6 +1193,57 @@ async def delete_invoice(
     return {"success": True, "id": invoice_id, "soft_deleted": True}
 
 
+class BulkDeleteRequest(BaseModel):
+    ids: list[int]
+    # Admin only: also remove invoices that are parked/posted in SAP — from VIM
+    # ONLY. The SAP document and its workflow are not touched (used to clear
+    # duplicate/test invoices; anything still open in SAP is handled there).
+    vim_only: bool = False
+
+
+@router.post("/bulk-delete")
+async def bulk_delete_invoices(
+    req: BulkDeleteRequest,
+    db: AsyncSession = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+):
+    """Soft-delete several invoices. Returns which were deleted and why the
+    others were skipped. Without vim_only, an invoice with a SAP document is
+    skipped (as DELETE /{id} refuses it)."""
+    if req.vim_only and not (principal.kind == "internal" and principal.role == "admin"):
+        raise HTTPException(status_code=403, detail="Only an admin can remove SAP invoices from VIM.")
+    ids = list(dict.fromkeys(req.ids))[:500]
+    rows = (await db.execute(
+        select(Invoice).where(Invoice.id.in_(ids), Invoice.is_deleted == 0)
+    )).scalars().all() if ids else []
+    found = {inv.id: inv for inv in rows}
+    deleted, skipped = [], []
+    now = datetime.now(timezone.utc)
+    for inv_id in ids:
+        inv = found.get(inv_id)
+        if not inv:
+            skipped.append({"id": inv_id, "reason": "not found"})
+            continue
+        try:
+            _assert_can_access(inv, principal)
+        except HTTPException:
+            skipped.append({"id": inv_id, "reason": "no access"})
+            continue
+        if inv.sap_document_number and not req.vim_only:
+            skipped.append({"id": inv_id, "reason": f"{inv.sap_doc_status or 'parked'} in SAP as "
+                                                    f"{inv.sap_document_number}/{inv.sap_fiscal_year}"})
+            continue
+        if inv.sap_document_number:
+            logger.warning("Invoice %s removed from VIM only by admin %s; SAP document %s/%s "
+                           "(workflow %s) left untouched", inv.id, principal.id,
+                           inv.sap_document_number, inv.sap_fiscal_year, inv.sap_wf_status or "-")
+        inv.is_deleted = 1
+        inv.deleted_at = now
+        deleted.append(inv_id)
+    await db.commit()
+    return {"deleted": deleted, "skipped": skipped}
+
+
 class LineItemPatch(BaseModel):
     """Partial update for a single invoice line item (inline editing)."""
     description: str | None = None
@@ -1231,7 +1292,7 @@ async def add_line_item(
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
     _assert_can_access(invoice, principal)
-    if invoice.sap_document_number:
+    if _locked_in_sap(invoice):
         raise HTTPException(status_code=409, detail="Invoice is in SAP — unpark it before editing line items.")
 
     line = InvoiceLineItem(
@@ -1268,7 +1329,7 @@ async def patch_line_item(
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
     _assert_can_access(invoice, principal)
-    if invoice.sap_document_number:
+    if _locked_in_sap(invoice):
         raise HTTPException(status_code=409, detail="Invoice is in SAP — unpark it before editing line items.")
 
     line = next((li for li in invoice.line_items if li.id == line_item_id), None)
@@ -1337,7 +1398,7 @@ async def delete_line_item(
         raise HTTPException(status_code=404, detail="Invoice not found")
     _assert_can_access(invoice, principal)
 
-    if invoice.sap_document_number:
+    if _locked_in_sap(invoice):
         raise HTTPException(
             status_code=409,
             detail=(

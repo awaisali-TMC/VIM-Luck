@@ -34,11 +34,24 @@ logger = logging.getLogger(__name__)
 WF_LOG_TABLE = "ZMIR7_WF_LOG"
 ERROR_LOG_TABLE = "ZMIR7_ERROR_LOG"
 
-# Logical name → SAP column. Change the right-hand side once DD03L is read.
-WF_LOG_FIELDS = {"objkey": "OBJKEY", "status": "STATUS", "posted_doc": "POSTED_DOC"}
-ERROR_LOG_FIELDS = {"objkey": "OBJKEY", "type": "TYPE", "message": "MESSAGE"}
+# Logical name → SAP column. ZMIR7_WF_LOG is confirmed on AUP (RFC_READ_TABLE
+# FIELDS, 2026-11-20): one row per workflow step, ITEM counting up; there is no
+# posted-document column, because APP means SAP approved AND posted the invoice,
+# which keeps its parked number (BELNR).
+WF_LOG_FIELDS = {"objkey": "OBJKEY", "item": "ITEM", "status": "WF_STATUS",
+                 "belnr": "BELNR", "erdat": "ERDAT", "erzet": "ERZET"}
+# ZMIR7_ERROR_LOG, also confirmed on AUP (2026-11-20): it has NO OBJKEY — rows
+# are keyed by document number + fiscal year (no company code). TYPE is
+# S/E/W/I/A, ZMESSAGE the text (CHAR 220), CDATE/CTIME (CHAR) when it was
+# logged. The newest row per document decides; Z_FROM is not used.
+ERROR_LOG_FIELDS = {"belnr": "BELNR", "gjahr": "GJAHR", "type": "TYPE",
+                    "message": "ZMESSAGE", "cdate": "CDATE", "ctime": "CTIME",
+                    # used when ZMESSAGE is empty (seen on AUP for a rejection)
+                    "msg_id": "ID", "msg_no": "ZNUMBER", "v1": "ZMESSAGE_V1",
+                    "v2": "ZMESSAGE_V2", "v3": "ZMESSAGE_V3", "v4": "ZMESSAGE_V4"}
 
-# ZMIR7_WF_LOG-STATUS values (Naila's meeting notes).
+# ZMIR7_WF_LOG-WF_STATUS values (Lucky ABAP team, 2026-11-20). CHAR 3, so
+# "INIT" may be stored as "INI"; both are read as WF_INIT.
 WF_INIT = "INIT"   # document saved, workflow NOT initiated
 WF_BLK = "BLK"     # workflow in process
 WF_APP = "APP"     # approved — SAP posts the invoice
@@ -186,29 +199,151 @@ def _read(sap, table: str, fields: dict, objkeys: list[str]) -> list[dict]:
     return [{back.get(k, k): v for k, v in r.items()} for r in rows]
 
 
+def _fill_t100(template: str, vars_: list[str]) -> str:
+    """Put a message's variables into a T100 text: &1..&4 by number, a bare &
+    in order, && is a literal &."""
+    import re
+    it = iter(vars_)
+    out = re.sub(r"&([1-4])", lambda m: vars_[int(m.group(1)) - 1] if int(m.group(1)) <= len(vars_) else "",
+                 template.replace("&&", "\x00"))
+    out = re.sub(r"&", lambda m: next(it, ""), out)
+    return " ".join(out.replace("\x00", "&").split())
+
+
+def _read_t100(sap, pairs: set[tuple[str, str]]) -> dict[tuple[str, str], str]:
+    """English message texts from T100 for (class, number) pairs. {} on failure
+    (e.g. no authorization for T100): the caller then shows the code."""
+    if not pairs:
+        return {}
+    options = [{"TEXT": "SPRSL = 'E' AND ( "}]
+    for i, (cls, no) in enumerate(sorted(pairs)):
+        options.append({"TEXT": f"{'OR ' if i else ''}( ARBGB = '{cls}' AND MSGNR = '{no}' ) "})
+    options.append({"TEXT": ") "})
+    try:
+        from app.services.sap_po_service import _parse_delimited_rows
+        res = sap.call(
+            "RFC_READ_TABLE", QUERY_TABLE="T100", DELIMITER="|",
+            input_tables={"OPTIONS": options,
+                          "FIELDS": [{"FIELDNAME": f} for f in ("ARBGB", "MSGNR", "TEXT")]},
+            tables=["DATA", "FIELDS"],
+            table_fields={"DATA": ["WA"], "FIELDS": ["FIELDNAME", "OFFSET", "LENGTH"]},
+        )
+        rows = _parse_delimited_rows(res.get("DATA", []), res.get("FIELDS", []))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("T100 message texts not read (showing codes instead): %s", exc)
+        return {}
+    return {((r.get("ARBGB") or "").strip(), (r.get("MSGNR") or "").strip()): (r.get("TEXT") or "").strip()
+            for r in rows}
+
+
+def _msg_key(row: dict) -> tuple[str, str] | None:
+    cls = (row.get("msg_id") or "").strip().upper()
+    no = (row.get("msg_no") or "").strip()
+    return (cls, no.zfill(3)) if cls and no.strip("0") else None
+
+
+def _message_text(row: dict, t100: dict | None = None) -> str:
+    """ZMESSAGE; when SAP left it empty, the T100 text of ID/ZNUMBER with the
+    variables filled in ("FF 724: <text>"); without T100, "<class> <number>: <vars>"."""
+    text = (row.get("message") or "").strip()
+    if text:
+        return text
+    vars_ = [row.get(k, "").strip() for k in ("v1", "v2", "v3", "v4")]
+    key = _msg_key(row)
+    head = f"{key[0]} {key[1].lstrip('0')}" if key else ""
+    template = (t100 or {}).get(key) if key else None
+    if template:
+        return f"{head}: {_fill_t100(template, vars_)}"
+    shown = " ".join(v for v in vars_ if v)
+    text = ": ".join(p for p in (head, shown) if p)
+    return text or "SAP logged an error without a message text"
+
+
+def _read_error_log(sap, objkeys: list[str]) -> list[dict]:
+    """ZMIR7_ERROR_LOG rows for these OBJKEYs, matched by BELNR + GJAHR (the
+    table has no OBJKEY). Each row gets the "objkey" it belongs to."""
+    by_doc = {(k[4:14], k[14:18]): k for k in objkeys if len(k) >= 18}
+    if not by_doc:
+        return []
+    f = ERROR_LOG_FIELDS
+    # One <=72-char OPTIONS row per document, OR-ed together.
+    options = [{"TEXT": f"{'OR ' if i else ''}( {f['belnr']} = '{doc}' AND {f['gjahr']} = '{year}' ) "}
+               for i, (doc, year) in enumerate(by_doc)]
+    from app.services.sap_po_service import _parse_delimited_rows
+    result = sap.call(
+        "RFC_READ_TABLE",
+        QUERY_TABLE=settings.SAP_WF_ERROR_TABLE or ERROR_LOG_TABLE,
+        DELIMITER="|",
+        input_tables={"OPTIONS": options,
+                      "FIELDS": [{"FIELDNAME": c} for c in f.values()]},
+        tables=["DATA", "FIELDS"],
+        table_fields={"DATA": ["WA"], "FIELDS": ["FIELDNAME", "OFFSET", "LENGTH"]},
+    )
+    back = {sap_col: logical for logical, sap_col in f.items()}
+    rows = []
+    for r in _parse_delimited_rows(result.get("DATA", []), result.get("FIELDS", [])):
+        row = {back.get(k, k): (v or "").strip() for k, v in r.items()}
+        row["objkey"] = by_doc.get((row.get("belnr", "").zfill(10), row.get("gjahr", "")), "")
+        if row["objkey"]:
+            rows.append(row)
+    return rows
+
+
 def read_workflow_status(sap, objkeys: list[str]) -> dict[str, dict]:
     """OBJKEY → {status, label, posted_doc, error}. Keys with no WF_LOG row are
     absent from the result (the workflow has not written anything yet)."""
     objkeys = [k for k in dict.fromkeys(objkeys) if k]
     out: dict[str, dict] = {}
-    for row in _read(sap, WF_LOG_TABLE, WF_LOG_FIELDS, objkeys):
+    # Several rows per key (one per step): the newest step decides.
+    latest: dict[str, dict] = {}
+    for row in _read(sap, settings.SAP_WF_LOG_TABLE or WF_LOG_TABLE, WF_LOG_FIELDS, objkeys):
+        key = (row.get("objkey") or "").strip()
+        order = tuple((row.get(f) or "").strip() for f in ("erdat", "erzet", "item"))
+        if key and (key not in latest or order >= latest[key]["_order"]):
+            latest[key] = {**row, "_order": order}
+    for key, row in latest.items():
         status = (row.get("status") or "").strip().upper()
-        out[row["objkey"]] = {
+        if status == "INI":
+            status = WF_INIT
+        out[key] = {
             "status": status,
             "label": WF_LABELS.get(status, status or "Unknown"),
-            "posted_doc": (row.get("posted_doc") or "").strip(),
+            # APP = approved and posted by SAP, under the same document number.
+            "posted_doc": ((row.get("belnr") or "").strip() or key[4:14]) if status == WF_APP else "",
             "error": "",
         }
     # The last row per key decides (the table has no timestamp we rely on, so
     # this trusts SAP's row order): an E row sets the error, an S row clears it.
-    for row in _read(sap, ERROR_LOG_TABLE, ERROR_LOG_FIELDS, objkeys):
-        entry = out.setdefault(row["objkey"], {"status": "", "label": "No workflow record",
-                                               "posted_doc": "", "error": ""})
-        kind = (row.get("type") or "").strip().upper()
-        if kind == "E":
-            entry["error"] = (row.get("message") or "").strip() or "SAP posting error"
+    # If the error log can't be read, keep the workflow status rather than
+    # failing the whole refresh.
+    try:
+        err_rows = _read_error_log(sap, objkeys)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("%s not read: %s", settings.SAP_WF_ERROR_TABLE or ERROR_LOG_TABLE, exc)
+        err_rows = []
+    # Newest message per document decides (CDATE + CTIME; ties keep SAP's order).
+    newest: dict[str, dict] = {}
+    for row in err_rows:
+        order = (row.get("cdate", ""), row.get("ctime", ""))
+        if row["objkey"] not in newest or order >= newest[row["objkey"]]["_order"]:
+            newest[row["objkey"]] = {**row, "_order": order}
+    # Messages logged as a code only (no ZMESSAGE): one T100 read for all.
+    t100 = _read_t100(sap, {k for r in newest.values()
+                            if (r.get("type") or "").upper() in ("E", "A") and not (r.get("message") or "").strip()
+                            for k in [_msg_key(r)] if k})
+    for key, row in newest.items():
+        entry = out.setdefault(key, {"status": "", "label": "No workflow record",
+                                     "posted_doc": "", "error": ""})
+        kind = (row.get("type") or "").upper()
+        if kind in ("E", "A"):
+            entry["error"] = _message_text(row, t100)
         elif kind == "S":
             entry["error"] = ""
+    # APP normally means posted, but a posting error logged after it means SAP
+    # approved and could not post: keep it parked and show the error.
+    for entry in out.values():
+        if entry["error"]:
+            entry["posted_doc"] = ""
     return out
 
 

@@ -5,6 +5,239 @@ Handover from Claude Code sessions on this machine (`D:\VIM\VIM-Luck`). Read
 what is still open. (`HANDOFF.md` is the separate product feature-status doc.)
 Newest session first; §1–§5 below are from session 1 and are still accurate.
 
+## 2026-11-21 (evening): resubmit tested on AUP — "0000" fiscal-year bug fixed — committed, pushed
+
+The first live resubmits on AUP (invoices 53/54) showed four things:
+- **`S_RFC` for `BAPI_INCOMINGINVOICE_CHANGE`** was missing (`RFC_NO_AUTHORITY`). Basis has since
+  granted it.
+- **`FF 724` "Tax entry not possible in this item"** was the real reason the workflow rejected the
+  invoice, and the resubmit hit it too. The PO item's tax code is `I2`, but VIM sent the
+  AI-suggested `I1`. VIM never reads `EKPO-MWSKZ`; a follow-up is to default to it and warn on a
+  mismatch (offered to the user). Choosing `I2` by hand made the resubmit go through.
+- **Bug, now fixed:** when the number is unchanged, `BAPI_INCOMINGINVOICE_CHANGE` returns
+  `INVOICEDOCNUMBER_NEW` / `FISCALYEAR_NEW` as initial values (`0000000000` / `0000`). VIM stored
+  `0000` as the year, the OBJKEY became `…0000`, and "Refresh from SAP" stayed on "Waiting for
+  SAP". `_change_parked()` now keeps the original document and year when the exports are
+  initial. The fake connector returns them that way, and `test_sap_workflow` asserts it.
+- **Repairing invoice 54:** run
+  `backend/.venv/bin/python backend/fix_invoice_sap_year.py 54 2027 --yes`. It is report-only
+  without `--yes`, and it restores the year and rebuilds the OBJKEY.
+
+## 2026-11-21 (later): resubmit a REJECTED invoice on the same SAP document — committed, pushed
+
+**Requirement:** when SAP's workflow rejects an invoice, the user corrects it in VIM and sends it
+again. It must be the **same parked document**, which is Lucky's own functionality.
+
+**ABAP confirmed:** changing and saving a rejected parked document makes `ZMIR7_PARK` restart the
+workflow itself, and the `ZMIR7_WF_LOG` row turns from `REJ` back to `BLK`.
+
+**`BAPI_INCOMINGINVOICE_CHANGE` on AUP** (SE37/SE11 screenshots from the user):
+- IMPORT: `INVOICEDOCNUMBER`, `FISCALYEAR`, `INVOICE_DOC_STATUS` (optional), `TABLE_CHANGE`
+  (`BAPI_INCINV_CHNG_TABLES`: `ITEMDATA`, `GLACCOUNTDATA`, `MATERIALDATA`, `TAXDATA`, …, 'X' =
+  replace), `HEADERDATA_CHANGE` (`BAPI_INCINV_CHNG_HEADER`, same field names as the park header),
+  `HEADERDATA_CHANGEX`, `ADRESSDATA_CHANGE(X)`.
+- EXPORT: `INVOICEDOCNUMBER_NEW`, `FISCALYEAR_NEW`.
+- TABLES: `ITEMDATA` (`BAPI_INCINV_CREATE_ITEM`) and `TAXDATA` (`BAPI_INCINV_CREATE_TAX`), the same
+  structures as the park.
+
+**Code:**
+- `sap_invoice_post.post_invoice_to_sap(mode="change", change_doc_number=, change_fiscal_year=)`
+  builds the same header, items and tax as a park, then calls `_change_parked()`.
+- `_change_parked()` sends header fields `_CHANGE_HEADER_FIELDS` (never doc type, company code or
+  currency) with `CHANGEX` 'X' and `TABLE_CHANGE` `ITEMDATA`/`TAXDATA` = 'X'. It commits on
+  success and rolls back on E/A.
+- Router `POST /api/sap/invoices/{id}/post` accepts `mode="change"` only for a parked invoice with
+  workflow `REJ`; otherwise it returns 409. It runs the same gates as a park (duplicate,
+  `ZINI_VERIFY`) and keeps the invoice parked on the same document.
+- `invoices.py` adds `_locked_in_sap()`: line add, patch and delete are allowed when the workflow is
+  `REJ`.
+- Frontend: for a `REJ` invoice the fields, SAP card and lines are editable again, and a
+  **"Resubmit to SAP"** button appears. The `REJ` hint in `SAPWorkflowStatus` now says so.
+  "Unpark from SAP" stays.
+- Fake SAP: `BAPI_INCOMINGINVOICE_CHANGE` refuses unknown structures, runs the park's item checks,
+  rewrites BKTXT and flips `REJ` to `BLK`.
+
+**Tests:** `test_sap_workflow.py` gains a `RESUBMIT` section. All SAP suites, `test_bulk_delete`
+and `test_line_item_guards` pass. The frontend builds. **Not tried on AUP and not checked in a
+browser.**
+
+**Open on AUP:**
+- `TMC_VIM` needs `S_RFC` for `BAPI_INCOMINGINVOICE_CHANGE`.
+- Confirm the workflow restarts when the change comes **through the BAPI** (RFC), not only from
+  MIR7.
+- Find which header fields SAP lets change on a parked document; a refused field shows SAP's
+  RETURN text.
+
+## 2026-11-21: Inbox bulk delete (admin can drop SAP invoices from VIM only) — committed with sap_dd03l.py --fm
+
+**Why:** many duplicate test invoices piled up, some of them parked in SAP. The user wants them
+gone from **VIM only**; SAP is not to be touched.
+
+**Backend:** `POST /api/invoices/bulk-delete` takes `{ids, vim_only}` and soft-deletes the
+invoices. It returns `{deleted, skipped:[{id, reason}]}`.
+- Without `vim_only`, an invoice with a SAP document is skipped.
+- `vim_only=true` is **admin-only** (403 otherwise). It also removes parked/posted invoices, but
+  only from VIM: no RFC is made, the SAP document and workflow stay as they are, and a WARNING is
+  logged.
+
+**Frontend:** the Invoice Inbox gets a checkbox per row, a select-all-on-page box and a
+**"Delete selected (n)"** button.
+- The confirm dialog shows admins an opt-in checkbox for the parked/posted ones, worded "from VIM
+  only". Other roles are told those will be skipped.
+- After the delete, a result banner lists what was deleted and what was skipped.
+
+**Tests:** `backend/test_bulk_delete.py` passes; the frontend lint and build are clean.
+**Not checked in a browser.**
+
+**Also uncommitted:** `sap_dd03l.py --fm <FUNCTION>` dumps an FM's interface (FUPARAREF) and its
+structures (DD03L). It is meant for `BAPI_INCOMINGINVOICE_CHANGE`, which the "Resubmit a rejected
+invoice to SAP" feature needs.
+- The ABAP team confirmed that changing a rejected parked document makes `ZMIR7_PARK` restart the
+  workflow itself, and that the `REJ` row turns back to `BLK`.
+- The feature itself is not built yet; it waits for the BAPI interface.
+
+## 2026-11-20 (night): workflow status read from the real ZMIR7_WF_LOG columns — committed `8068114`, pushed
+
+**Why "Refresh from SAP" failed:** VIM asked `RFC_READ_TABLE` for guessed columns (`STATUS`,
+`POSTED_DOC`). The SAP reply `TABLE_WITHOUT_DATA` was misleading. `ZMIR7_WF_LOG` is a transparent,
+active table in AUP client 100 (ABAP team, SE11/SE16, SE37 test).
+
+**Its real columns:**
+`MANDT, OBJKEY(C40), ITEM(N4), BELNR, GJAHR, SCENARIO, ERDAT, ERZET, WF_STATUS(C3), PERNR, BUKRS,
+TERMINAL, SCENARIO_DESC, AMOUNT, SLABID1, WAERS, AMOUNT_IN_LOC`.
+
+**WF_STATUS values (ABAP team):**
+- `INIT`: saved, but no workflow. The column is CHAR 3, so it is probably stored as `INI`; VIM reads
+  both.
+- `BLK`: in process.
+- `APP`: approved **and posted**, under the same `BELNR`.
+- `REJ`: rejected.
+
+**`ZMIR7_ERROR_LOG`, also confirmed (SE37 FIELDS):**
+`SR_NO(I), BELNR, GJAHR, TYPE(C1), ID, ZNUMBER, CDATE, CTIME, ZMESSAGE(C220), ZLOG_NO, ZLOG_MSG_NO,
+ZMESSAGE_V1..V4, Z_FROM, TOTAL_APP, CURRENT_APPR`.
+- The table has **no OBJKEY**, so VIM matches its rows by `BELNR` + `GJAHR` (`_read_error_log`).
+- The newest row per document, by `CDATE` + `CTIME`, decides the result.
+- `E` / `A` keeps an `APP` invoice parked and shows `ZMESSAGE`; `S` ("Document Posted") clears the
+  error.
+- `Z_FROM` is ignored, as the ABAP team said.
+- The fake connector's `ZMIR7_ERROR_LOG` has the real shape, filled by `error_log_row`.
+
+**Code (`sap_workflow.py`):**
+- It reads `OBJKEY`, `ITEM`, `WF_STATUS`, `BELNR`, `ERDAT`, `ERZET` and takes the newest step per
+  OBJKEY.
+- `APP` means posted, with `posted_doc` = `BELNR`, unless the error log holds an `E` row.
+- A failed error-log read is logged and skipped, so it never breaks the refresh.
+
+**Other changes:**
+- The table names are settings: `SAP_WF_LOG_TABLE`, `SAP_WF_ERROR_TABLE`.
+- `backend/sap_dd03l.py` shows a table's DD03L columns; `--find ZMIR7` lists the objects and their
+  TABCLASS.
+- In the fake connector, `ZMIR7_WF_LOG` now has the real shape and one row per step
+  (`wf_log_step`). An old-shape file store is rebuilt.
+- The refresh 502 carries SAP's own text.
+
+**Still needed from ABAP:**
+- The `BKTXT = VALIDATE` check: the case is confirmed as upper-case `VALIDATE`, which is what VIM
+  sends. Once ABAP says the check is live, set `SAP_WF_DRY_RUN_SAFE=true` on the LAN box.
+- ~~Initiator from `BKTXT(8)`~~ **confirmed by ABAP (2026-11-20).**
+- Cancel the extra workflows: the second one on `5105660678`, and invoice 46's dry-run workflow.
+
+## 2026-11-20 (evening): submit dry run skipped while SAP raises the event — committed `5b6da8c`, pushed
+
+**What happened:** invoice 46 got two workflows again, this time from **Submit & Park** plus
+**Confirm & Park**. The submit dialog runs a SAP dry run, `mode=validate`: park, then
+`BAPI_TRANSACTION_ROLLBACK`. The event raised inside `ZMIR7_PARK` **outlived the rollback** and
+started a workflow for a document that was never kept.
+
+**Fix:** new setting `SAP_WF_DRY_RUN_SAFE`, default `false`. With the workflow on and SAP raising
+the event, validate stops after VIM's own checks and never calls SAP. Those checks are: duplicate,
+GR pre-check, line selection, `ZINI_VERIFY`. The validate reply then carries `skipped_sap: true`.
+
+**Submit dialog:** it shows an amber note, "VIM checks passed. SAP's own checks run when you
+park…", instead of "SAP validation passed".
+
+**Tests:** `test_sap_workflow.py` checks that validate calls no park BAPI and leaves no stray
+workflow, and that `SAP_WF_DRY_RUN_SAFE=true` brings the dry run back.
+
+**Agreed with the ABAP team instead:**
+- A dry run sends `BKTXT = VALIDATE`; the value is the setting `SAP_DRY_RUN_HEADER_TEXT`.
+- When `ZMIR7_PARK` sees that value, it raises no workflow event.
+- A real park sends `<8-digit PERNR> <text>`.
+
+**Wiring:**
+- `post_invoice_to_sap` sends the marker in `mode=validate`.
+- The fake connector starts no workflow for it.
+- Tests check the dry run (`VALIDATE`, no stray workflow) and the real park (PERNR, exactly one
+  workflow).
+
+**To switch the SAP dry run back on:** once ABAP confirms their check is live, set
+`SAP_WF_DRY_RUN_SAFE=true` in the LAN box's `.env`. The marker is sent either way. Check the
+case: ABAP compares the text exactly, and VIM sends upper-case `VALIDATE`.
+
+**Cleanup:** invoice 46's dry-run workflow has no kept document behind it, so cancel it in SAP.
+
+## 2026-11-20 (later): VIM no longer raises the workflow event — SAP does (committed `2fdb3ee`, pushed)
+
+The ABAP team confirmed that the event is created **inside `ZMIR7_PARK`** during the park. VIM's
+own `SAP_WAPI_CREATE_EVENT` was therefore the second workflow.
+
+**New setting `SAP_WF_RAISE_EVENT`, default `false`:**
+- VIM parks and commits only; it makes no event call.
+- It still stores `OBJKEY` (company code + document + year), so "Refresh from SAP" and the poller
+  read `ZMIR7_WF_LOG` as before.
+- `SAP_WF_EVENT` is not needed in this mode.
+- The employee reaches SAP through `BKTXT(8)`.
+- `true` restores the old VIM-raised event (`USERI` / `PWDI` container).
+
+**Fake SAP:** the park writes the `BLK` row itself when the workflow is on and VIM does not raise
+the event.
+
+**Tests:**
+- `test_sap_workflow.py` runs the old sections with `SAP_WF_RAISE_EVENT=true`.
+- A new section checks the default: no event call, one workflow, `OBJKEY` stored, refresh to
+  `BLK`, approve to posted.
+- All SAP suites pass, as does `test_duplicate_check`.
+
+**On the LAN box:**
+- Keep `SAP_WORKFLOW_ENABLED=true`. With it off, VIM stores no `OBJKEY` and cannot track the
+  workflow.
+- Don't set `SAP_WF_RAISE_EVENT`; it defaults to `false`.
+- After the pull and restart, park one invoice and check SWI1 for exactly one `WS90000096`.
+
+**Open:** the ABAP team should confirm that their `ZMIR7_PARK` event reads the initiator from
+`BKTXT(8)`, now that VIM sends no `USERI` / `PWDI`.
+
+## 2026-11-20: false "Failed to park" + workflow started twice (fixed above)
+
+**False failure — fixed (frontend):** invoice 44 parked as `5105660678/2027` with its workflow, but
+the page said "Failed to park invoice in SAP". The ABAP team had the call paused in the debugger,
+so it outlasted axios' 60 s timeout. The server finished anyway. Fixes:
+- `postInvoiceToSAP` now uses a 180 s timeout.
+- When a park request gets **no reply**, `InvoiceDetailPage` re-reads the invoice. If it has a
+  document number it shows no error; if not, it says the server may still be working.
+- SAP's own refusals are shown as before.
+
+**Workflow started twice — open, on the SAP side so far:** SWI1 shows two `WS90000096`
+instances (11:21:00 and 11:21:05) for the same document `5105660678` / OBJKEY
+`120051056606782027`, each with a Ready approval item.
+- VIM calls `SAP_WAPI_CREATE_EVENT` exactly once per park, with no retry anywhere: not in the
+  connector, not in the workflow code, not in axios.
+- A single document number means a single park.
+- Suspects: the MIR7 park exit `ZXM08U30` or a BAdI also raises the event during the BAPI park, a
+  double SWE2 linkage, or a step re-executed in the debugger.
+
+**Test agreed with the user:**
+1. Set `SAP_WORKFLOW_ENABLED=false` on the LAN box. VIM then parks without raising the event.
+2. Park a new invoice without the debugger, and check SWEL and SWI1.
+- **A workflow still starts:** SAP raises it itself. VIM should then stop raising the event but
+  keep tracking the status. That needs a code change, because `sap_wf_objkey` is only stored when
+  VIM raises the event.
+- **No workflow:** the duplicate is on the SAP side (SWE2 or the debugger).
+
+Afterwards, set the flag back to `true`. Separately, one of the two Ready items for `5105660678`
+must be cancelled in SAP.
+
 ## 2026-11-19 (night): INPUT_CONTAINER rows are ELEMENT + VALUE only (SWR_CONT) — committed `12b923b`, pushed, WORKING on AUP
 
 After `ca2a6fa` the LAN box failed with "field 'TAB_INDEX' not found". On AUP,

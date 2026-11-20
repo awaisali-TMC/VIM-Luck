@@ -133,6 +133,29 @@ class Settings(BaseSettings):
     # event set, rather than guessing a name that SAP would silently ignore.
     SAP_WF_OBJECT_TYPE: str = "ZMIR7_PARK"
     SAP_WF_EVENT: str = ""
+    # Who raises ZMIR7_PARK's event. False (default): SAP raises it itself
+    # inside the park — Lucky's ABAP team confirmed (2026-11-20) that the event
+    # is created within ZMIR7_PARK, so VIM raising it too started the workflow
+    # TWICE for one document. VIM then only parks, stores the OBJKEY and reads
+    # the outcome from ZMIR7_WF_LOG. True: VIM raises it with
+    # SAP_WAPI_CREATE_EVENT in the park's LUW (needs SAP_WF_EVENT).
+    SAP_WF_RAISE_EVENT: bool = False
+    # The submit-time SAP dry run (validate = park + rollback) is skipped while
+    # SAP raises the event itself: that event survived the rollback and started
+    # a workflow for a document that was never kept (2026-11-20). Set true once
+    # the ABAP side skips the event for a dry run (see below), to bring the SAP
+    # dry run back.
+    SAP_WF_DRY_RUN_SAFE: bool = False
+    # HEADER_TXT (BKTXT) sent by the dry run (validate = park + rollback). Lucky's
+    # ABAP team (2026-11-20): when BKTXT says this, ZMIR7_PARK raises no workflow
+    # event; a real park sends "<8-digit PERNR> <text>" instead.
+    SAP_DRY_RUN_HEADER_TEXT: str = "VALIDATE"
+    # The DB tables VIM reads the workflow outcome from (RFC_READ_TABLE). On
+    # AUP "ZMIR7_WF_LOG" turned out to be a STRUCTURE (TABLE_WITHOUT_DATA,
+    # 2026-11-20), so the real transparent table names come from the ABAP team
+    # (find them with backend/sap_dd03l.py --find ZMIR7).
+    SAP_WF_LOG_TABLE: str = "ZMIR7_WF_LOG"
+    SAP_WF_ERROR_TABLE: str = "ZMIR7_ERROR_LOG"
     # Workflow container values VIM supplies (MIR7_Parking_Workflow.md §2.2).
     # SCENARIO_CHAR is the WF scenario the Approval Matrix keys on; Lucky Cement's
     # SAP team confirmed it is "3" (2026-11-17). The workflow derives the Group

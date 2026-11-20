@@ -39,6 +39,7 @@ settings.SAP_ENABLED = True
 settings.SAP_FAKE_DB_PATH = ""
 settings.SAP_WORKFLOW_ENABLED = False
 settings.SAP_WF_EVENT = ""
+settings.SAP_WF_RAISE_EVENT = True        # sections 2-5: VIM raises the event (old mode)
 settings.SAP_WF_POLL_SECONDS = 0          # the test drives refreshes itself
 
 from fastapi.testclient import TestClient  # noqa: E402
@@ -303,8 +304,151 @@ def test_poller_selection(client):
            _detail(client, waiting)["status"])
 
 
+def test_sap_raises(client):
+    """Default on Lucky: SAP raises the event inside ZMIR7_PARK. VIM must not
+    raise a second one (that started the workflow twice), but still tracks it."""
+    print("\nSAP RAISES THE EVENT ITSELF (SAP_WF_RAISE_EVENT=false, the default)")
+    settings.SAP_WORKFLOW_ENABLED = True
+    settings.SAP_WF_RAISE_EVENT = False
+    settings.SAP_WF_EVENT = ""                # not needed in this mode
+    try:
+        inv = _new_invoice(client)
+        r = _park(client, inv)
+        expect(f"park -> 200 without SAP_WF_EVENT (got {r.status_code})", r.status_code == 200, r.text[:200])
+        names = _names()
+        expect("VIM does NOT call SAP_WAPI_CREATE_EVENT (no second workflow)",
+               "SAP_WAPI_CREATE_EVENT" not in names, names)
+        expect("park then one commit",
+               [n for n in names if n in ("BAPI_INCOMINGINVOICE_PARK", "BAPI_TRANSACTION_COMMIT")]
+               == ["BAPI_INCOMINGINVOICE_PARK", "BAPI_TRANSACTION_COMMIT"], names)
+        d = _detail(client, inv)
+        objkey = d.get("sap_wf_objkey") or ""
+        expect("OBJKEY still stored, so the status can be read",
+               objkey == build_objkey("1100", d["sap_document_number"], d["sap_fiscal_year"]), objkey)
+        rows = fake._store().execute("SELECT count(*) AS n FROM ZMIR7_WF_LOG WHERE OBJKEY = ?",
+                                     (objkey,)).fetchone()["n"]
+        expect("exactly one workflow for the document", rows == 1, rows)
+        rr = _refresh(client, inv)
+        expect("refresh reads SAP's workflow: BLK", rr.status_code == 200
+               and rr.json().get("sap_wf_status") == "BLK", rr.text[:200])
+        fake.decide_workflow(objkey, approve=True)
+        expect("SAP approves and posts -> VIM shows posted",
+               _refresh(client, inv).json().get("sap_wf_status") == "APP"
+               and _detail(client, inv)["status"] == "posted", _detail(client, inv)["status"])
+
+        print("\nSUBMIT DRY RUN while SAP raises the event: never reaches SAP")
+        inv2 = _new_invoice(client)
+        wf_before = fake._store().execute("SELECT count(*) AS n FROM ZMIR7_WF_LOG").fetchone()["n"]
+        _calls.clear()
+        v = client.post(f"/api/sap/invoices/{inv2}/post", json={"mode": "validate"})
+        expect(f"validate -> 200 ok, marked skipped_sap (got {v.status_code})",
+               v.status_code == 200 and v.json().get("ok") is True and v.json().get("skipped_sap") is True,
+               v.text[:200])
+        expect("no park BAPI called by the dry run", "BAPI_INCOMINGINVOICE_PARK" not in _names(), _names())
+        wf_after = fake._store().execute("SELECT count(*) AS n FROM ZMIR7_WF_LOG").fetchone()["n"]
+        expect("no stray workflow from the dry run", wf_after == wf_before, (wf_before, wf_after))
+        settings.SAP_WF_DRY_RUN_SAFE = True
+        _calls.clear()
+        v = client.post(f"/api/sap/invoices/{inv2}/post", json={"mode": "validate"})
+        expect("SAP_WF_DRY_RUN_SAFE=true: the SAP dry run runs again (park + rollback)",
+               v.status_code == 200 and "skipped_sap" not in v.json()
+               and "BAPI_INCOMINGINVOICE_PARK" in _names() and "BAPI_TRANSACTION_ROLLBACK" in _names(),
+               (v.text[:200], _names()))
+        hdr = next(k for n, k in _calls if n == "BAPI_INCOMINGINVOICE_PARK")["input_structures"]["HEADERDATA"]
+        expect("dry run sends BKTXT = VALIDATE (ABAP raises no event for it)",
+               hdr["HEADER_TXT"] == "VALIDATE", hdr["HEADER_TXT"])
+        wf_dry = fake._store().execute("SELECT count(*) AS n FROM ZMIR7_WF_LOG").fetchone()["n"]
+        expect("still no stray workflow after the SAP dry run", wf_dry == wf_before, (wf_before, wf_dry))
+        _calls.clear()
+        r2 = _park(client, inv2)
+        hdr = next(k for n, k in _calls if n == "BAPI_INCOMINGINVOICE_PARK")["input_structures"]["HEADERDATA"]
+        expect("the real park does not send VALIDATE", r2.status_code == 200 and hdr["HEADER_TXT"] != "VALIDATE",
+               (r2.status_code, hdr["HEADER_TXT"]))
+        wf_real = fake._store().execute("SELECT count(*) AS n FROM ZMIR7_WF_LOG").fetchone()["n"]
+        expect("the real park starts exactly one workflow", wf_real == wf_before + 1, (wf_before, wf_real))
+    finally:
+        settings.SAP_WF_RAISE_EVENT = True
+        settings.SAP_WF_DRY_RUN_SAFE = False
+
+
+def test_resubmit(client):
+    """A REJECTED parked invoice is changed in place (same document) and SAP
+    restarts its workflow: REJ -> BLK. Anything not rejected can't be."""
+    print("\nRESUBMIT A REJECTED INVOICE (BAPI_INCOMINGINVOICE_CHANGE)")
+    settings.SAP_WORKFLOW_ENABLED = True
+    settings.SAP_WF_RAISE_EVENT = False
+    try:
+        inv = _new_invoice(client)
+        r = _park(client, inv)
+        expect(f"park -> 200 (got {r.status_code})", r.status_code == 200, r.text[:200])
+        d = _detail(client, inv)
+        doc, objkey = d["sap_document_number"], d["sap_wf_objkey"]
+
+        _calls.clear()
+        c = client.post(f"/api/sap/invoices/{inv}/post", json={"mode": "change", "tax_code": "I1"})
+        expect(f"change while BLK -> 409 (got {c.status_code})", c.status_code == 409, c.text[:200])
+        expect("...and nothing sent to SAP", "BAPI_INCOMINGINVOICE_CHANGE" not in _names(), _names())
+
+        fake.decide_workflow(objkey, approve=False)
+        expect("SAP rejected it", _refresh(client, inv).json().get("sap_wf_status") == "REJ")
+
+        _calls.clear()
+        c = client.post(f"/api/sap/invoices/{inv}/post", json={"mode": "change", "tax_code": "I1"})
+        expect(f"change while REJ -> 200 (got {c.status_code})", c.status_code == 200, c.text[:300])
+        names = _names()
+        expect("change BAPI then one commit, no park, no event",
+               "BAPI_INCOMINGINVOICE_CHANGE" in names and "BAPI_TRANSACTION_COMMIT" in names
+               and "BAPI_INCOMINGINVOICE_PARK" not in names and "SAP_WAPI_CREATE_EVENT" not in names, names)
+        kw = next(k for n, k in _calls if n == "BAPI_INCOMINGINVOICE_CHANGE")
+        expect("same document and year", (kw["INVOICEDOCNUMBER"], kw["FISCALYEAR"]) == (doc.zfill(10), d["sap_fiscal_year"]),
+               (kw["INVOICEDOCNUMBER"], kw["FISCALYEAR"]))
+        hdr = kw["input_structures"]["HEADERDATA_CHANGE"]
+        expect("header has no company code / doc type, and every field is flagged in CHANGEX",
+               "COMP_CODE" not in hdr and "DOC_TYPE" not in hdr
+               and set(kw["input_structures"]["HEADERDATA_CHANGEX"]) == set(hdr), hdr)
+        expect("items and tax replaced (TABLE_CHANGE)",
+               kw["input_structures"]["TABLE_CHANGE"] == {"ITEMDATA": "X", "TAXDATA": "X"})
+        expect("BKTXT is not the dry-run marker", hdr.get("HEADER_TXT") != "VALIDATE", hdr.get("HEADER_TXT"))
+        d2 = _detail(client, inv)
+        expect("still parked, same document", d2["status"] == "parked" and d2["sap_document_number"] == doc,
+               (d2["status"], d2["sap_document_number"]))
+        expect("SAP's initial '0000' year is not stored; OBJKEY unchanged",
+               d2["sap_fiscal_year"] == d["sap_fiscal_year"] and d2["sap_wf_objkey"] == objkey,
+               (d2["sap_fiscal_year"], d2["sap_wf_objkey"], objkey))
+        expect("SAP restarted the workflow: BLK", _refresh(client, inv).json().get("sap_wf_status") == "BLK")
+    finally:
+        settings.SAP_WF_RAISE_EVENT = True
+
+
+def test_t100_text():
+    """A ZMIR7_ERROR_LOG row with only a message code is shown with its T100 text."""
+    print("\nERROR LOG WITH A CODE ONLY -> T100 TEXT")
+    from app.services.sap_workflow import read_workflow_status
+    key = "1200510566999920" + "27"
+    conn = fake._store()
+    fake.wf_log_step(conn, key, "REJ")
+    conn.execute("INSERT INTO ZMIR7_ERROR_LOG (SR_NO, BELNR, GJAHR, TYPE, ID, ZNUMBER, ZMESSAGE, "
+                 "ZMESSAGE_V1, ZMESSAGE_V2, CDATE, CTIME) VALUES (900, ?, ?, 'E', 'ZVIMDEMO', '001', '', "
+                 "'5105669999', '1,000.00', '20261120', '120000')", (key[4:14], key[14:18]))
+    conn.commit()
+    info = read_workflow_status(fake.SAPConnectorFake(), [key])[key]
+    expect("status REJ", info["status"] == "REJ", info)
+    expect("T100 text with variables filled in",
+           info["error"] == "ZVIMDEMO 1: Document 5105669999 could not be posted: amount 1,000.00 does not match",
+           info["error"])
+    conn.execute("UPDATE ZMIR7_ERROR_LOG SET ID = 'ZNOSUCH' WHERE SR_NO = 900")
+    conn.commit()
+    info = read_workflow_status(fake.SAPConnectorFake(), [key])[key]
+    expect("unknown message -> code and variables", info["error"] == "ZNOSUCH 1: 5105669999 1,000.00", info["error"])
+    # Leave the store as found: later sections count ZMIR7 rows.
+    conn.execute("DELETE FROM ZMIR7_WF_LOG WHERE OBJKEY = ?", (key,))
+    conn.execute("DELETE FROM ZMIR7_ERROR_LOG WHERE SR_NO = 900")
+    conn.commit()
+
+
 if __name__ == "__main__":
     test_objkey()
+    test_t100_text()
 
     main.app.dependency_overrides[get_current_principal] = lambda: Principal(
         kind="internal", id=1, role="admin")
@@ -317,6 +461,8 @@ if __name__ == "__main__":
         test_refusals(client)
         test_flow(client)
         test_poller_selection(client)
+        test_sap_raises(client)
+        test_resubmit(client)
 
     print("\n" + "=" * 60)
     if _failures:
