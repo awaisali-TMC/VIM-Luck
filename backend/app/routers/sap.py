@@ -1409,6 +1409,25 @@ async def post_invoice_to_sap_endpoint(
                 return {"ok": False, "message": hier["message"], "sap_return": []}
             raise HTTPException(status_code=422, detail={"message": hier["message"], "sap_return": []})
 
+    # ── No SAP dry run while SAP raises the workflow event itself ──
+    # The dry run parks and rolls back, but the event ZMIR7_PARK raises during
+    # the park outlived the rollback and started a workflow for a document
+    # that was never kept (2026-11-20, invoice 46: submit's dry run + the real
+    # park = two workflows). Until the ABAP side ties the event to the commit
+    # (then set SAP_WF_DRY_RUN_SAFE=true), validate stops at VIM's own checks
+    # above (duplicate, GR, line selection, hierarchy) and never calls SAP.
+    if (req.mode == "validate" and settings.SAP_WORKFLOW_ENABLED
+            and not settings.SAP_WF_RAISE_EVENT and not settings.SAP_WF_DRY_RUN_SAFE):
+        logger.warning("[wf-diag] invoice %s: SAP dry run skipped (SAP raises the workflow "
+                       "event during park; SAP_WF_DRY_RUN_SAFE=false)", invoice.id)
+        return {
+            "ok": True,
+            "skipped_sap": True,
+            "message": "VIM checks passed. SAP's own checks run when you park "
+                       "(the SAP dry run is off: it would start an approval workflow).",
+            "sap_return": [],
+        }
+
     # ── Call SAP posting service ───────────────────────────────
     try:
         from app.services.sap_invoice_post import post_invoice_to_sap

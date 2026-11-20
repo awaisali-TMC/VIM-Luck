@@ -5,7 +5,41 @@ Handover from Claude Code sessions on this machine (`D:\VIM\VIM-Luck`). Read
 what is still open. (`HANDOFF.md` is the separate product feature-status doc.)
 Newest session first; §1–§5 below are from session 1 and are still accurate.
 
-## 2026-11-20 (later): VIM no longer raises the workflow event — SAP does (NOT committed yet)
+## 2026-11-20 (evening): submit dry run skipped while SAP raises the event — NOT committed yet
+
+**What happened:** invoice 46 got two workflows again, this time from **Submit & Park** plus
+**Confirm & Park**. The submit dialog runs a SAP dry run, `mode=validate`: park, then
+`BAPI_TRANSACTION_ROLLBACK`. The event raised inside `ZMIR7_PARK` **outlived the rollback** and
+started a workflow for a document that was never kept.
+
+**Fix:** new setting `SAP_WF_DRY_RUN_SAFE`, default `false`. With the workflow on and SAP raising
+the event, validate stops after VIM's own checks and never calls SAP. Those checks are: duplicate,
+GR pre-check, line selection, `ZINI_VERIFY`. The validate reply then carries `skipped_sap: true`.
+
+**Submit dialog:** it shows an amber note, "VIM checks passed. SAP's own checks run when you
+park…", instead of "SAP validation passed".
+
+**Tests:** `test_sap_workflow.py` checks that validate calls no park BAPI and leaves no stray
+workflow, and that `SAP_WF_DRY_RUN_SAFE=true` brings the dry run back.
+
+**Agreed with the ABAP team instead:**
+- A dry run sends `BKTXT = VALIDATE`; the value is the setting `SAP_DRY_RUN_HEADER_TEXT`.
+- When `ZMIR7_PARK` sees that value, it raises no workflow event.
+- A real park sends `<8-digit PERNR> <text>`.
+
+**Wiring:**
+- `post_invoice_to_sap` sends the marker in `mode=validate`.
+- The fake connector starts no workflow for it.
+- Tests check the dry run (`VALIDATE`, no stray workflow) and the real park (PERNR, exactly one
+  workflow).
+
+**To switch the SAP dry run back on:** once ABAP confirms their check is live, set
+`SAP_WF_DRY_RUN_SAFE=true` in the LAN box's `.env`. The marker is sent either way. Check the
+case: ABAP compares the text exactly, and VIM sends upper-case `VALIDATE`.
+
+**Cleanup:** invoice 46's dry-run workflow has no kept document behind it, so cancel it in SAP.
+
+## 2026-11-20 (later): VIM no longer raises the workflow event — SAP does (committed `2fdb3ee`, pushed)
 
 The ABAP team confirmed that the event is created **inside `ZMIR7_PARK`** during the park. VIM's
 own `SAP_WAPI_CREATE_EVENT` was therefore the second workflow.

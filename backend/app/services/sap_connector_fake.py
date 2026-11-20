@@ -316,7 +316,9 @@ class SAPConnectorFake:
         # Lucky Cement: parking itself raises ZMIR7_PARK's event inside SAP, in
         # the same LUW (VIM raises nothing unless SAP_WF_RAISE_EVENT is on).
         from app.config import settings as _s
-        if not post and _s.SAP_WORKFLOW_ENABLED and not _s.SAP_WF_RAISE_EVENT:
+        # ... except for a dry run, which marks BKTXT (SAP_DRY_RUN_HEADER_TEXT).
+        dry_run = (header.get("HEADER_TXT") or "") == (_s.SAP_DRY_RUN_HEADER_TEXT or "VALIDATE")[:25]
+        if not post and not dry_run and _s.SAP_WORKFLOW_ENABLED and not _s.SAP_WF_RAISE_EVENT:
             objkey = f"{(header.get('COMP_CODE') or '').strip()}{doc}{year}"
             conn.execute("DELETE FROM ZMIR7_WF_LOG WHERE OBJKEY = ?", (objkey,))
             conn.execute("INSERT INTO ZMIR7_WF_LOG (OBJKEY, STATUS, POSTED_DOC) VALUES (?, 'BLK', '')",

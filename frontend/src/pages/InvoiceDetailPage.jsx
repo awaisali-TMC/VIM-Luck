@@ -402,6 +402,9 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
   const [showApprovalConfirm, setShowApprovalConfirm] = useState(false);
   const [sapValidationError, setSapValidationError] = useState(null); // SAP dry-run error(s) at submit time
   const [validatingSap, setValidatingSap] = useState(false);
+  // Set when the backend skipped the SAP dry run (SAP starts its approval
+  // workflow on every park, so a test park would leave a stray workflow).
+  const [sapDryRunSkipped, setSapDryRunSkipped] = useState(null);
   const [submittingApproval, setSubmittingApproval] = useState(false);
 
   const handleSubmitForApproval = async () => {
@@ -417,6 +420,7 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
       return;
     }
     setSapValidationError(null);
+    setSapDryRunSkipped(null);
 
     // Pre-flight the SAP park (dry run) so parking errors — duplicate check,
     // missing entry sheet, dates, tax — surface NOW, in the dialog, instead of
@@ -427,6 +431,8 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
         const res = await validateInvoiceForSAP(invoice.id, selectedLineIdArray());
         if (!res.ok) {
           setSapValidationError(res.message || "SAP validation failed.");
+        } else if (res.skipped_sap) {
+          setSapDryRunSkipped(res.message || "VIM checks passed. SAP checks the invoice when you park.");
         }
       } catch (err) {
         const detail = err.response?.data?.detail;
@@ -1489,7 +1495,13 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
             </div>
           )}
 
-          {canParkToSAP && !sapValidationError && (
+          {canParkToSAP && !sapValidationError && sapDryRunSkipped && (
+            <div className="bg-warning-bg border border-warning-base rounded-md px-3 py-2 text-2xs text-warning-dark">
+              ✓ {sapDryRunSkipped}
+            </div>
+          )}
+
+          {canParkToSAP && !sapValidationError && !sapDryRunSkipped && (
             <div className="bg-success-bg border border-success-base rounded-md px-3 py-2 text-2xs text-success-dark">
               ✓ SAP validation passed — this invoice will park cleanly when you submit.
             </div>

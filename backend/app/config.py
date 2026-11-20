@@ -140,6 +140,16 @@ class Settings(BaseSettings):
     # the outcome from ZMIR7_WF_LOG. True: VIM raises it with
     # SAP_WAPI_CREATE_EVENT in the park's LUW (needs SAP_WF_EVENT).
     SAP_WF_RAISE_EVENT: bool = False
+    # The submit-time SAP dry run (validate = park + rollback) is skipped while
+    # SAP raises the event itself: that event survived the rollback and started
+    # a workflow for a document that was never kept (2026-11-20). Set true once
+    # the ABAP side skips the event for a dry run (see below), to bring the SAP
+    # dry run back.
+    SAP_WF_DRY_RUN_SAFE: bool = False
+    # HEADER_TXT (BKTXT) sent by the dry run (validate = park + rollback). Lucky's
+    # ABAP team (2026-11-20): when BKTXT says this, ZMIR7_PARK raises no workflow
+    # event; a real park sends "<8-digit PERNR> <text>" instead.
+    SAP_DRY_RUN_HEADER_TEXT: str = "VALIDATE"
     # Workflow container values VIM supplies (MIR7_Parking_Workflow.md §2.2).
     # SCENARIO_CHAR is the WF scenario the Approval Matrix keys on; Lucky Cement's
     # SAP team confirmed it is "3" (2026-11-17). The workflow derives the Group

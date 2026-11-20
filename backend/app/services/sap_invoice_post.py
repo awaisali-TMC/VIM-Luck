@@ -154,7 +154,10 @@ def post_invoice_to_sap(
             "CALC_TAX_IND": "",
             "REF_DOC_NO": invoice_number[:16] if invoice_number else "",
             # Basic Data "Text" (BKTXT); Lucky Cement: PERNR in chars 1-8
-            "HEADER_TXT": build_header_text(header_text or f"einv-{invoice_number}", initiator_sap_user),
+            # A dry run sends the marker instead, so SAP raises no workflow for
+            # a park that is rolled back (Lucky ABAP team, 2026-11-20).
+            "HEADER_TXT": ((settings.SAP_DRY_RUN_HEADER_TEXT or "VALIDATE")[:25] if mode == "validate"
+                           else build_header_text(header_text or f"einv-{invoice_number}", initiator_sap_user)),
         }
         if item_text:
             header_data["ITEM_TEXT"] = item_text[:50]  # Details "Text" (SGTXT)

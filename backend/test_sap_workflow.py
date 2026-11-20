@@ -335,8 +335,40 @@ def test_sap_raises(client):
         expect("SAP approves and posts -> VIM shows posted",
                _refresh(client, inv).json().get("sap_wf_status") == "APP"
                and _detail(client, inv)["status"] == "posted", _detail(client, inv)["status"])
+
+        print("\nSUBMIT DRY RUN while SAP raises the event: never reaches SAP")
+        inv2 = _new_invoice(client)
+        wf_before = fake._store().execute("SELECT count(*) AS n FROM ZMIR7_WF_LOG").fetchone()["n"]
+        _calls.clear()
+        v = client.post(f"/api/sap/invoices/{inv2}/post", json={"mode": "validate"})
+        expect(f"validate -> 200 ok, marked skipped_sap (got {v.status_code})",
+               v.status_code == 200 and v.json().get("ok") is True and v.json().get("skipped_sap") is True,
+               v.text[:200])
+        expect("no park BAPI called by the dry run", "BAPI_INCOMINGINVOICE_PARK" not in _names(), _names())
+        wf_after = fake._store().execute("SELECT count(*) AS n FROM ZMIR7_WF_LOG").fetchone()["n"]
+        expect("no stray workflow from the dry run", wf_after == wf_before, (wf_before, wf_after))
+        settings.SAP_WF_DRY_RUN_SAFE = True
+        _calls.clear()
+        v = client.post(f"/api/sap/invoices/{inv2}/post", json={"mode": "validate"})
+        expect("SAP_WF_DRY_RUN_SAFE=true: the SAP dry run runs again (park + rollback)",
+               v.status_code == 200 and "skipped_sap" not in v.json()
+               and "BAPI_INCOMINGINVOICE_PARK" in _names() and "BAPI_TRANSACTION_ROLLBACK" in _names(),
+               (v.text[:200], _names()))
+        hdr = next(k for n, k in _calls if n == "BAPI_INCOMINGINVOICE_PARK")["input_structures"]["HEADERDATA"]
+        expect("dry run sends BKTXT = VALIDATE (ABAP raises no event for it)",
+               hdr["HEADER_TXT"] == "VALIDATE", hdr["HEADER_TXT"])
+        wf_dry = fake._store().execute("SELECT count(*) AS n FROM ZMIR7_WF_LOG").fetchone()["n"]
+        expect("still no stray workflow after the SAP dry run", wf_dry == wf_before, (wf_before, wf_dry))
+        _calls.clear()
+        r2 = _park(client, inv2)
+        hdr = next(k for n, k in _calls if n == "BAPI_INCOMINGINVOICE_PARK")["input_structures"]["HEADERDATA"]
+        expect("the real park does not send VALIDATE", r2.status_code == 200 and hdr["HEADER_TXT"] != "VALIDATE",
+               (r2.status_code, hdr["HEADER_TXT"]))
+        wf_real = fake._store().execute("SELECT count(*) AS n FROM ZMIR7_WF_LOG").fetchone()["n"]
+        expect("the real park starts exactly one workflow", wf_real == wf_before + 1, (wf_before, wf_real))
     finally:
         settings.SAP_WF_RAISE_EVENT = True
+        settings.SAP_WF_DRY_RUN_SAFE = False
 
 
 if __name__ == "__main__":
