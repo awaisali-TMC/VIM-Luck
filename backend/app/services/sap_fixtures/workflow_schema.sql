@@ -40,3 +40,15 @@ CREATE TABLE IF NOT EXISTS ZMIR7_ERROR_LOG (
     CTIME TEXT,        -- HHMMSS
     Z_FROM TEXT
 );
+
+-- Message texts (SE91), read when ZMIR7_ERROR_LOG carries only a code. The
+-- demo row is an invented class, not a copy of SAP's own texts.
+CREATE TABLE IF NOT EXISTS T100 (
+    SPRSL TEXT,
+    ARBGB TEXT,
+    MSGNR TEXT,
+    TEXT TEXT
+);
+INSERT INTO T100 (SPRSL, ARBGB, MSGNR, TEXT)
+SELECT 'E', 'ZVIMDEMO', '001', 'Document &1 could not be posted: amount &2 does not match'
+WHERE NOT EXISTS (SELECT 1 FROM T100 WHERE ARBGB = 'ZVIMDEMO' AND MSGNR = '001');

@@ -199,14 +199,63 @@ def _read(sap, table: str, fields: dict, objkeys: list[str]) -> list[dict]:
     return [{back.get(k, k): v for k, v in r.items()} for r in rows]
 
 
-def _message_text(row: dict) -> str:
-    """ZMESSAGE, or, when SAP left it empty, "<class> <number>: <v1> <v2> <v3> <v4>"."""
+def _fill_t100(template: str, vars_: list[str]) -> str:
+    """Put a message's variables into a T100 text: &1..&4 by number, a bare &
+    in order, && is a literal &."""
+    import re
+    it = iter(vars_)
+    out = re.sub(r"&([1-4])", lambda m: vars_[int(m.group(1)) - 1] if int(m.group(1)) <= len(vars_) else "",
+                 template.replace("&&", "\x00"))
+    out = re.sub(r"&", lambda m: next(it, ""), out)
+    return " ".join(out.replace("\x00", "&").split())
+
+
+def _read_t100(sap, pairs: set[tuple[str, str]]) -> dict[tuple[str, str], str]:
+    """English message texts from T100 for (class, number) pairs. {} on failure
+    (e.g. no authorization for T100): the caller then shows the code."""
+    if not pairs:
+        return {}
+    options = [{"TEXT": "SPRSL = 'E' AND ( "}]
+    for i, (cls, no) in enumerate(sorted(pairs)):
+        options.append({"TEXT": f"{'OR ' if i else ''}( ARBGB = '{cls}' AND MSGNR = '{no}' ) "})
+    options.append({"TEXT": ") "})
+    try:
+        from app.services.sap_po_service import _parse_delimited_rows
+        res = sap.call(
+            "RFC_READ_TABLE", QUERY_TABLE="T100", DELIMITER="|",
+            input_tables={"OPTIONS": options,
+                          "FIELDS": [{"FIELDNAME": f} for f in ("ARBGB", "MSGNR", "TEXT")]},
+            tables=["DATA", "FIELDS"],
+            table_fields={"DATA": ["WA"], "FIELDS": ["FIELDNAME", "OFFSET", "LENGTH"]},
+        )
+        rows = _parse_delimited_rows(res.get("DATA", []), res.get("FIELDS", []))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("T100 message texts not read (showing codes instead): %s", exc)
+        return {}
+    return {((r.get("ARBGB") or "").strip(), (r.get("MSGNR") or "").strip()): (r.get("TEXT") or "").strip()
+            for r in rows}
+
+
+def _msg_key(row: dict) -> tuple[str, str] | None:
+    cls = (row.get("msg_id") or "").strip().upper()
+    no = (row.get("msg_no") or "").strip()
+    return (cls, no.zfill(3)) if cls and no.strip("0") else None
+
+
+def _message_text(row: dict, t100: dict | None = None) -> str:
+    """ZMESSAGE; when SAP left it empty, the T100 text of ID/ZNUMBER with the
+    variables filled in ("FF 724: <text>"); without T100, "<class> <number>: <vars>"."""
     text = (row.get("message") or "").strip()
     if text:
         return text
-    vars_ = " ".join(v for v in (row.get(k, "").strip() for k in ("v1", "v2", "v3", "v4")) if v)
-    head = " ".join(p for p in (row.get("msg_id", "").strip(), row.get("msg_no", "").strip().lstrip("0")) if p)
-    text = ": ".join(p for p in (head, vars_) if p)
+    vars_ = [row.get(k, "").strip() for k in ("v1", "v2", "v3", "v4")]
+    key = _msg_key(row)
+    head = f"{key[0]} {key[1].lstrip('0')}" if key else ""
+    template = (t100 or {}).get(key) if key else None
+    if template:
+        return f"{head}: {_fill_t100(template, vars_)}"
+    shown = " ".join(v for v in vars_ if v)
+    text = ": ".join(p for p in (head, shown) if p)
     return text or "SAP logged an error without a message text"
 
 
@@ -278,12 +327,16 @@ def read_workflow_status(sap, objkeys: list[str]) -> dict[str, dict]:
         order = (row.get("cdate", ""), row.get("ctime", ""))
         if row["objkey"] not in newest or order >= newest[row["objkey"]]["_order"]:
             newest[row["objkey"]] = {**row, "_order": order}
+    # Messages logged as a code only (no ZMESSAGE): one T100 read for all.
+    t100 = _read_t100(sap, {k for r in newest.values()
+                            if (r.get("type") or "").upper() in ("E", "A") and not (r.get("message") or "").strip()
+                            for k in [_msg_key(r)] if k})
     for key, row in newest.items():
         entry = out.setdefault(key, {"status": "", "label": "No workflow record",
                                      "posted_doc": "", "error": ""})
         kind = (row.get("type") or "").upper()
         if kind in ("E", "A"):
-            entry["error"] = _message_text(row)
+            entry["error"] = _message_text(row, t100)
         elif kind == "S":
             entry["error"] = ""
     # APP normally means posted, but a posting error logged after it means SAP

@@ -371,8 +371,35 @@ def test_sap_raises(client):
         settings.SAP_WF_DRY_RUN_SAFE = False
 
 
+def test_t100_text():
+    """A ZMIR7_ERROR_LOG row with only a message code is shown with its T100 text."""
+    print("\nERROR LOG WITH A CODE ONLY -> T100 TEXT")
+    from app.services.sap_workflow import read_workflow_status
+    key = "1200510566999920" + "27"
+    conn = fake._store()
+    fake.wf_log_step(conn, key, "REJ")
+    conn.execute("INSERT INTO ZMIR7_ERROR_LOG (SR_NO, BELNR, GJAHR, TYPE, ID, ZNUMBER, ZMESSAGE, "
+                 "ZMESSAGE_V1, ZMESSAGE_V2, CDATE, CTIME) VALUES (900, ?, ?, 'E', 'ZVIMDEMO', '001', '', "
+                 "'5105669999', '1,000.00', '20261120', '120000')", (key[4:14], key[14:18]))
+    conn.commit()
+    info = read_workflow_status(fake.SAPConnectorFake(), [key])[key]
+    expect("status REJ", info["status"] == "REJ", info)
+    expect("T100 text with variables filled in",
+           info["error"] == "ZVIMDEMO 1: Document 5105669999 could not be posted: amount 1,000.00 does not match",
+           info["error"])
+    conn.execute("UPDATE ZMIR7_ERROR_LOG SET ID = 'ZNOSUCH' WHERE SR_NO = 900")
+    conn.commit()
+    info = read_workflow_status(fake.SAPConnectorFake(), [key])[key]
+    expect("unknown message -> code and variables", info["error"] == "ZNOSUCH 1: 5105669999 1,000.00", info["error"])
+    # Leave the store as found: later sections count ZMIR7 rows.
+    conn.execute("DELETE FROM ZMIR7_WF_LOG WHERE OBJKEY = ?", (key,))
+    conn.execute("DELETE FROM ZMIR7_ERROR_LOG WHERE SR_NO = 900")
+    conn.commit()
+
+
 if __name__ == "__main__":
     test_objkey()
+    test_t100_text()
 
     main.app.dependency_overrides[get_current_principal] = lambda: Principal(
         kind="internal", id=1, role="admin")
