@@ -86,6 +86,14 @@ export async function deleteInvoice(id) {
   return response.data;
 }
 
+export async function bulkDeleteInvoices(ids, vimOnly = false) {
+  // Soft-delete several invoices -> { deleted: [id], skipped: [{ id, reason }] }.
+  // vimOnly (admin): also drop invoices parked/posted in SAP from VIM only;
+  // the SAP document and workflow are left as they are.
+  const response = await api.post(`/api/invoices/bulk-delete`, { ids, vim_only: vimOnly });
+  return response.data;
+}
+
 export async function deleteInvoiceLineItem(invoiceId, lineItemId) {
   // Permanently remove one line item (e.g. a line not on the PO) so the rest
   // of the invoice can be parked. Recomputes subtotal/total server-side.

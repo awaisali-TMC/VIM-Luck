@@ -1183,6 +1183,57 @@ async def delete_invoice(
     return {"success": True, "id": invoice_id, "soft_deleted": True}
 
 
+class BulkDeleteRequest(BaseModel):
+    ids: list[int]
+    # Admin only: also remove invoices that are parked/posted in SAP — from VIM
+    # ONLY. The SAP document and its workflow are not touched (used to clear
+    # duplicate/test invoices; anything still open in SAP is handled there).
+    vim_only: bool = False
+
+
+@router.post("/bulk-delete")
+async def bulk_delete_invoices(
+    req: BulkDeleteRequest,
+    db: AsyncSession = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+):
+    """Soft-delete several invoices. Returns which were deleted and why the
+    others were skipped. Without vim_only, an invoice with a SAP document is
+    skipped (as DELETE /{id} refuses it)."""
+    if req.vim_only and not (principal.kind == "internal" and principal.role == "admin"):
+        raise HTTPException(status_code=403, detail="Only an admin can remove SAP invoices from VIM.")
+    ids = list(dict.fromkeys(req.ids))[:500]
+    rows = (await db.execute(
+        select(Invoice).where(Invoice.id.in_(ids), Invoice.is_deleted == 0)
+    )).scalars().all() if ids else []
+    found = {inv.id: inv for inv in rows}
+    deleted, skipped = [], []
+    now = datetime.now(timezone.utc)
+    for inv_id in ids:
+        inv = found.get(inv_id)
+        if not inv:
+            skipped.append({"id": inv_id, "reason": "not found"})
+            continue
+        try:
+            _assert_can_access(inv, principal)
+        except HTTPException:
+            skipped.append({"id": inv_id, "reason": "no access"})
+            continue
+        if inv.sap_document_number and not req.vim_only:
+            skipped.append({"id": inv_id, "reason": f"{inv.sap_doc_status or 'parked'} in SAP as "
+                                                    f"{inv.sap_document_number}/{inv.sap_fiscal_year}"})
+            continue
+        if inv.sap_document_number:
+            logger.warning("Invoice %s removed from VIM only by admin %s; SAP document %s/%s "
+                           "(workflow %s) left untouched", inv.id, principal.id,
+                           inv.sap_document_number, inv.sap_fiscal_year, inv.sap_wf_status or "-")
+        inv.is_deleted = 1
+        inv.deleted_at = now
+        deleted.append(inv_id)
+    await db.commit()
+    return {"deleted": deleted, "skipped": skipped}
+
+
 class LineItemPatch(BaseModel):
     """Partial update for a single invoice line item (inline editing)."""
     description: str | None = None

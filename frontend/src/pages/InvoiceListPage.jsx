@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useLocation } from "react-router-dom";
-import { getInvoices } from "../services/invoiceService";
+import { getInvoices, bulkDeleteInvoices } from "../services/invoiceService";
 import { getInvoiceApproval } from "../services/workflowService";
 import Card from "../components/common/Card";
 import Badge from "../components/common/Badge";
@@ -31,7 +31,21 @@ const STATUS_LABELS = {
 };
 const STATUS_ORDER = Object.keys(STATUS_LABELS);
 
-export default function InvoiceListPage({ onViewInvoice, onUpload }) {
+// In SAP (parked / posted): only an admin may remove these, and from VIM only.
+const inSap = (inv) => !!inv.sap_doc_status || ["parked", "posted"].includes(inv.status);
+
+export default function InvoiceListPage({ onViewInvoice, onUpload, isAdmin = false }) {
+  // ── Bulk delete ──
+  const [selected, setSelected] = useState(() => new Set());
+  const [showDelete, setShowDelete] = useState(false);
+  const [vimOnly, setVimOnly] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteResult, setDeleteResult] = useState(null); // { deleted, skipped } | { error }
+  const toggleSelected = (id) => setSelected((prev) => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
   // Freshly uploaded drafts (batch upload) arrive via router state — highlight them.
   const location = useLocation();
   const [newIds, setNewIds] = useState(() => new Set(location.state?.newInvoiceIds || []));
@@ -205,7 +219,54 @@ export default function InvoiceListPage({ onViewInvoice, onUpload }) {
     );
   }
 
+  const pageIds = paginated.map((r) => r.id);
+  const allOnPage = pageIds.length > 0 && pageIds.every((id) => selected.has(id));
+  const selectedRows = invoices.filter((inv) => selected.has(inv.id));
+  const selectedInSap = selectedRows.filter(inSap).length;
+
+  const handleBulkDelete = async () => {
+    setDeleting(true);
+    try {
+      const res = await bulkDeleteInvoices([...selected], isAdmin && vimOnly);
+      const gone = new Set(res.deleted);
+      setInvoices((prev) => prev.filter((inv) => !gone.has(inv.id)));
+      setSelected(new Set());
+      setDeleteResult(res);
+    } catch (err) {
+      const d = err.response?.data?.detail;
+      setDeleteResult({ error: typeof d === "string" ? d : "Delete failed." });
+    } finally {
+      setDeleting(false);
+      setShowDelete(false);
+      setVimOnly(false);
+    }
+  };
+
   const columns = [
+    {
+      key: "_select",
+      label: (
+        <input
+          type="checkbox"
+          aria-label="Select all on this page"
+          checked={allOnPage}
+          onChange={() => setSelected((prev) => {
+            const next = new Set(prev);
+            pageIds.forEach((id) => (allOnPage ? next.delete(id) : next.add(id)));
+            return next;
+          })}
+        />
+      ),
+      render: (_, row) => (
+        <input
+          type="checkbox"
+          aria-label={`Select invoice ${row.id}`}
+          checked={selected.has(row.id)}
+          onClick={(e) => e.stopPropagation()}
+          onChange={() => toggleSelected(row.id)}
+        />
+      ),
+    },
     {
       key: "id", label: "#",
       render: (v, row) => (
@@ -359,6 +420,11 @@ export default function InvoiceListPage({ onViewInvoice, onUpload }) {
         title="Invoice Inbox"
         action={
           <div className="flex items-center gap-2">
+            {selected.size > 0 && (
+              <Button variant="danger" size="xs" onClick={() => setShowDelete(true)}>
+                Delete selected ({selected.size})
+              </Button>
+            )}
             <Button variant="secondary" size="xs">&#8595; Export</Button>
             <Button variant="primary" size="xs" onClick={onUpload}>
               &#128228; Upload Invoice
@@ -400,6 +466,20 @@ export default function InvoiceListPage({ onViewInvoice, onUpload }) {
             ]}
           />
         </div>
+        {deleteResult && (
+          <div className={`mx-5 mb-3 rounded-base px-4 py-2.5 flex items-start justify-between border ${
+            deleteResult.error ? "bg-danger-bg border-danger-base" : "bg-success-bg border-success-base"}`}>
+            <span className={`text-2xs font-medium ${deleteResult.error ? "text-danger-dark" : "text-success-dark"}`}>
+              {deleteResult.error || `${deleteResult.deleted.length} invoice${deleteResult.deleted.length !== 1 ? "s" : ""} deleted.`}
+              {!deleteResult.error && deleteResult.skipped.length > 0 && (
+                <span className="block text-warning-dark mt-0.5">
+                  {deleteResult.skipped.length} skipped: {deleteResult.skipped.map((s) => `#${s.id} (${s.reason})`).join(", ")}
+                </span>
+              )}
+            </span>
+            <button className="text-neutral-400 hover:text-neutral-600 bg-transparent border-none cursor-pointer text-sm" onClick={() => setDeleteResult(null)}>&times;</button>
+          </div>
+        )}
         {docError && (
           <div className="mx-5 mb-3 bg-danger-bg border border-danger-base rounded-base px-4 py-2.5 flex items-center justify-between">
             <span className="text-2xs text-danger-dark font-medium">{docError}</span>
@@ -436,6 +516,43 @@ export default function InvoiceListPage({ onViewInvoice, onUpload }) {
           </div>
         </div>
       </Card>
+
+      <Modal
+        open={showDelete}
+        onClose={() => { if (!deleting) { setShowDelete(false); setVimOnly(false); } }}
+        title={`Delete ${selected.size} invoice${selected.size !== 1 ? "s" : ""}?`}
+        width={520}
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" size="sm" type="button" onClick={() => { setShowDelete(false); setVimOnly(false); }} disabled={deleting}>
+              Cancel
+            </Button>
+            <Button variant="danger" size="sm" type="button" onClick={handleBulkDelete} disabled={deleting}>
+              {deleting ? "Deleting…" : "Delete"}
+            </Button>
+          </div>
+        }
+      >
+        <div className="text-xs text-neutral-700 space-y-3">
+          <p>The selected invoices will be removed from the inbox.</p>
+          {selectedInSap > 0 && (
+            isAdmin ? (
+              <label className="flex items-start gap-2 bg-warning-bg border border-warning-base rounded-md px-3 py-2.5 cursor-pointer">
+                <input type="checkbox" className="mt-0.5" checked={vimOnly} onChange={(e) => setVimOnly(e.target.checked)} />
+                <span className="text-warning-dark">
+                  Also remove the <strong>{selectedInSap}</strong> invoice{selectedInSap !== 1 ? "s" : ""} parked/posted
+                  in SAP — <strong>from VIM only</strong>. Their SAP documents and workflows are not touched;
+                  handle those in SAP.
+                </span>
+              </label>
+            ) : (
+              <p className="text-warning-dark">
+                {selectedInSap} of them {selectedInSap !== 1 ? "are" : "is"} parked/posted in SAP and will be skipped.
+              </p>
+            )
+          )}
+        </div>
+      </Modal>
     </div>
   );
 }

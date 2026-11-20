@@ -66,6 +66,7 @@ py -3 backend/test_duplicate_check.py       # duplicate-invoice key blocks appro
 py -3 backend/test_sap_workflow.py          # SAP approval workflow: park+event in one LUW, ZMIR7 status read-back, offline; own throwaway DB
 py -3 backend/test_sap_employee.py          # SAP employee login (ztmc_login) + ZINI_VERIFY hierarchy gate, offline (mock HTTP, fake SAP); own DB
 py -3 backend/test_header_text_pernr.py     # park HEADER_TXT (BKTXT) = 8-digit PERNR + space + text(16), offline; fake SAP
+py -3 backend/test_bulk_delete.py           # Inbox "Delete selected": soft delete, SAP invoices skipped unless admin vim_only; own DB
 py -3 backend/test_receiver_ntn.py          # receiver NTN: extracted when printed, stored, shown, editable; own DB
 py -3 backend/test_po_regression.py         # PO-lane BASELINE: live SAP validate dry-run (needs SAP env)
 ```

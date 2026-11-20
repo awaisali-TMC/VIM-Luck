@@ -125,12 +125,13 @@ function ResultsRoute() {
   );
 }
 
-function InvoiceListRoute() {
+function InvoiceListRoute({ currentUser }) {
   const navigate = useNavigate();
   return (
     <InvoiceListPage
       onViewInvoice={(id) => navigate(`/invoices/${id}`)}
       onUpload={() => navigate("/upload")}
+      isAdmin={currentUser?.role === "admin"}
     />
   );
 }
@@ -313,7 +314,7 @@ export default function App() {
           <Route path="upload" element={guard("/upload", <UploadRoute />)} />
           <Route path="results" element={guard("/results", <ResultsRoute />)} />
 
-          <Route path="invoices" element={guard("/invoices", <InvoiceListRoute />)} />
+          <Route path="invoices" element={guard("/invoices", <InvoiceListRoute currentUser={currentUser} />)} />
           <Route path="invoices/:id" element={guard("/invoices", <InvoiceDetailRoute currentUser={currentUser} />)} />
 
           <Route path="reports" element={guard("/reports", <ReportsPage />)} />

@@ -5,7 +5,35 @@ Handover from Claude Code sessions on this machine (`D:\VIM\VIM-Luck`). Read
 what is still open. (`HANDOFF.md` is the separate product feature-status doc.)
 Newest session first; §1–§5 below are from session 1 and are still accurate.
 
-## 2026-11-20 (night): workflow status read from the real ZMIR7_WF_LOG columns — NOT committed yet
+## 2026-11-21: Inbox bulk delete (admin can drop SAP invoices from VIM only) — committed with sap_dd03l.py --fm
+
+**Why:** many duplicate test invoices piled up, some of them parked in SAP. The user wants them
+gone from **VIM only**; SAP is not to be touched.
+
+**Backend:** `POST /api/invoices/bulk-delete` takes `{ids, vim_only}` and soft-deletes the
+invoices. It returns `{deleted, skipped:[{id, reason}]}`.
+- Without `vim_only`, an invoice with a SAP document is skipped.
+- `vim_only=true` is **admin-only** (403 otherwise). It also removes parked/posted invoices, but
+  only from VIM: no RFC is made, the SAP document and workflow stay as they are, and a WARNING is
+  logged.
+
+**Frontend:** the Invoice Inbox gets a checkbox per row, a select-all-on-page box and a
+**"Delete selected (n)"** button.
+- The confirm dialog shows admins an opt-in checkbox for the parked/posted ones, worded "from VIM
+  only". Other roles are told those will be skipped.
+- After the delete, a result banner lists what was deleted and what was skipped.
+
+**Tests:** `backend/test_bulk_delete.py` passes; the frontend lint and build are clean.
+**Not checked in a browser.**
+
+**Also uncommitted:** `sap_dd03l.py --fm <FUNCTION>` dumps an FM's interface (FUPARAREF) and its
+structures (DD03L). It is meant for `BAPI_INCOMINGINVOICE_CHANGE`, which the "Resubmit a rejected
+invoice to SAP" feature needs.
+- The ABAP team confirmed that changing a rejected parked document makes `ZMIR7_PARK` restart the
+  workflow itself, and that the `REJ` row turns back to `BLK`.
+- The feature itself is not built yet; it waits for the BAPI interface.
+
+## 2026-11-20 (night): workflow status read from the real ZMIR7_WF_LOG columns — committed `8068114`, pushed
 
 **Why "Refresh from SAP" failed:** VIM asked `RFC_READ_TABLE` for guessed columns (`STATUS`,
 `POSTED_DOC`). The SAP reply `TABLE_WITHOUT_DATA` was misleading. `ZMIR7_WF_LOG` is a transparent,

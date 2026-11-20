@@ -49,11 +49,44 @@ def main():
     ap.add_argument("--find", metavar="PREFIX",
                     help="list every DDIC table/structure whose name starts with PREFIX, with its TABCLASS")
     ap.add_argument("--rows", type=int, default=3, help="sample rows to read (0 = none)")
+    ap.add_argument("--fm", metavar="FUNCTION",
+                    help="print a function module's interface (FUPARAREF) and every structure's fields")
     args = ap.parse_args()
 
     sap = SAPConnector()
     sap.connect()
     try:
+        if args.fm:
+            fm = args.fm.upper()
+            # PARAMTYPE: I import, E export, C changing, T tables, X exception
+            params = read_table(sap, "FUPARAREF", ["PARAMETER", "PARAMTYPE", "STRUCTURE", "OPTIONAL", "PPOSITION"],
+                                f"FUNCNAME = '{fm}' AND R3STATE = 'A'")
+            if not params:
+                print(f"  {fm}: not found (or not active) on this system")
+                return
+            kinds = {"I": "IMPORT", "E": "EXPORT", "C": "CHANGING", "T": "TABLES", "X": "EXCEPTION"}
+            params.sort(key=lambda r: (r.get("PARAMTYPE", ""), r.get("PPOSITION", "")))
+            print(f"\n=== {fm} interface ===")
+            for p in params:
+                print(f"  {kinds.get(p.get('PARAMTYPE', '').strip(), '?'):<9} {p.get('PARAMETER', '').strip():<28} "
+                      f"{p.get('STRUCTURE', '').strip():<32} {'optional' if p.get('OPTIONAL', '').strip() else ''}")
+            seen = set()
+            for p in params:
+                struct = p.get("STRUCTURE", "").strip()
+                if not struct or "-" in struct or struct in seen or p.get("PARAMTYPE", "").strip() == "X":
+                    continue          # a data element / field reference, not a structure
+                seen.add(struct)
+                cols = read_table(sap, "DD03L", ["FIELDNAME", "POSITION", "DATATYPE", "LENG"],
+                                  f"TABNAME = '{struct}' AND AS4LOCAL = 'A'")
+                if not cols:
+                    continue
+                cols.sort(key=lambda r: r.get("POSITION", ""))
+                print(f"\n  --- {p.get('PARAMETER', '').strip()} : {struct} ---")
+                for c in cols:
+                    name = c.get("FIELDNAME", "").strip()
+                    if not name.startswith("."):
+                        print(f"    {name:<30} {c.get('DATATYPE', ''):<6} {c.get('LENG', '').lstrip('0')}")
+            return
         if args.find:
             prefix = args.find.upper().rstrip("%*")
             print(f"\n=== DD02L: {prefix}* ===")
