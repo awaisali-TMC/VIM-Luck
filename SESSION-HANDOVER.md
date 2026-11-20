@@ -5,6 +5,36 @@ Handover from Claude Code sessions on this machine (`D:\VIM\VIM-Luck`). Read
 what is still open. (`HANDOFF.md` is the separate product feature-status doc.)
 Newest session first; §1–§5 below are from session 1 and are still accurate.
 
+## 2026-11-20: false "Failed to park" + workflow started twice (open)
+
+**False failure — fixed (frontend):** invoice 44 parked as `5105660678/2027` with its workflow, but
+the page said "Failed to park invoice in SAP". The ABAP team had the call paused in the debugger,
+so it outlasted axios' 60 s timeout. The server finished anyway. Fixes:
+- `postInvoiceToSAP` now uses a 180 s timeout.
+- When a park request gets **no reply**, `InvoiceDetailPage` re-reads the invoice. If it has a
+  document number it shows no error; if not, it says the server may still be working.
+- SAP's own refusals are shown as before.
+
+**Workflow started twice — open, on the SAP side so far:** SWI1 shows two `WS90000096`
+instances (11:21:00 and 11:21:05) for the same document `5105660678` / OBJKEY
+`120051056606782027`, each with a Ready approval item.
+- VIM calls `SAP_WAPI_CREATE_EVENT` exactly once per park, with no retry anywhere: not in the
+  connector, not in the workflow code, not in axios.
+- A single document number means a single park.
+- Suspects: the MIR7 park exit `ZXM08U30` or a BAdI also raises the event during the BAPI park, a
+  double SWE2 linkage, or a step re-executed in the debugger.
+
+**Test agreed with the user:**
+1. Set `SAP_WORKFLOW_ENABLED=false` on the LAN box. VIM then parks without raising the event.
+2. Park a new invoice without the debugger, and check SWEL and SWI1.
+- **A workflow still starts:** SAP raises it itself. VIM should then stop raising the event but
+  keep tracking the status. That needs a code change, because `sap_wf_objkey` is only stored when
+  VIM raises the event.
+- **No workflow:** the duplicate is on the SAP side (SWE2 or the debugger).
+
+Afterwards, set the flag back to `true`. Separately, one of the two Ready items for `5105660678`
+must be cancelled in SAP.
+
 ## 2026-11-19 (night): INPUT_CONTAINER rows are ELEMENT + VALUE only (SWR_CONT) — committed `12b923b`, pushed, WORKING on AUP
 
 After `ca2a6fa` the LAN box failed with "field 'TAB_INDEX' not found". On AUP,

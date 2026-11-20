@@ -76,6 +76,11 @@ export async function postInvoiceToSAP(invoiceId, options = {}) {
     exchange_rate: options.exchangeRate || null,
     layout: options.layout || "goods",  // "goods" | "delivery" | "both" — SAP item-selection layout
     line_item_ids: options.lineItemIds || null,  // if set, park only these invoice lines
+  }, {
+    // Live SAP: park + workflow event + commit over the SAProuter can outlast the
+    // 60s default. A client timeout does NOT stop the server, so the invoice
+    // would park anyway while the page reported a failure.
+    timeout: 180000,
   });
   return response.data;
 }

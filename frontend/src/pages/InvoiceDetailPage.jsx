@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { usePermissions } from "../context/PermissionsContext";
 import useInvoiceDetail from "../hooks/useInvoiceDetail";
-import { updateInvoice, deleteInvoice, deleteInvoiceLineItem, patchInvoiceLineItem, addInvoiceLineItem, setParkingSelection, matchProducts } from "../services/invoiceService";
+import { getInvoice, updateInvoice, deleteInvoice, deleteInvoiceLineItem, patchInvoiceLineItem, addInvoiceLineItem, setParkingSelection, matchProducts } from "../services/invoiceService";
 import { openInvoiceDocument } from "../utils/invoiceDocument";
 import { getInvoiceMatches } from "../services/purchaseOrderService";
 import { verifyNTN } from "../services/fbrService";
@@ -463,6 +463,23 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
     changeStatus("validated");
   };
 
+  // A park request that got NO reply (client timeout / dropped connection) may
+  // still have parked in SAP — the server keeps going. Re-read the invoice
+  // before calling it a failure. Returns the message to show, or null when the
+  // invoice did park.
+  const parkFailureMessage = async (err) => {
+    const detail = err.response?.data?.detail;
+    if (err.response) {
+      return typeof detail === "object" ? detail.message || JSON.stringify(detail) : detail || "Failed to park invoice in SAP";
+    }
+    try {
+      const fresh = await getInvoice(invoice.id);
+      if (fresh?.sap_document_number) return null;
+    } catch { /* fall through */ }
+    return "No reply from the server while parking (it may still be working). " +
+      "Reload this page in a minute and check the SAP status before trying again.";
+  };
+
   // Approval is skipped on this instance: confirming a validated invoice parks
   // it straight to SAP (the backend allows validated → parked for parker roles).
   const confirmApproval = async () => {
@@ -483,10 +500,9 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
       await refetch();
     } catch (err) {
       setShowApprovalConfirm(false);
-      const detail = err.response?.data?.detail;
-      setActionError(
-        typeof detail === "object" ? detail.message || JSON.stringify(detail) : detail || "Failed to park invoice in SAP"
-      );
+      const msg = await parkFailureMessage(err);
+      if (msg) setActionError(msg);
+      await refetch();
     } finally {
       setSubmittingApproval(false);
     }
@@ -708,7 +724,8 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
       await refetch();
     } catch (err) {
       const detail = err.response?.data?.detail;
-      const base = typeof detail === "object" ? detail.message || JSON.stringify(detail) : detail || "Failed to park invoice in SAP";
+      const base = await parkFailureMessage(err);
+      if (!base) { setShowSAPPostConfirm(false); await refetch(); return; }
       // An approved invoice is locked: the way back to editing its lines is Flag Exception.
       const hint = invoice.status === "approved" && typeof detail === "string" && detail.includes("Uncheck or delete")
         ? " This invoice is approved, so use Flag Exception to edit its lines first."
