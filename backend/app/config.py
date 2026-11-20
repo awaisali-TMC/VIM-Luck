@@ -133,6 +133,13 @@ class Settings(BaseSettings):
     # event set, rather than guessing a name that SAP would silently ignore.
     SAP_WF_OBJECT_TYPE: str = "ZMIR7_PARK"
     SAP_WF_EVENT: str = ""
+    # Who raises ZMIR7_PARK's event. False (default): SAP raises it itself
+    # inside the park — Lucky's ABAP team confirmed (2026-11-20) that the event
+    # is created within ZMIR7_PARK, so VIM raising it too started the workflow
+    # TWICE for one document. VIM then only parks, stores the OBJKEY and reads
+    # the outcome from ZMIR7_WF_LOG. True: VIM raises it with
+    # SAP_WAPI_CREATE_EVENT in the park's LUW (needs SAP_WF_EVENT).
+    SAP_WF_RAISE_EVENT: bool = False
     # Workflow container values VIM supplies (MIR7_Parking_Workflow.md §2.2).
     # SCENARIO_CHAR is the WF scenario the Approval Matrix keys on; Lucky Cement's
     # SAP team confirmed it is "3" (2026-11-17). The workflow derives the Group

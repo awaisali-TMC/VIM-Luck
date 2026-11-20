@@ -5,7 +5,38 @@ Handover from Claude Code sessions on this machine (`D:\VIM\VIM-Luck`). Read
 what is still open. (`HANDOFF.md` is the separate product feature-status doc.)
 Newest session first; §1–§5 below are from session 1 and are still accurate.
 
-## 2026-11-20: false "Failed to park" + workflow started twice (open)
+## 2026-11-20 (later): VIM no longer raises the workflow event — SAP does (NOT committed yet)
+
+The ABAP team confirmed that the event is created **inside `ZMIR7_PARK`** during the park. VIM's
+own `SAP_WAPI_CREATE_EVENT` was therefore the second workflow.
+
+**New setting `SAP_WF_RAISE_EVENT`, default `false`:**
+- VIM parks and commits only; it makes no event call.
+- It still stores `OBJKEY` (company code + document + year), so "Refresh from SAP" and the poller
+  read `ZMIR7_WF_LOG` as before.
+- `SAP_WF_EVENT` is not needed in this mode.
+- The employee reaches SAP through `BKTXT(8)`.
+- `true` restores the old VIM-raised event (`USERI` / `PWDI` container).
+
+**Fake SAP:** the park writes the `BLK` row itself when the workflow is on and VIM does not raise
+the event.
+
+**Tests:**
+- `test_sap_workflow.py` runs the old sections with `SAP_WF_RAISE_EVENT=true`.
+- A new section checks the default: no event call, one workflow, `OBJKEY` stored, refresh to
+  `BLK`, approve to posted.
+- All SAP suites pass, as does `test_duplicate_check`.
+
+**On the LAN box:**
+- Keep `SAP_WORKFLOW_ENABLED=true`. With it off, VIM stores no `OBJKEY` and cannot track the
+  workflow.
+- Don't set `SAP_WF_RAISE_EVENT`; it defaults to `false`.
+- After the pull and restart, park one invoice and check SWI1 for exactly one `WS90000096`.
+
+**Open:** the ABAP team should confirm that their `ZMIR7_PARK` event reads the initiator from
+`BKTXT(8)`, now that VIM sends no `USERI` / `PWDI`.
+
+## 2026-11-20: false "Failed to park" + workflow started twice (fixed above)
 
 **False failure — fixed (frontend):** invoice 44 parked as `5105660678/2027` with its workflow, but
 the page said "Failed to park invoice in SAP". The ABAP team had the call paused in the debugger,

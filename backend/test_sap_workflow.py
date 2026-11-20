@@ -39,6 +39,7 @@ settings.SAP_ENABLED = True
 settings.SAP_FAKE_DB_PATH = ""
 settings.SAP_WORKFLOW_ENABLED = False
 settings.SAP_WF_EVENT = ""
+settings.SAP_WF_RAISE_EVENT = True        # sections 2-5: VIM raises the event (old mode)
 settings.SAP_WF_POLL_SECONDS = 0          # the test drives refreshes itself
 
 from fastapi.testclient import TestClient  # noqa: E402
@@ -303,6 +304,41 @@ def test_poller_selection(client):
            _detail(client, waiting)["status"])
 
 
+def test_sap_raises(client):
+    """Default on Lucky: SAP raises the event inside ZMIR7_PARK. VIM must not
+    raise a second one (that started the workflow twice), but still tracks it."""
+    print("\nSAP RAISES THE EVENT ITSELF (SAP_WF_RAISE_EVENT=false, the default)")
+    settings.SAP_WORKFLOW_ENABLED = True
+    settings.SAP_WF_RAISE_EVENT = False
+    settings.SAP_WF_EVENT = ""                # not needed in this mode
+    try:
+        inv = _new_invoice(client)
+        r = _park(client, inv)
+        expect(f"park -> 200 without SAP_WF_EVENT (got {r.status_code})", r.status_code == 200, r.text[:200])
+        names = _names()
+        expect("VIM does NOT call SAP_WAPI_CREATE_EVENT (no second workflow)",
+               "SAP_WAPI_CREATE_EVENT" not in names, names)
+        expect("park then one commit",
+               [n for n in names if n in ("BAPI_INCOMINGINVOICE_PARK", "BAPI_TRANSACTION_COMMIT")]
+               == ["BAPI_INCOMINGINVOICE_PARK", "BAPI_TRANSACTION_COMMIT"], names)
+        d = _detail(client, inv)
+        objkey = d.get("sap_wf_objkey") or ""
+        expect("OBJKEY still stored, so the status can be read",
+               objkey == build_objkey("1100", d["sap_document_number"], d["sap_fiscal_year"]), objkey)
+        rows = fake._store().execute("SELECT count(*) AS n FROM ZMIR7_WF_LOG WHERE OBJKEY = ?",
+                                     (objkey,)).fetchone()["n"]
+        expect("exactly one workflow for the document", rows == 1, rows)
+        rr = _refresh(client, inv)
+        expect("refresh reads SAP's workflow: BLK", rr.status_code == 200
+               and rr.json().get("sap_wf_status") == "BLK", rr.text[:200])
+        fake.decide_workflow(objkey, approve=True)
+        expect("SAP approves and posts -> VIM shows posted",
+               _refresh(client, inv).json().get("sap_wf_status") == "APP"
+               and _detail(client, inv)["status"] == "posted", _detail(client, inv)["status"])
+    finally:
+        settings.SAP_WF_RAISE_EVENT = True
+
+
 if __name__ == "__main__":
     test_objkey()
 
@@ -317,6 +353,7 @@ if __name__ == "__main__":
         test_refusals(client)
         test_flow(client)
         test_poller_selection(client)
+        test_sap_raises(client)
 
     print("\n" + "=" * 60)
     if _failures:

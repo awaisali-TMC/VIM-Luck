@@ -313,6 +313,14 @@ class SAPConnectorFake:
             conn.execute("ALTER TABLE RBKP ADD COLUMN BKTXT TEXT")
         conn.execute("INSERT INTO RBKP (BELNR, GJAHR, RBSTAT, BKTXT) VALUES (?, ?, ?, ?)",
                      (doc, year, "5" if post else "A", header.get("HEADER_TXT") or ""))
+        # Lucky Cement: parking itself raises ZMIR7_PARK's event inside SAP, in
+        # the same LUW (VIM raises nothing unless SAP_WF_RAISE_EVENT is on).
+        from app.config import settings as _s
+        if not post and _s.SAP_WORKFLOW_ENABLED and not _s.SAP_WF_RAISE_EVENT:
+            objkey = f"{(header.get('COMP_CODE') or '').strip()}{doc}{year}"
+            conn.execute("DELETE FROM ZMIR7_WF_LOG WHERE OBJKEY = ?", (objkey,))
+            conn.execute("INSERT INTO ZMIR7_WF_LOG (OBJKEY, STATUS, POSTED_DOC) VALUES (?, 'BLK', '')",
+                         (objkey,))
 
         verb = "posted" if post else "parked"
         return _shape(

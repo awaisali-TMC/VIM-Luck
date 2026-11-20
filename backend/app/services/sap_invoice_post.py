@@ -295,8 +295,18 @@ def post_invoice_to_sap(
         # ── SAP workflow (park only): raise the event in the SAME LUW ──
         # Committed together with the park below, or rolled back with it, so an
         # invoice never stays parked without its approval workflow.
+        # Unless SAP raises the event itself during the park (the default,
+        # SAP_WF_RAISE_EVENT=false): then VIM raises nothing, which would start
+        # a second workflow, and only keeps the OBJKEY to read the status by.
         wf = {}
-        if workflow and mode == "park":
+        if workflow and mode == "park" and not settings.SAP_WF_RAISE_EVENT:
+            from app.services.sap_workflow import build_objkey
+            wf = {"ok": True, "event_id": "", "message": "Raised by SAP during the park",
+                  "objkey": build_objkey(company_code, doc_number, fiscal_year)}
+            logger.warning("[wf-diag] %s/%s parked; SAP raises the workflow event itself "
+                           "(SAP_WF_RAISE_EVENT=false), objkey=%s",
+                           doc_number, fiscal_year, wf["objkey"])
+        elif workflow and mode == "park":
             from app.services.sap_workflow import build_objkey, raise_parking_event
             objkey = build_objkey(company_code, doc_number, fiscal_year)
             wf = raise_parking_event(sap, objkey, doc_number,
