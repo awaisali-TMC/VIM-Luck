@@ -107,7 +107,7 @@ def _store() -> sqlite3.Connection:
         if old and "WF_STATUS" not in old:
             conn.execute("DROP TABLE ZMIR7_WF_LOG")
         old = {c[1] for c in conn.execute("PRAGMA table_info(ZMIR7_ERROR_LOG)")}
-        if old and "ZMESSAGE" not in old:
+        if old and "ZMESSAGE_V1" not in old:
             conn.execute("DROP TABLE ZMIR7_ERROR_LOG")
         conn.executescript((_FIXTURES / "workflow_schema.sql").read_text(encoding="utf-8"))
         conn.commit()

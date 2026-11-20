@@ -29,7 +29,13 @@ CREATE TABLE IF NOT EXISTS ZMIR7_ERROR_LOG (
     BELNR TEXT,
     GJAHR TEXT,
     TYPE TEXT,
+    ID TEXT,           -- message class
+    ZNUMBER TEXT,      -- message number
     ZMESSAGE TEXT,
+    ZMESSAGE_V1 TEXT,
+    ZMESSAGE_V2 TEXT,
+    ZMESSAGE_V3 TEXT,
+    ZMESSAGE_V4 TEXT,
     CDATE TEXT,        -- YYYYMMDD
     CTIME TEXT,        -- HHMMSS
     Z_FROM TEXT

@@ -59,7 +59,9 @@ export default function SAPWorkflowStatus({ invoice, onChanged }) {
         </button>
       </div>
       {invoice.sap_wf_message && (
-        <div className="text-danger-dark mt-1">SAP posting error: {invoice.sap_wf_message}</div>
+        <div className="text-danger-dark mt-1">
+          {invoice.sap_wf_status === "APP" ? "SAP posting error" : "SAP message"}: {invoice.sap_wf_message}
+        </div>
       )}
       {state.hint && !invoice.sap_wf_message && <div className="text-neutral-500 mt-1">{state.hint}</div>}
       <div className="text-neutral-400 mt-1">

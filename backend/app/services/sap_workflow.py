@@ -45,7 +45,10 @@ WF_LOG_FIELDS = {"objkey": "OBJKEY", "item": "ITEM", "status": "WF_STATUS",
 # S/E/W/I/A, ZMESSAGE the text (CHAR 220), CDATE/CTIME (CHAR) when it was
 # logged. The newest row per document decides; Z_FROM is not used.
 ERROR_LOG_FIELDS = {"belnr": "BELNR", "gjahr": "GJAHR", "type": "TYPE",
-                    "message": "ZMESSAGE", "cdate": "CDATE", "ctime": "CTIME"}
+                    "message": "ZMESSAGE", "cdate": "CDATE", "ctime": "CTIME",
+                    # used when ZMESSAGE is empty (seen on AUP for a rejection)
+                    "msg_id": "ID", "msg_no": "ZNUMBER", "v1": "ZMESSAGE_V1",
+                    "v2": "ZMESSAGE_V2", "v3": "ZMESSAGE_V3", "v4": "ZMESSAGE_V4"}
 
 # ZMIR7_WF_LOG-WF_STATUS values (Lucky ABAP team, 2026-11-20). CHAR 3, so
 # "INIT" may be stored as "INI"; both are read as WF_INIT.
@@ -196,6 +199,17 @@ def _read(sap, table: str, fields: dict, objkeys: list[str]) -> list[dict]:
     return [{back.get(k, k): v for k, v in r.items()} for r in rows]
 
 
+def _message_text(row: dict) -> str:
+    """ZMESSAGE, or, when SAP left it empty, "<class> <number>: <v1> <v2> <v3> <v4>"."""
+    text = (row.get("message") or "").strip()
+    if text:
+        return text
+    vars_ = " ".join(v for v in (row.get(k, "").strip() for k in ("v1", "v2", "v3", "v4")) if v)
+    head = " ".join(p for p in (row.get("msg_id", "").strip(), row.get("msg_no", "").strip().lstrip("0")) if p)
+    text = ": ".join(p for p in (head, vars_) if p)
+    return text or "SAP logged an error without a message text"
+
+
 def _read_error_log(sap, objkeys: list[str]) -> list[dict]:
     """ZMIR7_ERROR_LOG rows for these OBJKEYs, matched by BELNR + GJAHR (the
     table has no OBJKEY). Each row gets the "objkey" it belongs to."""
@@ -269,7 +283,7 @@ def read_workflow_status(sap, objkeys: list[str]) -> dict[str, dict]:
                                      "posted_doc": "", "error": ""})
         kind = (row.get("type") or "").upper()
         if kind in ("E", "A"):
-            entry["error"] = row.get("message") or "SAP posting error"
+            entry["error"] = _message_text(row)
         elif kind == "S":
             entry["error"] = ""
     # APP normally means posted, but a posting error logged after it means SAP
