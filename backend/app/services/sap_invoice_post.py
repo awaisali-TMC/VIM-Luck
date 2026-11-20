@@ -100,8 +100,16 @@ def _change_parked(sap, doc_number: str, fiscal_year: str, header_data: dict,
         return {"success": False, "invoice_doc_number": "", "fiscal_year": "",
                 "message": text, "return_messages": messages}
     sap.call("BAPI_TRANSACTION_COMMIT", WAIT="X")
-    new_doc = (result.get("INVOICEDOCNUMBER_NEW") or "").strip() or doc
-    new_year = (result.get("FISCALYEAR_NEW") or "").strip() or year
+    # The *_NEW exports are only filled when SAP gives the document a new number.
+    # Otherwise AUP returns an initial NUMC — "0000000000" / "0000" (seen
+    # 2026-11-20: storing "0000" broke the OBJKEY, so the workflow was never
+    # found again). Keep the original document in that case.
+    new_doc = (result.get("INVOICEDOCNUMBER_NEW") or "").strip()
+    new_year = (result.get("FISCALYEAR_NEW") or "").strip()
+    if not new_doc.strip("0"):
+        new_doc = doc
+    if not (len(new_year) == 4 and new_year.isdigit() and new_year.strip("0")):
+        new_year = year
     from app.services.sap_workflow import build_objkey
     logger.info("SAP invoice %s/%s changed and resubmitted (now %s/%s)", doc, year, new_doc, new_year)
     return {

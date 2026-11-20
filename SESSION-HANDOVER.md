@@ -5,6 +5,24 @@ Handover from Claude Code sessions on this machine (`D:\VIM\VIM-Luck`). Read
 what is still open. (`HANDOFF.md` is the separate product feature-status doc.)
 Newest session first; §1–§5 below are from session 1 and are still accurate.
 
+## 2026-11-21 (evening): resubmit tested on AUP — "0000" fiscal-year bug fixed — committed, pushed
+
+The first live resubmits on AUP (invoices 53/54) showed four things:
+- **`S_RFC` for `BAPI_INCOMINGINVOICE_CHANGE`** was missing (`RFC_NO_AUTHORITY`). Basis has since
+  granted it.
+- **`FF 724` "Tax entry not possible in this item"** was the real reason the workflow rejected the
+  invoice, and the resubmit hit it too. The PO item's tax code is `I2`, but VIM sent the
+  AI-suggested `I1`. VIM never reads `EKPO-MWSKZ`; a follow-up is to default to it and warn on a
+  mismatch (offered to the user). Choosing `I2` by hand made the resubmit go through.
+- **Bug, now fixed:** when the number is unchanged, `BAPI_INCOMINGINVOICE_CHANGE` returns
+  `INVOICEDOCNUMBER_NEW` / `FISCALYEAR_NEW` as initial values (`0000000000` / `0000`). VIM stored
+  `0000` as the year, the OBJKEY became `…0000`, and "Refresh from SAP" stayed on "Waiting for
+  SAP". `_change_parked()` now keeps the original document and year when the exports are
+  initial. The fake connector returns them that way, and `test_sap_workflow` asserts it.
+- **Repairing invoice 54:** run
+  `backend/.venv/bin/python backend/fix_invoice_sap_year.py 54 2027 --yes`. It is report-only
+  without `--yes`, and it restores the year and rebuilds the OBJKEY.
+
 ## 2026-11-21 (later): resubmit a REJECTED invoice on the same SAP document — committed, pushed
 
 **Requirement:** when SAP's workflow rejects an invoice, the user corrects it in VIM and sends it

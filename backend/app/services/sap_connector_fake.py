@@ -375,7 +375,8 @@ class SAPConnectorFake:
             conn.execute("UPDATE ZMIR7_WF_LOG SET WF_STATUS = 'BLK' WHERE OBJKEY = ? AND WF_STATUS = 'REJ'",
                          (objkey,))
         return _shape({"RETURN": [_msg("S", "M8", "060", f"Document no. {doc} changed", doc)]},
-                      {"INVOICEDOCNUMBER_NEW": doc, "FISCALYEAR_NEW": year}, {}, kwargs)
+                      # As on AUP: no new number, so the exports come back initial.
+                      {"INVOICEDOCNUMBER_NEW": "0000000000", "FISCALYEAR_NEW": "0000"}, {}, kwargs)
 
     def _invoice_errors(self, header: dict, items: list) -> list:
         """Scripted failures first, then one honest structural check."""

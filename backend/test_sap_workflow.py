@@ -412,6 +412,9 @@ def test_resubmit(client):
         d2 = _detail(client, inv)
         expect("still parked, same document", d2["status"] == "parked" and d2["sap_document_number"] == doc,
                (d2["status"], d2["sap_document_number"]))
+        expect("SAP's initial '0000' year is not stored; OBJKEY unchanged",
+               d2["sap_fiscal_year"] == d["sap_fiscal_year"] and d2["sap_wf_objkey"] == objkey,
+               (d2["sap_fiscal_year"], d2["sap_wf_objkey"], objkey))
         expect("SAP restarted the workflow: BLK", _refresh(client, inv).json().get("sap_wf_status") == "BLK")
     finally:
         settings.SAP_WF_RAISE_EVENT = True
