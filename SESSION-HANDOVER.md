@@ -5,7 +5,54 @@ Handover from Claude Code sessions on this machine (`D:\VIM\VIM-Luck`). Read
 what is still open. (`HANDOFF.md` is the separate product feature-status doc.)
 Newest session first; §1–§5 below are from session 1 and are still accurate.
 
-## 2026-11-20 (evening): submit dry run skipped while SAP raises the event — NOT committed yet
+## 2026-11-20 (night): workflow status read from the real ZMIR7_WF_LOG columns — NOT committed yet
+
+**Why "Refresh from SAP" failed:** VIM asked `RFC_READ_TABLE` for guessed columns (`STATUS`,
+`POSTED_DOC`). The SAP reply `TABLE_WITHOUT_DATA` was misleading. `ZMIR7_WF_LOG` is a transparent,
+active table in AUP client 100 (ABAP team, SE11/SE16, SE37 test).
+
+**Its real columns:**
+`MANDT, OBJKEY(C40), ITEM(N4), BELNR, GJAHR, SCENARIO, ERDAT, ERZET, WF_STATUS(C3), PERNR, BUKRS,
+TERMINAL, SCENARIO_DESC, AMOUNT, SLABID1, WAERS, AMOUNT_IN_LOC`.
+
+**WF_STATUS values (ABAP team):**
+- `INIT`: saved, but no workflow. The column is CHAR 3, so it is probably stored as `INI`; VIM reads
+  both.
+- `BLK`: in process.
+- `APP`: approved **and posted**, under the same `BELNR`.
+- `REJ`: rejected.
+
+**`ZMIR7_ERROR_LOG`, also confirmed (SE37 FIELDS):**
+`SR_NO(I), BELNR, GJAHR, TYPE(C1), ID, ZNUMBER, CDATE, CTIME, ZMESSAGE(C220), ZLOG_NO, ZLOG_MSG_NO,
+ZMESSAGE_V1..V4, Z_FROM, TOTAL_APP, CURRENT_APPR`.
+- The table has **no OBJKEY**, so VIM matches its rows by `BELNR` + `GJAHR` (`_read_error_log`).
+- The newest row per document, by `CDATE` + `CTIME`, decides the result.
+- `E` / `A` keeps an `APP` invoice parked and shows `ZMESSAGE`; `S` ("Document Posted") clears the
+  error.
+- `Z_FROM` is ignored, as the ABAP team said.
+- The fake connector's `ZMIR7_ERROR_LOG` has the real shape, filled by `error_log_row`.
+
+**Code (`sap_workflow.py`):**
+- It reads `OBJKEY`, `ITEM`, `WF_STATUS`, `BELNR`, `ERDAT`, `ERZET` and takes the newest step per
+  OBJKEY.
+- `APP` means posted, with `posted_doc` = `BELNR`, unless the error log holds an `E` row.
+- A failed error-log read is logged and skipped, so it never breaks the refresh.
+
+**Other changes:**
+- The table names are settings: `SAP_WF_LOG_TABLE`, `SAP_WF_ERROR_TABLE`.
+- `backend/sap_dd03l.py` shows a table's DD03L columns; `--find ZMIR7` lists the objects and their
+  TABCLASS.
+- In the fake connector, `ZMIR7_WF_LOG` now has the real shape and one row per step
+  (`wf_log_step`). An old-shape file store is rebuilt.
+- The refresh 502 carries SAP's own text.
+
+**Still needed from ABAP:**
+- The `BKTXT = VALIDATE` check: the case is confirmed as upper-case `VALIDATE`, which is what VIM
+  sends. Once ABAP says the check is live, set `SAP_WF_DRY_RUN_SAFE=true` on the LAN box.
+- ~~Initiator from `BKTXT(8)`~~ **confirmed by ABAP (2026-11-20).**
+- Cancel the extra workflows: the second one on `5105660678`, and invoice 46's dry-run workflow.
+
+## 2026-11-20 (evening): submit dry run skipped while SAP raises the event — committed `5b6da8c`, pushed
 
 **What happened:** invoice 46 got two workflows again, this time from **Submit & Park** plus
 **Confirm & Park**. The submit dialog runs a SAP dry run, `mode=validate`: park, then

@@ -41,11 +41,12 @@ def main() -> None:
     from app.services.sap_connector_fake import _store, decide_workflow
 
     if not args.objkey:
-        rows = _store().execute("SELECT OBJKEY, STATUS, POSTED_DOC FROM ZMIR7_WF_LOG ORDER BY OBJKEY").fetchall()
+        rows = _store().execute("SELECT OBJKEY, ITEM, WF_STATUS, ERDAT, ERZET FROM ZMIR7_WF_LOG "
+                                "ORDER BY OBJKEY, ITEM").fetchall()
         if not rows:
             print("No workflows yet — park an invoice in VIM first.")
         for r in rows:
-            print(f"{r['OBJKEY']}  {r['STATUS']:4}  {r['POSTED_DOC'] or ''}")
+            print(f"{r['OBJKEY']}  {r['ITEM']}  {r['WF_STATUS']:4}  {r['ERDAT']} {r['ERZET']}")
         return
     if not args.decision:
         ap.error("give a decision: approve or reject")

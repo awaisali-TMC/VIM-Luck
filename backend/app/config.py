@@ -150,6 +150,12 @@ class Settings(BaseSettings):
     # ABAP team (2026-11-20): when BKTXT says this, ZMIR7_PARK raises no workflow
     # event; a real park sends "<8-digit PERNR> <text>" instead.
     SAP_DRY_RUN_HEADER_TEXT: str = "VALIDATE"
+    # The DB tables VIM reads the workflow outcome from (RFC_READ_TABLE). On
+    # AUP "ZMIR7_WF_LOG" turned out to be a STRUCTURE (TABLE_WITHOUT_DATA,
+    # 2026-11-20), so the real transparent table names come from the ABAP team
+    # (find them with backend/sap_dd03l.py --find ZMIR7).
+    SAP_WF_LOG_TABLE: str = "ZMIR7_WF_LOG"
+    SAP_WF_ERROR_TABLE: str = "ZMIR7_ERROR_LOG"
     # Workflow container values VIM supplies (MIR7_Parking_Workflow.md §2.2).
     # SCENARIO_CHAR is the WF scenario the Approval Matrix keys on; Lucky Cement's
     # SAP team confirmed it is "3" (2026-11-17). The workflow derives the Group
