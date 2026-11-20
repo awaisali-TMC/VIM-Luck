@@ -1556,9 +1556,16 @@ async def refresh_invoice_workflow(
     from app.services.sap_workflow import refresh_invoices, WF_LABELS
     try:
         await refresh_invoices(db, [invoice])
-    except Exception:
+    except Exception as exc:
         logger.exception("SAP workflow status read failed for invoice %s", invoice.id)
-        raise HTTPException(status_code=502, detail="Could not read the SAP workflow status — see server logs.")
+        from app.services.sap_auth_log import log_rfc_failure
+        kind = log_rfc_failure(f"invoice {invoice.id} workflow refresh", exc, actor=f"{user.id}:{user.email}",
+                               function="RFC_READ_TABLE", objkey=invoice.sap_wf_objkey)
+        # Show SAP's own text (e.g. FIELD_NOT_VALID for an unconfirmed
+        # ZMIR7_WF_LOG column, NOT_AUTHORIZED for S_TABU_DIS), as the park does.
+        reason = " ".join(f"{type(exc).__name__}: {exc}".split())[:400]
+        raise HTTPException(status_code=502,
+                            detail=f"Could not read the SAP workflow status ({kind}) — {reason}")
 
     return {
         "invoice_id": invoice.id,
