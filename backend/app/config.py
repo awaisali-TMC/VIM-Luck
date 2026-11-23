@@ -66,6 +66,9 @@ class Settings(BaseSettings):
     FBR_API_URL: str = "https://api.fbr.gov.pk/iris2ovs/v1/getdata"
     FBR_IRIS_JS_INDEX: str = "https://iris.fbr.gov.pk/public/ATL"
     FBR_LIVE_LOOKUP_ENABLED: bool = False
+    # CA bundle (PEM) for FBR's HTTPS. Empty = REQUESTS_CA_BUNDLE, else
+    # SSL_CERT_FILE (set on the LAN box for its TLS-inspecting proxy), else certifi.
+    FBR_CA_BUNDLE: str = ""
     FBR_REQUEST_TIMEOUT: int = 30
     FBR_MAX_RETRIES: int = 3
     FBR_RETRY_DELAY: int = 2          # seconds between retries

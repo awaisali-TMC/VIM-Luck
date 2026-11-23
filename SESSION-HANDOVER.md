@@ -5,6 +5,30 @@ Handover from Claude Code sessions on this machine (`D:\VIM\VIM-Luck`). Read
 what is still open. (`HANDOFF.md` is the separate product feature-status doc.)
 Newest session first; §1–§5 below are from session 1 and are still accurate.
 
+## 2026-11-23 (later): live FBR lookup failed behind the Fortinet proxy — CA bundle fix — committed, pushed
+
+**Symptom:** after `90bd8f0`, invoice 56 showed `source: live_api` but still `not_found`.
+
+**Cause:** the FBR module uses `requests`, which **ignores `SSL_CERT_FILE`** (it reads only
+`REQUESTS_CA_BUNDLE` or certifi). Behind the office Fortinet proxy, which re-signs HTTPS, the IRIS
+token fetch failed with `CERTIFICATE_VERIFY_FAILED`, so the lookup returned nothing. httpx (Gemini,
+`ztmc_login`) does honour `SSL_CERT_FILE`, which is why those calls worked.
+
+**Fix:** `fbr_verification._new_session()` sets `verify` from `FBR_CA_BUNDLE`, else
+`REQUESTS_CA_BUNDLE`, else `SSL_CERT_FILE` (which `start-lan.sh` already sets). `FBR_CA_BUNDLE` is a
+new setting and is in `.env.example`.
+
+**Verified live from the Windows box,** with the Windows root store (which holds the Fortinet CAs)
+exported to PEM:
+- The token extracts (length 1106).
+- `verify_ntn("1328862-8")` returns `verified_active`, INAM UL HAQ, "HAMZA TRADING ,UNIVERSAL
+  EXPORTER", Active (source `live_api`).
+
+**On the LAN box:**
+1. `git pull` and restart.
+2. Keep `FBR_LIVE_LOOKUP_ENABLED=true`.
+3. If its system CA file lacks the Fortinet CA, point `FBR_CA_BUNDLE` at a PEM that has it.
+
 ## 2026-11-23: "NTN Not Found" for individuals — live FBR fallback on invoice verify — committed, pushed
 
 **Case:** invoice 56, vendor HAMZA TRADING, NTN `1328862-8`. VIM said `not_found` (source

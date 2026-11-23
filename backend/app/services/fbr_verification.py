@@ -240,6 +240,22 @@ _token_fetched_at: float = 0
 _cached_api_url: Optional[str] = None  # dynamically extracted from bundle
 
 
+def _new_session() -> requests.Session:
+    """requests session that trusts the right CA bundle.
+
+    requests ignores SSL_CERT_FILE (it reads only REQUESTS_CA_BUNDLE / its own
+    certifi bundle). Behind the office Fortinet proxy, which re-signs HTTPS,
+    that made every FBR call fail with CERTIFICATE_VERIFY_FAILED, so the live
+    lookup silently returned "not found" (2026-11-23). Use FBR_CA_BUNDLE, else
+    REQUESTS_CA_BUNDLE, else SSL_CERT_FILE (set by start-lan.sh)."""
+    sess = requests.Session()
+    bundle = (settings.FBR_CA_BUNDLE or os.environ.get("REQUESTS_CA_BUNDLE")
+              or os.environ.get("SSL_CERT_FILE") or "").strip()
+    if bundle:
+        sess.verify = bundle
+    return sess
+
+
 def _invalidate_token_cache():
     """Force re-extraction on next request (called on 401)."""
     global _cached_token, _token_fetched_at, _cached_api_url
@@ -269,7 +285,7 @@ def _fetch_bearer_token_sync(force_refresh: bool = False) -> Optional[str]:
     if not force_refresh and _cached_token and (time.time() - _token_fetched_at) < ttl:
         return _cached_token
 
-    session = requests.Session()
+    session = _new_session()
     session.headers.update(_DEFAULT_HEADERS)
     timeout = settings.FBR_REQUEST_TIMEOUT
 
@@ -423,7 +439,7 @@ def _query_fbr_api_sync(
     if not token:
         return None
 
-    session = requests.Session()
+    session = _new_session()
     # SELECTOR: Payload shape expected by the FBR API.
     # protocolId "1004" = Income Tax ATL, outputType "5" = JSON response.
     payload = {
