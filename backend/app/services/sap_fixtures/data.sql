@@ -91,13 +91,14 @@ INSERT INTO T001 (BUKRS, LAND1, KTOPL) VALUES ('1100','PK','1100');
 INSERT INTO T005 (LAND1, KALSM) VALUES ('PK','TAXPK');
 
 INSERT INTO T007A (KALSM, MWSKZ, MWART) VALUES
- ('TAXPK','I0','V'), ('TAXPK','I1','V'), ('TAXPK','I2','V'), ('TAXPK','I3','V');
+ ('TAXPK','I0','V'), ('TAXPK','I1','V'), ('TAXPK','I2','V'), ('TAXPK','I3','V'), ('TAXPK','2I','V');
 
 INSERT INTO T007S (KALSM, MWSKZ, SPRAS, TEXT1) VALUES
- ('TAXPK','I0','E','Exempt - 0%'),
- ('TAXPK','I1','E','Sales Tax 18%'),
- ('TAXPK','I2','E','Sales Tax 17%'),
- ('TAXPK','I3','E','Services Sales Tax 15%');
+ ('TAXPK','I0','E','Exempt from Input Tax - 0%'),
+ ('TAXPK','I1','E','Zero Rated Input Tax - 0%'),
+ ('TAXPK','I2','E','Standard Rate of Input Tax on Goods - 17%'),
+ ('TAXPK','I3','E','Input Tax on Fixed assets - 17%'),
+ ('TAXPK','2I','E','Standard Rate of Input Tax on Goods - 18%');
 
 INSERT INTO TCURT (WAERS, SPRAS, LTEXT) VALUES
  ('PKR','E','Pakistan Rupee'),

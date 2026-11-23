@@ -835,37 +835,22 @@ def _tax_codes_response(company_code, rows):
 
 @router.get("/tax-codes")
 async def get_sap_tax_codes(company_code: str = "1100", db: AsyncSession = Depends(get_db)):
-    """Tax codes for the Park-to-SAP dropdown — served from the local
-    `sap_tax_codes` cache. On first use (empty cache) it lazily syncs from SAP."""
-    from app.models.sap_tax_code import SapTaxCode
+    """Tax codes for the Park-to-SAP dropdown and the AI tax-code suggestion.
 
-    async def _load():
-        res = await db.execute(
-            select(SapTaxCode).where(SapTaxCode.company_code == company_code).order_by(SapTaxCode.code)
-        )
-        return res.scalars().all()
-
-    rows = await _load()
-    if not rows:
-        # No-SAP instance: serve a static Pakistan tax-code set for the dropdown.
-        if not settings.SAP_ENABLED:
-            return {
-                "company_code": company_code,
-                "source": "static",
-                "tax_codes": [
-                    {"code": "I0", "description": "0% — Exempt / no input tax", "rate": 0},
-                    {"code": "I1", "description": "18% — Standard input sales tax", "rate": 18},
-                    {"code": "I2", "description": "17% — Input sales tax", "rate": 17},
-                ],
-            }
-        _ensure_dll()
-        try:
-            await _sync_tax_codes(db, company_code)
-            rows = await _load()
-        except Exception:
-            logger.exception("Tax-code lazy sync failed")
-            return {"company_code": company_code, "tax_codes": [], "source": "empty"}
-    return _tax_codes_response(company_code, rows)
+    Served from Lucky Cement's official list (services/lucky_tax_codes.py, from
+    "Tax Codes Details.xlsx", 2026-11-23) for every company code. It replaced
+    the local sap_tax_codes cache, which on the LAN box still held the fake-SAP
+    fixture texts ("I1 — Sales Tax 18%"; in Lucky's SAP I1 is Zero Rated 0%),
+    so 18% invoices were parked with I1 and refused by SAP with FF 724.
+    """
+    from app.services.lucky_tax_codes import tax_codes
+    return {
+        "company_code": company_code,
+        "procedure": "TAXPK",
+        "country": "PK",
+        "source": "lucky_master",
+        "tax_codes": tax_codes(),
+    }
 
 
 @router.post("/tax-codes/sync")

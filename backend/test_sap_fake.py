@@ -172,7 +172,7 @@ def _park(sap, po_number, po_item="00010", amount="3700000", post=False):
         }},
         input_tables={"ITEMDATA": [{
             "INVOICE_DOC_ITEM": "000001", "PO_NUMBER": po_number, "PO_ITEM": po_item,
-            "TAX_CODE": "I1", "ITEM_AMOUNT": amount, "QUANTITY": "20", "PO_UNIT": "ST",
+            "TAX_CODE": "2I", "ITEM_AMOUNT": amount, "QUANTITY": "20", "PO_UNIT": "ST",
         }], "TAXDATA": []},
         tables=["RETURN"],
         table_fields={"RETURN": ["TYPE", "ID", "NUMBER", "MESSAGE", "MESSAGE_V1", "MESSAGE_V2"]},
@@ -364,7 +364,7 @@ def _park_via_api(client, po_number, lines, expect_ok=True, label=""):
     expect(f"{label}match invoice to PO -> 200 (got {r.status_code})", r.status_code == 200, r.text[:200])
 
     r = client.post(f"/api/sap/invoices/{inv_id}/post",
-                    json={"mode": "park", "tax_code": "I1", "layout": "goods",
+                    json={"mode": "park", "tax_code": "2I", "layout": "goods",
                           "posting_date": "20260312"})
     return inv_id, r
 
@@ -468,7 +468,7 @@ def test_partial_delivery(client):
     expect("billing the 18 received is a partial match, not a mismatch",
            ok.get("match_status") == "partial_match", ok.get("match_status"))
     r = client.post(f"/api/sap/invoices/{inv_id}/post",
-                    json={"mode": "park", "tax_code": "I1", "layout": "goods",
+                    json={"mode": "park", "tax_code": "2I", "layout": "goods",
                           "posting_date": "20260318"})
     expect(f"and it parks (got {r.status_code})", r.status_code == 200, r.text[:300])
 
@@ -536,7 +536,7 @@ def _save_and_match(client, po_number, lines):
 
 
 def _send(client, inv_id, mode="park", line_item_ids=None, layout="goods"):
-    body = {"mode": mode, "tax_code": "I1", "layout": layout, "posting_date": "20260330"}
+    body = {"mode": mode, "tax_code": "2I", "layout": layout, "posting_date": "20260330"}
     if line_item_ids is not None:
         body["line_item_ids"] = line_item_ids
     return client.post(f"/api/sap/invoices/{inv_id}/post", json=body)

@@ -796,6 +796,11 @@ def tax_rate_for_code(company_code: str, tax_code: str) -> float | None:
     carries no tax amount."""
     if not tax_code:
         return None
+    # Lucky Cement's official list first (no RFC); SAP only for a code not on it.
+    from app.services.lucky_tax_codes import LUCKY_TAX_CODES
+    for code, _desc, _kind, rate in LUCKY_TAX_CODES:
+        if code == tax_code:
+            return rate
     try:
         data = fetch_tax_codes(company_code)
     except Exception:

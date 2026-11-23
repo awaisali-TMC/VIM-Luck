@@ -5,6 +5,28 @@ Handover from Claude Code sessions on this machine (`D:\VIM\VIM-Luck`). Read
 what is still open. (`HANDOFF.md` is the separate product feature-status doc.)
 Newest session first; §1–§5 below are from session 1 and are still accurate.
 
+## 2026-11-23 (evening): Lucky's official tax-code list replaces the old codes — committed, pushed
+
+The user supplied `Tax Codes Details.xlsx`: 100 codes with their descriptions.
+
+**Why it mattered:** the dropdown and the AI suggestion offered "I1 — Sales Tax 18%". That came
+from the fake-SAP fixtures, cached in the LAN box's `sap_tax_codes`. In Lucky's SAP `I1` is
+**Zero Rated 0%** and 18% is **`2I`**, which is why invoice 54 was refused with `FF 724`.
+
+**Changes:**
+- `backend/app/services/lucky_tax_codes.py` holds the list: 80 input and 20 output codes (`O…` and
+  `$O` are output). The rate is the first "n%" in the description; 7 codes have none.
+- `GET /api/sap/tax-codes` returns this list for every company code (`source: lucky_master`); the
+  `sap_tax_codes` cache is no longer read.
+- `tax_rate_for_code()` uses the list first and SAP only for unknown codes.
+- The AI default (`pickDefaultTaxCode`, unchanged) now gives 18% → `2I`, 17% → `I2`, 0% → `I0`,
+  16% → `IB`. Checked with node against the new list.
+- The fake fixtures' `T007S` texts follow Lucky's meanings, and `2I` was added. Tests use `2I` for
+  18%. All suites pass.
+
+**Note:** invoices that already saved `sap_tax_code = I1` keep it. Re-pick the code on any open
+invoice that is really 18%.
+
 ## 2026-11-23 (later): live FBR lookup failed behind the Fortinet proxy — CA bundle fix — committed, pushed
 
 **Symptom:** after `90bd8f0`, invoice 56 showed `source: live_api` but still `not_found`.

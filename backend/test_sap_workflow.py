@@ -116,7 +116,7 @@ def _new_invoice(client):
 def _park(client, inv_id):
     _calls.clear()
     return client.post(f"/api/sap/invoices/{inv_id}/post",
-                       json={"mode": "park", "tax_code": "I1", "layout": "goods",
+                       json={"mode": "park", "tax_code": "2I", "layout": "goods",
                              "posting_date": "20260312"})
 
 
@@ -184,7 +184,7 @@ def test_refusals(client):
         vendor_number="0002000101", company_code="1100", currency="PKR", gross_amount=3700000,
         tax_amount=0, po_number=PO, line_items=[{"po_item": 10, "amount": 3700000, "quantity": 20,
                                                  "po_unit": "ST"}],
-        tax_code="I1", mode="park", workflow=True, initiator_sap_user="nohier")
+        tax_code="2I", mode="park", workflow=True, initiator_sap_user="nohier")
     expect("park is reported as failed", res["success"] is False, res.get("message"))
     expect("with SAP's hierarchy message", "hierarchy" in res["message"].lower(), res["message"])
     expect("the event was raised as the VIM user's SAP id",
@@ -385,7 +385,7 @@ def test_resubmit(client):
         doc, objkey = d["sap_document_number"], d["sap_wf_objkey"]
 
         _calls.clear()
-        c = client.post(f"/api/sap/invoices/{inv}/post", json={"mode": "change", "tax_code": "I1"})
+        c = client.post(f"/api/sap/invoices/{inv}/post", json={"mode": "change", "tax_code": "2I"})
         expect(f"change while BLK -> 409 (got {c.status_code})", c.status_code == 409, c.text[:200])
         expect("...and nothing sent to SAP", "BAPI_INCOMINGINVOICE_CHANGE" not in _names(), _names())
 
@@ -393,7 +393,7 @@ def test_resubmit(client):
         expect("SAP rejected it", _refresh(client, inv).json().get("sap_wf_status") == "REJ")
 
         _calls.clear()
-        c = client.post(f"/api/sap/invoices/{inv}/post", json={"mode": "change", "tax_code": "I1"})
+        c = client.post(f"/api/sap/invoices/{inv}/post", json={"mode": "change", "tax_code": "2I"})
         expect(f"change while REJ -> 200 (got {c.status_code})", c.status_code == 200, c.text[:300])
         names = _names()
         expect("change BAPI then one commit, no park, no event",

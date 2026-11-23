@@ -25,7 +25,7 @@ PARK_ARGS = dict(
     vendor_number="0002000101", company_code="1000", currency="PKR",
     gross_amount=117000.0, tax_amount=17000.0, po_number="4500009001",
     line_items=[{"po_item": "00010", "amount": 100000.0, "quantity": 20, "po_unit": "EA"}],
-    tax_code="I1", header_text="einv-HP-2026-0417", initiator_sap_user="00004007",
+    tax_code="2I", header_text="einv-HP-2026-0417", initiator_sap_user="00004007",
 )
 
 failures = 0
@@ -62,7 +62,7 @@ r = post_invoice_to_sap(
     vendor_number="0002000101", company_code="1000", currency="PKR",
     gross_amount=117000.0, tax_amount=17000.0, po_number="4500009001",
     line_items=[{"po_item": "00010", "amount": 100000.0, "quantity": 20, "po_unit": "EA"}],
-    tax_code="I1", header_text="einv-HP-2026-0417", mode="park",
+    tax_code="2I", header_text="einv-HP-2026-0417", mode="park",
     initiator_sap_user="00004007",
 )
 print(f"  park: success={r.get('success')} doc={r.get('invoice_doc_number')} msg={r.get('message')!r}")

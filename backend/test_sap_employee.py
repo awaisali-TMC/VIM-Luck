@@ -216,7 +216,7 @@ def _new_invoice(client):
 
 def _post(client, inv_id, mode):
     return client.post(f"/api/sap/invoices/{inv_id}/post",
-                       json={"mode": mode, "tax_code": "I1", "layout": "goods", "posting_date": "20260312"})
+                       json={"mode": mode, "tax_code": "2I", "layout": "goods", "posting_date": "20260312"})
 
 
 def _rbkp_count():
