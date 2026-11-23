@@ -1257,14 +1257,35 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
                         </div>
                       );
                     })}
-                    {fbrInfo.profile && (
-                      <div className="mt-1 text-neutral-600 flex flex-col gap-0.5 border-t border-neutral-100 pt-1">
-                        <span className="text-neutral-500 font-semibold">FBR Taxpayer Profile</span>
-                        {fbrInfo.profile.registration_status && <div><span className="text-neutral-400">Registration:</span> {fbrInfo.profile.registration_status}</div>}
-                        {fbrInfo.profile.sales_tax_registered && <div><span className="text-neutral-400">Sales tax registered:</span> {fbrInfo.profile.sales_tax_registered}</div>}
-                        {fbrInfo.profile.tax_office && <div><span className="text-neutral-400">Tax office:</span> {fbrInfo.profile.tax_office}</div>}
-                        {fbrInfo.profile.registered_on && <div><span className="text-neutral-400">Registered on:</span> {fbrInfo.profile.registered_on}</div>}
-                        {fbrInfo.profile.category && <div><span className="text-neutral-400">Category:</span> {fbrInfo.profile.category}</div>}
+                    {/* NTN details: every field FBR's Taxpayer Profile Inquiry returns,
+                        in FBR's order (as on the IRIS portal); then the ATL details. */}
+                    {(fbrInfo.profile || fbrInfo.income_tax?.name || fbrInfo.sales_tax?.name) && (
+                      <div className="mt-2 border border-neutral-100 rounded-md bg-neutral-25 px-3 py-2 min-w-[320px] max-w-[520px]">
+                        <div className="text-neutral-700 font-semibold mb-1">NTN Details · {fbrInfo.ntn || invoice.supplier_ntn}</div>
+                        <table className="w-full border-collapse">
+                          <tbody>
+                            {(fbrInfo.profile?.fields || []).map((f) => (
+                              <tr key={f.label} className="border-t border-neutral-100 first:border-t-0">
+                                <td className="py-0.5 pr-3 text-neutral-400 whitespace-nowrap align-top">{f.label}</td>
+                                <td className="py-0.5 text-neutral-700">{f.value}</td>
+                              </tr>
+                            ))}
+                            {[["Income Tax (ATL)", fbrInfo.income_tax], ["Sales Tax (ATL)", fbrInfo.sales_tax]].map(([label, s]) =>
+                              s && (s.name || s.status_date || s.registration_no) ? (
+                                <tr key={label} className="border-t border-neutral-100">
+                                  <td className="py-0.5 pr-3 text-neutral-400 whitespace-nowrap align-top">{label}</td>
+                                  <td className="py-0.5 text-neutral-700">
+                                    {[s.registration_no, s.name, s.business_name && s.business_name !== s.name ? s.business_name : null,
+                                      s.filing_status, s.status_date && `as of ${s.status_date}`].filter(Boolean).join(" · ")}
+                                  </td>
+                                </tr>
+                              ) : null
+                            )}
+                          </tbody>
+                        </table>
+                        {!fbrInfo.profile && (
+                          <div className="text-neutral-400 mt-1">FBR profile not available (live FBR lookup off or no reply).</div>
+                        )}
                       </div>
                     )}
                   </div>

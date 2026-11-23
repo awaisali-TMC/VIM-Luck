@@ -239,8 +239,9 @@ def _status_from(filing: str) -> str:
         "active" if f.startswith("active") or "operative" in f else "inactive")
 
 
-# Profile fields shown in VIM. Email and Cell are left out on purpose: FBR
-# returns them masked, and VIM has no use for them.
+# Named profile fields (kept for callers that want one value). The client asked
+# for the NTN's full details (2026-11-23), so the profile also carries every
+# field FBR returns, in FBR's order, as "fields" — Email/Cell come masked by FBR.
 _PROFILE_FIELDS = {"Name": "name", "Category": "category", "Registered On": "registered_on",
                    "Tax Office": "tax_office", "Registration Status": "registration_status",
                    "Registered for Sales Tax": "sales_tax_registered"}
@@ -284,7 +285,8 @@ async def fbr_status_detail(identifier: str, live: bool, it_result: Optional[dic
         filing = t.get("Filing Status") or t.get("Status") or t.get("STATUS") or ""
         return {"status": _status_from(filing) if filing else "active", "name": t.get("Name"),
                 "business_name": t.get("Business Name"), "filing_status": filing or None,
-                "status_date": t.get("Filing Status Checking Date"), "source": "live_api"}
+                "status_date": t.get("Filing Status Checking Date"),
+                "registration_no": t.get("Registration No"), "source": "live_api"}
 
     # Income tax
     if lists["IT"]:
@@ -303,6 +305,7 @@ async def fbr_status_detail(identifier: str, live: bool, it_result: Optional[dic
     titles = await live_raw("1003", output_type="4")
     if titles:
         profile = {v: titles.get(k) for k, v in _PROFILE_FIELDS.items() if titles.get(k)}
+        profile["fields"] = [{"label": k, "value": v} for k, v in titles.items() if v]
     return {"income_tax": income, "sales_tax": sales, "profile": profile}
 
 
@@ -517,18 +520,51 @@ def _parse_fbr_response(data: dict, fallback_id: str) -> Optional[dict]:
     return parsed
 
 
-def _fbr_titles(data: dict) -> Optional[dict]:
-    """{Title (without ':'): Value} from an FBR reply, or None for "no record"."""
-    if not isinstance(data, dict) or data.get("status_code") != 1:
+def _fbr_titles(data) -> Optional[dict]:
+    """{Title (without ':'): Value} from an FBR reply, or None for "no record".
+
+    The reply comes in more than one shape: outputType 5 gives
+    {"status_code": 1, "response": [{Title, Value}, ...]}, while the Taxpayer
+    Profile (1003, outputType 4) sends the list as a JSON *string* — reading
+    only the first shape left the profile empty on screen (2026-11-23). A bare
+    list, or the list under another key, is accepted too.
+    """
+    def as_list(x):
+        if isinstance(x, str):
+            s = x.strip()
+            if s[:1] in ("[", "{"):
+                try:
+                    return as_list(json.loads(s))
+                except ValueError:
+                    # Loose JSON (trailing commas etc.): take the pairs as text.
+                    pairs = re.findall(r'"Title"\s*:\s*"([^"]*)"\s*,\s*"Value"\s*:\s*"([^"]*)"', s)
+                    return [{"Title": a, "Value": b} for a, b in pairs] or None
+            return None                       # e.g. "No record exists"
+        if isinstance(x, list):
+            flat = []
+            for el in x:                      # [[{...}, ...]] -> [{...}, ...]
+                flat.extend(el if isinstance(el, list) else [el])
+            return flat
+        if isinstance(x, dict):
+            if "status_code" in x and x.get("status_code") not in (1, "1"):
+                return None
+            for key in ("response", "Response", "data", "Data", "payload", "Payload"):
+                if key in x:
+                    return as_list(x[key])
         return None
-    response = data.get("response")
-    if not isinstance(response, list):
+
+    items = as_list(data)
+    if not items:
         return None
     out = {}
-    for item in response:
-        title = (item.get("Title") or "").strip().rstrip(":").strip()
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        title = str(item.get("Title") or "").strip().rstrip(":").strip()
         if title:
-            out[title] = (item.get("Value") or "").strip()
+            out[title] = str(item.get("Value") or "").strip()
+    if not out:
+        logger.warning("FBR reply not understood (no Title/Value pairs): %s", json.dumps(data)[:300])
     return out or None
 
 
