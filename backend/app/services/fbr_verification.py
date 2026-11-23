@@ -302,7 +302,7 @@ async def fbr_status_detail(identifier: str, live: bool, it_result: Optional[dic
     sales = from_row(lists["ST"]) if lists["ST"] else from_titles(await live_raw(settings.FBR_PROTOCOL_SALES_TAX))
     # Taxpayer profile
     profile = None
-    titles = await live_raw("1003", output_type="4")
+    titles = await live_raw("1003", output_type="4") or await live_raw("1003", output_type="5")
     if titles:
         profile = {v: titles.get(k) for k, v in _PROFILE_FIELDS.items() if titles.get(k)}
         profile["fields"] = [{"label": k, "value": v} for k, v in titles.items() if v]
@@ -642,8 +642,21 @@ def _query_fbr_api_sync(
                 )
 
             resp.raise_for_status()
+            if raw:
+                # The Taxpayer Profile (1003, outputType 4) can come back as
+                # plain text that only looks like JSON — resp.json() fails on
+                # it, which left the profile empty (2026-11-24). Fall back to
+                # reading the text's Title/Value pairs.
+                try:
+                    return _fbr_titles(resp.json())
+                except ValueError:
+                    titles = _fbr_titles(resp.text)
+                    if titles is None:
+                        logger.warning("FBR %s reply not JSON and no Title/Value pairs: %r",
+                                       protocol_id, resp.text[:300])
+                    return titles
             data = resp.json()
-            return _fbr_titles(data) if raw else _parse_fbr_response(data, identifier)
+            return _parse_fbr_response(data, identifier)
 
         except requests.exceptions.Timeout:
             logger.warning("FBR API timeout on attempt %d.", attempt)
