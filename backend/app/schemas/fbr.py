@@ -37,6 +37,13 @@ class FBRVerificationResponse(BaseModel):
     registrations: Optional[list[str]] = None  # ATL lists found: ["IT","ST"]
     source: str = "local_db"              # "local_db" | "live_api"
     verified_at: datetime
+    # Lucky Cement: separate Income Tax / Sales Tax status + FBR profile
+    # ({status, name, business_name, filing_status, status_date, source};
+    # profile: {name, category, registered_on, tax_office, registration_status,
+    # sales_tax_registered}). Filled by /verify-ntn.
+    income_tax: Optional[dict] = None
+    sales_tax: Optional[dict] = None
+    profile: Optional[dict] = None
 
 
 class WHTComplianceResponse(BaseModel):

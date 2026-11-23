@@ -285,6 +285,7 @@ def _build_detail_response(invoice: Invoice) -> InvoiceDetailResponse:
         sap_wf_message=invoice.sap_wf_message,
         sap_wf_checked_at=invoice.sap_wf_checked_at,
         parking_line_item_ids=(json.loads(invoice.parking_line_item_ids) if invoice.parking_line_item_ids else None),
+        parking_gr_refs=(json.loads(invoice.parking_gr_refs) if invoice.parking_gr_refs else None),
         # PO matching
         matched_po_id=invoice.matched_po_id,
         latest_po_match_status=invoice.latest_po_match_status,
@@ -802,7 +803,8 @@ async def save_invoice(
     if data.supplier_ntn and data.supplier_ntn.strip():
         try:
             from app.services.fbr_verification import verify_ntn as _verify_ntn, check_wht_compliance
-            verification = await _verify_ntn(data.supplier_ntn)
+            # Live FBR fallback when enabled (individuals are in the ATL file by CNIC only).
+            verification = await _verify_ntn(data.supplier_ntn, check_live=settings.FBR_LIVE_LOOKUP_ENABLED)
             invoice.fbr_verification_status = verification["status"]
             invoice.fbr_verified_at = verification["verified_at"]
             invoice.fbr_taxpayer_name = verification.get("taxpayer_name")
@@ -1256,6 +1258,10 @@ class ParkingSelection(BaseModel):
     line_item_ids: list[int]
 
 
+class GrSelection(BaseModel):
+    gr_keys: list[str]          # "YYYY/BELNR/BUZEI"; [] = latest GR per item (default)
+
+
 @router.put("/{invoice_id}/parking-selection")
 async def set_parking_selection(
     invoice_id: int,
@@ -1274,6 +1280,28 @@ async def set_parking_selection(
     invoice.parking_line_item_ids = json.dumps(list(data.line_item_ids))
     await db.commit()
     return {"success": True, "parking_line_item_ids": data.line_item_ids}
+
+
+@router.put("/{invoice_id}/parking-grs")
+async def set_parking_grs(
+    invoice_id: int,
+    data: GrSelection,
+    db: AsyncSession = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+):
+    """Lucky Cement (observation F): which goods receipts this invoice parks
+    against. Not editable once the invoice is in SAP (unless SAP rejected it)."""
+    result = await db.execute(select(Invoice).where(Invoice.id == invoice_id, Invoice.is_deleted == 0))
+    invoice = result.scalar_one_or_none()
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    _assert_can_access(invoice, principal)
+    if _locked_in_sap(invoice):
+        raise HTTPException(status_code=409, detail="Invoice is in SAP — its goods receipts can't be changed.")
+    keys = [k.strip() for k in data.gr_keys if k and k.strip()]
+    invoice.parking_gr_refs = json.dumps(keys) if keys else None
+    await db.commit()
+    return {"success": True, "parking_gr_refs": keys}
 
 
 @router.post("/{invoice_id}/line-items")

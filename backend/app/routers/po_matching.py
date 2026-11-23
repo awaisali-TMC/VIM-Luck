@@ -161,6 +161,18 @@ async def trigger_po_match(
 
     db.add(match_result)
 
+    # Lucky Cement (observation B): an invoice line that prints no unit of
+    # measure takes its matched PO line's unit. Only fills an EMPTY unit — a
+    # unit the invoice printed or a user typed is never overwritten.
+    inv_by_id = {li.id: li for li in invoice.line_items}
+    po_by_id = {li.id: li for li in po.line_items}
+    for lm in result["line_matches"]:
+        inv_li = inv_by_id.get(lm.get("invoice_line_item_id"))
+        po_li = po_by_id.get(lm.get("po_line_item_id"))
+        if inv_li is not None and po_li is not None and not (inv_li.unit or "").strip() \
+                and (po_li.unit or "").strip():
+            inv_li.unit = po_li.unit.strip()
+
     # Update convenience fields on invoice
     invoice.matched_po_id = req.po_id
     invoice.latest_po_match_status = result["match_status"]

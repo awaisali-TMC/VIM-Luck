@@ -5,6 +5,147 @@ Handover from Claude Code sessions on this machine (`D:\VIM\VIM-Luck`). Read
 what is still open. (`HANDOFF.md` is the separate product feature-status doc.)
 Newest session first; §1–§5 below are from session 1 and are still accurate.
 
+## 2026-11-24: client observation F — GR-wise parking — committed, pushed
+
+**Backend:**
+- `sap_po_service.fetch_open_grs(po)` reads EKBE `VGABE` 1 and 2 with
+  `LFGJA`/`LFBNR`/`LFPOS`. It returns one entry per GR material-document line, with the open
+  quantity: received minus reversed minus posted-invoiced.
+- `split_by_grs()` builds one ITEMDATA row per selected GR.
+- `GET /api/sap/invoices/{id}/open-grs` and `PUT /api/invoices/{id}/parking-grs` are new. The
+  selection is stored in the new column `invoices.parking_gr_refs`, which has its migration.
+- In the park endpoint, ticked GRs replace the "latest GR" reference for their PO item. The park
+  returns 422 when the ticked GRs don't add up to the billed quantity or are no longer open.
+  Nothing ticked = the old behaviour.
+
+**Frontend:** `components/detail/GoodsReceiptsCard.jsx` on the invoice page shows each GR with a
+checkbox, the open quantity and amount, and the selected total per item. It is locked once the
+invoice is in SAP, unless the invoice is REJ.
+
+**Fake SAP:**
+- `EKBE` gains `LFGJA` and `LFPOS`; old file stores get them through `ALTER TABLE`.
+- PO `4500009001` item 10 is now two GRs, 12 + 8 (`5000009001` / `5000009006`).
+- `test_sap_fake`'s GRN check was updated to match, and `test_sap_workflow` has a new
+  `GR-WISE PARKING` section. All suites pass, and the frontend builds.
+
+**Not checked on AUP or in a browser.**
+- `LFGJA` and `LFPOS` are standard EKBE fields, but confirm the reversal and invoice references
+  on a real PO.
+
+**Open — client observation G (WHT):**
+- It waits for the LFBW / park-BAPI `WITHTAXDATA` field names, either as screenshots or through
+  Basis access to DD02L/DD03L/FUPARAREF.
+- It also needs `S_TABU_DIS` for LFBW for `TMC_VIM`; the email draft went to the user.
+
+## 2026-11-23 (night): client observations A–G — A, B done; G started — A, B + WHT list committed
+
+The client's list (the user said to work from it and set earlier work aside):
+
+**A. FBR status — done:** Income Tax, Sales Tax and Taxpayer Profile are now shown separately.
+Example: income tax Active but sales tax not.
+- `fbr_verification.fbr_status_detail()` reads the local ATL lists IT and ST separately
+  (`_lookup_atl_lists`).
+- With `FBR_LIVE_LOOKUP_ENABLED`, a miss goes live: protocol **1004** for the IT ATL and **1005**
+  for the ST ATL. The profile comes from **1003**, the Taxpayer Profile Inquiry, with outputType 4.
+  These protocol ids are read from IRIS's own portal bundle.
+- The profile keeps Name, Category, Registered On, Tax Office, Registration Status ("Income Tax:
+  Active, Sales Tax: OPERATIVE") and Registered for Sales Tax. **Email and Cell are dropped.**
+- `/api/fbr/verify-ntn` returns `income_tax`, `sales_tax` and `profile`. The Vendor Verification
+  card shows two badges plus the profile block.
+- Tested offline with stubs. The live 1003 reply shape was seen once for NTN 1328862.
+
+**B. Unit of measure from the PO — done:** at PO match, an invoice line with **no** unit takes the
+matched PO line's unit (`po_matching.py`). A printed or typed unit is never overwritten.
+`test_sap_workflow` covers it.
+
+**C.** Tax codes: done in `b681d01`. **D:** resolved by business. **E:** testing only.
+
+**G. Withholding tax — started:** the user chose "show and send to SAP".
+- `services/lucky_wht_codes.py` holds the 180 PK codes from `Book3.xlsx` (T059Z: type, code,
+  name, rate).
+- **Next:** read the vendor's WHT types and codes from BP / `LFBW` (vendor + company code), show a
+  WHT section on the invoice, and send `WITHTAXDATA` in the park BAPI.
+- **Before coding,** confirm the field names on AUP from the LAN box:
+  - `backend/.venv/bin/python backend/sap_dd03l.py LFBW --rows 2`
+  - `backend/.venv/bin/python backend/sap_dd03l.py --fm BAPI_INCOMINGINVOICE_PARK`, which shows
+    the `WITHTAXDATA` structure.
+
+**F. GR-wise parking — to do:** list the PO's not-yet-invoiced GRs with checkboxes; only the ticked
+ones are parked, each line referencing its GR.
+
+## 2026-11-23 (evening): Lucky's official tax-code list replaces the old codes — committed, pushed
+
+The user supplied `Tax Codes Details.xlsx`: 100 codes with their descriptions.
+
+**Why it mattered:** the dropdown and the AI suggestion offered "I1 — Sales Tax 18%". That came
+from the fake-SAP fixtures, cached in the LAN box's `sap_tax_codes`. In Lucky's SAP `I1` is
+**Zero Rated 0%** and 18% is **`2I`**, which is why invoice 54 was refused with `FF 724`.
+
+**Changes:**
+- `backend/app/services/lucky_tax_codes.py` holds the list: 80 input and 20 output codes (`O…` and
+  `$O` are output). The rate is the first "n%" in the description; 7 codes have none.
+- `GET /api/sap/tax-codes` returns this list for every company code (`source: lucky_master`); the
+  `sap_tax_codes` cache is no longer read.
+- `tax_rate_for_code()` uses the list first and SAP only for unknown codes.
+- The AI default (`pickDefaultTaxCode`, unchanged) now gives 18% → `2I`, 17% → `I2`, 0% → `I0`,
+  16% → `IB`. Checked with node against the new list.
+- The fake fixtures' `T007S` texts follow Lucky's meanings, and `2I` was added. Tests use `2I` for
+  18%. All suites pass.
+
+**Note:** invoices that already saved `sap_tax_code = I1` keep it. Re-pick the code on any open
+invoice that is really 18%.
+
+## 2026-11-23 (later): live FBR lookup failed behind the Fortinet proxy — CA bundle fix — committed, pushed
+
+**Symptom:** after `90bd8f0`, invoice 56 showed `source: live_api` but still `not_found`.
+
+**Cause:** the FBR module uses `requests`, which **ignores `SSL_CERT_FILE`** (it reads only
+`REQUESTS_CA_BUNDLE` or certifi). Behind the office Fortinet proxy, which re-signs HTTPS, the IRIS
+token fetch failed with `CERTIFICATE_VERIFY_FAILED`, so the lookup returned nothing. httpx (Gemini,
+`ztmc_login`) does honour `SSL_CERT_FILE`, which is why those calls worked.
+
+**Fix:** `fbr_verification._new_session()` sets `verify` from `FBR_CA_BUNDLE`, else
+`REQUESTS_CA_BUNDLE`, else `SSL_CERT_FILE` (which `start-lan.sh` already sets). `FBR_CA_BUNDLE` is a
+new setting and is in `.env.example`.
+
+**Verified live from the Windows box,** with the Windows root store (which holds the Fortinet CAs)
+exported to PEM:
+- The token extracts (length 1106).
+- `verify_ntn("1328862-8")` returns `verified_active`, INAM UL HAQ, "HAMZA TRADING ,UNIVERSAL
+  EXPORTER", Active (source `live_api`).
+
+**On the LAN box:**
+1. `git pull` and restart.
+2. Keep `FBR_LIVE_LOOKUP_ENABLED=true`.
+3. If its system CA file lacks the Fortinet CA, point `FBR_CA_BUNDLE` at a PEM that has it.
+
+## 2026-11-23: "NTN Not Found" for individuals — live FBR fallback on invoice verify — committed, pushed
+
+**Case:** invoice 56, vendor HAMZA TRADING, NTN `1328862-8`. VIM said `not_found` (source
+`local_db`), while FBR's site, searched **by NTN**, shows **Active** with Registration No
+`4220148670085`, which is the owner's CNIC.
+
+**Cause:** FBR's ATL file lists individuals by CNIC. The imported `atl_taxpayers` therefore has no
+row under their NTN. VIM already handles both the 7-digit and 8-digit NTN forms.
+
+**Fix:**
+- The invoice verify (`POST /api/fbr/invoices/{id}/verify-fbr`) and the verify at save
+  (`invoices.py`) now pass `check_live=settings.FBR_LIVE_LOOKUP_ENABLED`.
+- So, with the flag on, an NTN missing from the local table falls through to the live FBR lookup
+  (`live_fbr_lookup`). Before this they never asked for it, even with the flag on.
+- Checked offline with a stubbed live lookup; it is not tried against FBR yet.
+
+**To switch it on (LAN box):**
+1. Set `FBR_LIVE_LOOKUP_ENABLED=true` in `backend/.env` and restart.
+2. Click "Re-verify" on invoice 56.
+
+**Open:**
+- Confirm the box reaches `iris.fbr.gov.pk` / `api.fbr.gov.pk` through the Fortinet proxy
+  (`SSL_CERT_FILE` is already set).
+- **Settled:** the FBR portal searches by the 7-digit NTN base (`1328862`), so `live_fbr_lookup`
+  now drops the check digit of an 8-digit NTN. Checked offline: `1328862-8`, `13288628` and
+  `1328862` are all sent as `1328862`; a CNIC goes unchanged.
+
 ## 2026-11-21 (evening): resubmit tested on AUP — "0000" fiscal-year bug fixed — committed, pushed
 
 The first live resubmits on AUP (invoices 53/54) showed four things:

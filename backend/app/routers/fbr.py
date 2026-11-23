@@ -58,7 +58,18 @@ async def verify_ntn_endpoint(req: VerifyNTNRequest):
     """
     if not req.ntn or not req.ntn.strip():
         raise HTTPException(status_code=400, detail="NTN or CNIC is required")
-    result = await verify_ntn(req.ntn, check_live=req.check_live, protocol_id=req.protocol_id)
+    # With FBR_LIVE_LOOKUP_ENABLED the live fallback applies here too: the
+    # Vendor Verification card and the review screen call this with
+    # check_live=false, and an individual's NTN is never in the local ATL
+    # (FBR lists them by CNIC), so they showed "NTN Not Found" (2026-11-23).
+    from app.config import settings as _settings
+    live = bool(req.check_live or _settings.FBR_LIVE_LOOKUP_ENABLED)
+    result = await verify_ntn(req.ntn, check_live=live, protocol_id=req.protocol_id)
+    from app.services.fbr_verification import fbr_status_detail
+    try:
+        result.update(await fbr_status_detail(req.ntn, live=live, it_result=result))
+    except Exception:
+        logger.exception("FBR IT/ST/profile detail failed for %s", req.ntn)
     return FBRVerificationResponse(**result)
 
 
@@ -114,8 +125,12 @@ async def verify_invoice_fbr(invoice_id: int, db: AsyncSession = Depends(get_db)
     if not invoice.supplier_ntn or not invoice.supplier_ntn.strip():
         raise HTTPException(status_code=400, detail="Invoice has no supplier NTN")
 
-    # Verify NTN
-    verification = await verify_ntn(invoice.supplier_ntn)
+    # Verify NTN: local ATL first, then — when FBR_LIVE_LOOKUP_ENABLED — the live
+    # FBR lookup. Needed for individuals: FBR's ATL file lists them by CNIC, so
+    # their NTN (e.g. 1328862-8) is not in the local table, while FBR itself
+    # finds them by NTN.
+    from app.config import settings as _settings
+    verification = await verify_ntn(invoice.supplier_ntn, check_live=_settings.FBR_LIVE_LOOKUP_ENABLED)
 
     # Update invoice
     invoice.fbr_verification_status = verification["status"]

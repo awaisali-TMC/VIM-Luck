@@ -546,6 +546,114 @@ def fetch_service_grn_refs(po_number: str) -> dict[int, dict]:
         sap.disconnect()
 
 
+def fetch_open_grs(po_number: str) -> list[dict]:
+    """Lucky Cement (observation F): the PO's goods-receipt lines that are not
+    yet (fully) invoiced, one entry per GR material-document line, so the user
+    can choose which GRs an invoice parks against.
+
+    From EKBE: receipts (VGABE 1, BWART 101/103, SHKZG S) are the GR lines;
+    reversals (VGABE 1, SHKZG H) and invoices (VGABE 2; H = credit memo) point
+    at their GR through LFGJA/LFBNR/LFPOS and reduce its open quantity. Parked
+    (not posted) invoices are not in EKBE, so they do not reduce it.
+
+    Returns [{gr_key "YYYY/BELNR/BUZEI", gr_year, gr_doc, gr_item, po_item,
+    posting_date, received, invoiced, open_qty, amount, open_amount}], oldest
+    first, open_qty > 0 only.
+    """
+    sap = _get_connector()
+    sap.connect()
+    try:
+        po_num = po_number.strip().zfill(10)
+        result = sap.call(
+            "RFC_READ_TABLE",
+            QUERY_TABLE="EKBE",
+            ROWCOUNT="5000",
+            DELIMITER="|",
+            input_tables={
+                "OPTIONS": [{"TEXT": f"EBELN = '{po_num}' "},
+                            {"TEXT": "AND ( VGABE = '1' OR VGABE = '2' ) "}],
+                "FIELDS": [{"FIELDNAME": f} for f in (
+                    "EBELP", "GJAHR", "BELNR", "BUZEI", "VGABE", "BWART", "BUDAT",
+                    "MENGE", "DMBTR", "SHKZG", "LFGJA", "LFBNR", "LFPOS")],
+            },
+            tables=["DATA", "FIELDS"],
+            table_fields={"DATA": ["WA"], "FIELDS": ["FIELDNAME", "OFFSET", "LENGTH"]},
+        )
+        rows = _parse_delimited_rows(result.get("DATA", []), result.get("FIELDS", []))
+    finally:
+        sap.disconnect()
+
+    def key(year, doc, item):
+        return f"{(year or '').strip()}/{(doc or '').strip().zfill(10)}/{(item or '').strip().zfill(4)}"
+
+    grs: dict[str, dict] = {}
+    for r in rows:   # receipts first, so references below find their GR
+        if r.get("VGABE", "").strip() != "1" or r.get("SHKZG", "").strip() == "H":
+            continue
+        if r.get("BWART", "").strip() not in ("101", "103"):
+            continue                      # 105 = release of a 103, not a receipt
+        k = key(r.get("GJAHR"), r.get("BELNR"), r.get("BUZEI") or "1")
+        g = grs.setdefault(k, {
+            "gr_key": k, "gr_year": r.get("GJAHR", "").strip(), "gr_doc": r.get("BELNR", "").strip(),
+            "gr_item": (r.get("BUZEI", "").strip() or "1"),
+            "po_item": int(r.get("EBELP", "0") or "0"),
+            "posting_date": r.get("BUDAT", "").strip(), "received": 0.0, "reversed": 0.0,
+            "invoiced": 0.0, "amount": 0.0,
+        })
+        g["received"] += _safe_float(r.get("MENGE") or "") or 0.0
+        g["amount"] += _safe_float(r.get("DMBTR") or "") or 0.0
+    for r in rows:
+        vgabe, shkzg = r.get("VGABE", "").strip(), r.get("SHKZG", "").strip()
+        if vgabe == "1" and shkzg != "H":
+            continue
+        ref = key(r.get("LFGJA"), r.get("LFBNR"), r.get("LFPOS") or "1")
+        g = grs.get(ref)
+        if g is None:
+            continue
+        qty = _safe_float(r.get("MENGE") or "") or 0.0
+        if vgabe == "1":
+            g["reversed"] += qty
+        else:
+            g["invoiced"] += -qty if shkzg == "H" else qty
+
+    out = []
+    for g in grs.values():
+        net = g["received"] - g["reversed"]
+        open_qty = round(net - g["invoiced"], 3)
+        if open_qty <= 0:
+            continue
+        g["open_qty"] = open_qty
+        g["open_amount"] = round(g["amount"] * (open_qty / net), 2) if net else 0.0
+        g["received"] = round(net, 3)
+        g.pop("reversed")
+        out.append(g)
+    out.sort(key=lambda g: (g["posting_date"], g["gr_key"]))
+    logger.info("Open GRs for PO %s: %s", po_number, [(g["gr_key"], g["open_qty"]) for g in out])
+    return out
+
+
+def split_by_grs(goods_item: dict, grs: list[dict]) -> list[dict]:
+    """One ITEMDATA row per selected GR for a PO item: each GR's open quantity,
+    the invoice's unit price, and the GR as REF_DOC. Raises ValueError when the
+    selected GRs' open quantity is not the quantity the invoice bills."""
+    total = round(sum(g["open_qty"] for g in grs), 3)
+    billed = round(float(goods_item.get("quantity") or 0), 3)
+    if abs(total - billed) > 0.001:
+        docs = ", ".join(g["gr_doc"] for g in grs)
+        raise ValueError(
+            f"PO item {goods_item['po_item']}: the selected goods receipts ({docs}) have "
+            f"{total:g} open, but the invoice bills {billed:g}. Select GRs that add up to "
+            f"the invoiced quantity, or correct the invoice quantity.")
+    price = float(goods_item["amount"]) / billed if billed else 0.0
+    rows, left = [], round(float(goods_item["amount"]), 2)
+    for i, g in enumerate(grs):
+        amount = left if i == len(grs) - 1 else round(g["open_qty"] * price, 2)
+        left = round(left - amount, 2)
+        rows.append({**goods_item, "quantity": g["open_qty"], "amount": amount,
+                     "ref_doc": g["gr_doc"], "ref_doc_year": g["gr_year"], "ref_doc_item": g["gr_item"]})
+    return rows
+
+
 def fetch_delivery_costs(po_number: str) -> list[dict]:
     """Fetch invoiceable PLANNED delivery costs (freight, etc.) for a PO from
     SAP table EKBZ (delivery-cost PO history).
@@ -796,6 +904,11 @@ def tax_rate_for_code(company_code: str, tax_code: str) -> float | None:
     carries no tax amount."""
     if not tax_code:
         return None
+    # Lucky Cement's official list first (no RFC); SAP only for a code not on it.
+    from app.services.lucky_tax_codes import LUCKY_TAX_CODES
+    for code, _desc, _kind, rate in LUCKY_TAX_CODES:
+        if code == tax_code:
+            return rate
     try:
         data = fetch_tax_codes(company_code)
     except Exception:

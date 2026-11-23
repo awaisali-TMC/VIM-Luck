@@ -199,6 +199,116 @@ async def _lookup_atl_pg(normalized: str) -> Optional[dict]:
         return None
 
 
+async def _lookup_atl_lists(normalized: str) -> dict:
+    """{"IT": row | None, "ST": row | None} from the imported ATL. Being on a
+    list means active for that tax (FBR's ATL lists only active filers)."""
+    found = {"IT": None, "ST": None}
+    try:
+        from sqlalchemy import select, or_
+        from app.database import async_session
+        from app.models.atl_taxpayer import AtlTaxpayer
+        digits = re.sub(r"[\s\-/]", "", normalized or "")
+        if not digits:
+            return found
+        candidates = {digits}
+        conds = []
+        if len(digits) == 8:
+            candidates.add(digits[:7])
+        if len(digits) == 7:
+            conds.append(AtlTaxpayer.ntn.like(f"{digits}_"))
+        conds.insert(0, AtlTaxpayer.ntn.in_(candidates))
+        if len(digits) == 13:
+            conds.append(AtlTaxpayer.cnic == digits)
+        async with async_session() as db:
+            rows = (await db.execute(select(AtlTaxpayer).where(or_(*conds)))).scalars().all()
+        for r in rows:
+            kind = (r.list_type or "").upper()
+            if kind in found and found[kind] is None:
+                found[kind] = {"name": r.name, "business_name": r.business_name,
+                               "filing_status": r.filing_status, "status_date": r.status_date}
+    except Exception:
+        logger.debug("ATL list lookup unavailable", exc_info=True)
+    return found
+
+
+def _status_from(filing: str) -> str:
+    f = (filing or "").strip().lower()
+    if not f:
+        return "unknown"
+    return "inactive" if ("inactive" in f or "in-active" in f or "non" in f) else (
+        "active" if f.startswith("active") or "operative" in f else "inactive")
+
+
+# Named profile fields (kept for callers that want one value). The client asked
+# for the NTN's full details (2026-11-23), so the profile also carries every
+# field FBR returns, in FBR's order, as "fields" — Email/Cell come masked by FBR.
+_PROFILE_FIELDS = {"Name": "name", "Category": "category", "Registered On": "registered_on",
+                   "Tax Office": "tax_office", "Registration Status": "registration_status",
+                   "Registered for Sales Tax": "sales_tax_registered"}
+
+
+async def fbr_status_detail(identifier: str, live: bool, it_result: Optional[dict] = None) -> dict:
+    """Lucky Cement (observation A): Income Tax and Sales Tax status shown
+    separately, plus the FBR Taxpayer Profile — a vendor can be active for
+    income tax and not for sales tax.
+
+    Local ATL lists first (IT / ST); with `live` (FBR_LIVE_LOOKUP_ENABLED) a
+    list miss is asked of FBR — protocol 1004 (IT ATL), 1005 (ST ATL) — and
+    the profile comes from protocol 1003 (Taxpayer Profile Inquiry). Protocol
+    ids are those IRIS's own portal uses (iris.fbr.gov.pk bundle, 2026-11-23).
+    """
+    normalized, id_type = normalize_identifier(identifier)
+    send = normalized
+    if id_type == "NTN" and normalized.isdigit() and len(normalized) == 8:
+        send = normalized[:7]
+    lists = await _lookup_atl_lists(normalized)
+    loop = asyncio.get_event_loop()
+
+    async def live_raw(protocol, output_type="5"):
+        if not live:
+            return None
+        try:
+            return await loop.run_in_executor(
+                None, lambda: _query_fbr_api_sync(send, id_type, protocol, output_type=output_type, raw=True))
+        except Exception:
+            logger.exception("FBR live %s lookup failed", protocol)
+            return None
+
+    def from_row(row):
+        return {"status": "active", "name": row.get("name"), "business_name": row.get("business_name"),
+                "filing_status": row.get("filing_status") or "Active", "status_date": row.get("status_date"),
+                "source": "local_db"}
+
+    def from_titles(t):
+        if not t:
+            return {"status": "not_found", "source": "live_api" if live else "local_db"}
+        filing = t.get("Filing Status") or t.get("Status") or t.get("STATUS") or ""
+        return {"status": _status_from(filing) if filing else "active", "name": t.get("Name"),
+                "business_name": t.get("Business Name"), "filing_status": filing or None,
+                "status_date": t.get("Filing Status Checking Date"),
+                "registration_no": t.get("Registration No"), "source": "live_api"}
+
+    # Income tax
+    if lists["IT"]:
+        income = from_row(lists["IT"])
+    elif it_result and it_result.get("source") == "live_api" and it_result.get("status") != "not_found":
+        income = {"status": "active" if it_result.get("is_active") else "inactive",
+                  "name": it_result.get("taxpayer_name"), "business_name": it_result.get("business_name"),
+                  "filing_status": it_result.get("filing_status"), "status_date": it_result.get("status_date"),
+                  "source": "live_api"}
+    else:
+        income = from_titles(await live_raw(settings.FBR_PROTOCOL_INCOME_TAX))
+    # Sales tax
+    sales = from_row(lists["ST"]) if lists["ST"] else from_titles(await live_raw(settings.FBR_PROTOCOL_SALES_TAX))
+    # Taxpayer profile
+    profile = None
+    titles = await live_raw("1003", output_type="4")
+    if titles:
+        profile = {v: titles.get(k) for k, v in _PROFILE_FIELDS.items() if titles.get(k)}
+        profile["fields"] = [{"label": k, "value": v} for k, v in titles.items() if v]
+    return {"income_tax": income, "sales_tax": sales, "profile": profile}
+
+
 async def lookup_atl(identifier: str) -> Optional[dict]:
     """Look up an NTN/CNIC in the ATL. Prefers the app DB's atl_taxpayers table
     (weekly import); falls back to the local sqlite ATL file if present."""
@@ -240,6 +350,22 @@ _token_fetched_at: float = 0
 _cached_api_url: Optional[str] = None  # dynamically extracted from bundle
 
 
+def _new_session() -> requests.Session:
+    """requests session that trusts the right CA bundle.
+
+    requests ignores SSL_CERT_FILE (it reads only REQUESTS_CA_BUNDLE / its own
+    certifi bundle). Behind the office Fortinet proxy, which re-signs HTTPS,
+    that made every FBR call fail with CERTIFICATE_VERIFY_FAILED, so the live
+    lookup silently returned "not found" (2026-11-23). Use FBR_CA_BUNDLE, else
+    REQUESTS_CA_BUNDLE, else SSL_CERT_FILE (set by start-lan.sh)."""
+    sess = requests.Session()
+    bundle = (settings.FBR_CA_BUNDLE or os.environ.get("REQUESTS_CA_BUNDLE")
+              or os.environ.get("SSL_CERT_FILE") or "").strip()
+    if bundle:
+        sess.verify = bundle
+    return sess
+
+
 def _invalidate_token_cache():
     """Force re-extraction on next request (called on 401)."""
     global _cached_token, _token_fetched_at, _cached_api_url
@@ -269,7 +395,7 @@ def _fetch_bearer_token_sync(force_refresh: bool = False) -> Optional[str]:
     if not force_refresh and _cached_token and (time.time() - _token_fetched_at) < ttl:
         return _cached_token
 
-    session = requests.Session()
+    session = _new_session()
     session.headers.update(_DEFAULT_HEADERS)
     timeout = settings.FBR_REQUEST_TIMEOUT
 
@@ -394,6 +520,54 @@ def _parse_fbr_response(data: dict, fallback_id: str) -> Optional[dict]:
     return parsed
 
 
+def _fbr_titles(data) -> Optional[dict]:
+    """{Title (without ':'): Value} from an FBR reply, or None for "no record".
+
+    The reply comes in more than one shape: outputType 5 gives
+    {"status_code": 1, "response": [{Title, Value}, ...]}, while the Taxpayer
+    Profile (1003, outputType 4) sends the list as a JSON *string* — reading
+    only the first shape left the profile empty on screen (2026-11-23). A bare
+    list, or the list under another key, is accepted too.
+    """
+    def as_list(x):
+        if isinstance(x, str):
+            s = x.strip()
+            if s[:1] in ("[", "{"):
+                try:
+                    return as_list(json.loads(s))
+                except ValueError:
+                    # Loose JSON (trailing commas etc.): take the pairs as text.
+                    pairs = re.findall(r'"Title"\s*:\s*"([^"]*)"\s*,\s*"Value"\s*:\s*"([^"]*)"', s)
+                    return [{"Title": a, "Value": b} for a, b in pairs] or None
+            return None                       # e.g. "No record exists"
+        if isinstance(x, list):
+            flat = []
+            for el in x:                      # [[{...}, ...]] -> [{...}, ...]
+                flat.extend(el if isinstance(el, list) else [el])
+            return flat
+        if isinstance(x, dict):
+            if "status_code" in x and x.get("status_code") not in (1, "1"):
+                return None
+            for key in ("response", "Response", "data", "Data", "payload", "Payload"):
+                if key in x:
+                    return as_list(x[key])
+        return None
+
+    items = as_list(data)
+    if not items:
+        return None
+    out = {}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        title = str(item.get("Title") or "").strip().rstrip(":").strip()
+        if title:
+            out[title] = str(item.get("Value") or "").strip()
+    if not out:
+        logger.warning("FBR reply not understood (no Title/Value pairs): %s", json.dumps(data)[:300])
+    return out or None
+
+
 # ── Core API query function ──────────────────────────────────────────────────
 
 def _query_fbr_api_sync(
@@ -401,6 +575,8 @@ def _query_fbr_api_sync(
     identifier_type: str = "NTN",
     protocol_id: Optional[str] = None,
     _is_retry: bool = False,
+    output_type: str = "5",
+    raw: bool = False,
 ) -> Optional[dict]:
     """
     Query the live FBR ATL API for a single NTN or CNIC.
@@ -423,12 +599,12 @@ def _query_fbr_api_sync(
     if not token:
         return None
 
-    session = requests.Session()
+    session = _new_session()
     # SELECTOR: Payload shape expected by the FBR API.
     # protocolId "1004" = Income Tax ATL, outputType "5" = JSON response.
     payload = {
         "protocolId": protocol_id,
-        "outputType": "5",
+        "outputType": output_type,
         "identifierType": identifier_type,
         "identifier": identifier.strip(),
         "date": "",
@@ -461,12 +637,13 @@ def _query_fbr_api_sync(
                 logger.warning("FBR API returned 401 — token likely expired. Re-extracting...")
                 _invalidate_token_cache()
                 return _query_fbr_api_sync(
-                    identifier, identifier_type, protocol_id, _is_retry=True
+                    identifier, identifier_type, protocol_id, _is_retry=True,
+                    output_type=output_type, raw=raw,
                 )
 
             resp.raise_for_status()
             data = resp.json()
-            return _parse_fbr_response(data, identifier)
+            return _fbr_titles(data) if raw else _parse_fbr_response(data, identifier)
 
         except requests.exceptions.Timeout:
             logger.warning("FBR API timeout on attempt %d.", attempt)
@@ -499,6 +676,11 @@ async def live_fbr_lookup(
         normalized = normalize_cnic(identifier)
     else:
         normalized = normalize_ntn(identifier)
+        # FBR's NTN search takes the 7-digit base only (IRIS portal, 2026-11-23:
+        # "1328862" finds the taxpayer whose invoice prints "1328862-8"), so drop
+        # the check digit of an 8-digit NTN.
+        if normalized.isdigit() and len(normalized) == 8:
+            normalized = normalized[:7]
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(
         None, _query_fbr_api_sync, normalized, identifier_type, protocol_id

@@ -33,6 +33,7 @@ import InvoiceClassificationCard from "../components/detail/InvoiceClassificatio
 import MultiCurrencyCard from "../components/detail/MultiCurrencyCard";
 import AttachmentsCard from "../components/detail/AttachmentsCard";
 import Modal from "../components/common/Modal";
+import GoodsReceiptsCard from "../components/detail/GoodsReceiptsCard";
 import { postInvoiceToSAP, fetchSAPTaxCodes, fetchSAPCurrencies, unparkInvoiceFromSAP, validateInvoiceForSAP, lookupSAPVendor } from "../services/sapService";
 import { tokens } from "../styles/tokens";
 import { todayIso } from "../utils/dateRange";
@@ -1233,8 +1234,62 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
                     <div className="text-neutral-400 mt-0.5">Source: {fbrInfo.source === "local_db" ? "FBR ATL" : fbrInfo.source === "live_api" ? "FBR Live" : fbrInfo.source}</div>
                   </div>
                 )}
-                {fbrInfo && fbrInfo.status === "not_found" && (
+                {fbrInfo && fbrInfo.status === "not_found" && !fbrInfo.income_tax && (
                   <div className="text-2xs text-warning-dark">NTN not on the Active Taxpayer List.</div>
+                )}
+                {/* Lucky Cement: Income Tax and Sales Tax are separate — a vendor
+                    can be active for one and not the other — plus FBR's profile. */}
+                {fbrInfo && (fbrInfo.income_tax || fbrInfo.sales_tax) && (
+                  <div className="flex flex-col gap-1 text-2xs mt-0.5">
+                    {[["Income Tax", fbrInfo.income_tax], ["Sales Tax", fbrInfo.sales_tax]].map(([label, s]) => {
+                      const st = s?.status || "unknown";
+                      const tone = st === "active"
+                        ? "text-success-dark bg-success-bg border-success-base"
+                        : st === "inactive" || st === "not_found"
+                        ? "text-danger-dark bg-danger-bg border-danger-base"
+                        : "text-neutral-600 bg-neutral-50 border-neutral-200";
+                      const text = st === "active" ? "Active" : st === "inactive" ? "Inactive"
+                        : st === "not_found" ? "Not on ATL" : "Unknown";
+                      return (
+                        <div key={label} className="flex items-center gap-1.5">
+                          <span className="text-neutral-500 w-[68px]">{label}:</span>
+                          <span className={`inline-flex items-center text-[10px] font-semibold px-1.5 py-0.5 rounded border ${tone}`}>{text}</span>
+                          {s?.source && <span className="text-neutral-400">{s.source === "live_api" ? "FBR live" : "FBR ATL"}</span>}
+                        </div>
+                      );
+                    })}
+                    {/* NTN details: every field FBR's Taxpayer Profile Inquiry returns,
+                        in FBR's order (as on the IRIS portal); then the ATL details. */}
+                    {(fbrInfo.profile || fbrInfo.income_tax?.name || fbrInfo.sales_tax?.name) && (
+                      <div className="mt-2 border border-neutral-100 rounded-md bg-neutral-25 px-3 py-2 min-w-[320px] max-w-[520px]">
+                        <div className="text-neutral-700 font-semibold mb-1">NTN Details · {fbrInfo.ntn || invoice.supplier_ntn}</div>
+                        <table className="w-full border-collapse">
+                          <tbody>
+                            {(fbrInfo.profile?.fields || []).map((f) => (
+                              <tr key={f.label} className="border-t border-neutral-100 first:border-t-0">
+                                <td className="py-0.5 pr-3 text-neutral-400 whitespace-nowrap align-top">{f.label}</td>
+                                <td className="py-0.5 text-neutral-700">{f.value}</td>
+                              </tr>
+                            ))}
+                            {[["Income Tax (ATL)", fbrInfo.income_tax], ["Sales Tax (ATL)", fbrInfo.sales_tax]].map(([label, s]) =>
+                              s && (s.name || s.status_date || s.registration_no) ? (
+                                <tr key={label} className="border-t border-neutral-100">
+                                  <td className="py-0.5 pr-3 text-neutral-400 whitespace-nowrap align-top">{label}</td>
+                                  <td className="py-0.5 text-neutral-700">
+                                    {[s.registration_no, s.name, s.business_name && s.business_name !== s.name ? s.business_name : null,
+                                      s.filing_status, s.status_date && `as of ${s.status_date}`].filter(Boolean).join(" · ")}
+                                  </td>
+                                </tr>
+                              ) : null
+                            )}
+                          </tbody>
+                        </table>
+                        {!fbrInfo.profile && (
+                          <div className="text-neutral-400 mt-1">FBR profile not available (live FBR lookup off or no reply).</div>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
             ) : (
@@ -1320,6 +1375,11 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
         ].filter(Boolean)}
         lineItems={invoice.line_items || []}
       />
+
+      {/* GR-wise parking (observation F): pick the goods receipts to park against */}
+      {!editing && invoice.matched_po_id && (
+        <GoodsReceiptsCard invoice={invoice} editable={sapFieldsEditable} onChanged={refetch} />
+      )}
 
       {/* SAP Parking parameters — editable during review, locked at approval */}
       {!editing && (

@@ -103,6 +103,10 @@ def _store() -> sqlite3.Connection:
         # Every start, IF NOT EXISTS: older file-backed stores gain these too.
         # A store made with the old guessed ZMIR7_WF_LOG (STATUS / POSTED_DOC)
         # is rebuilt in AUP's real shape; it only ever held fixture rows.
+        ekbe = {c[1] for c in conn.execute("PRAGMA table_info(EKBE)")}
+        for col in ("LFGJA", "LFPOS"):      # added for open-GR selection (2026-11-23)
+            if ekbe and col not in ekbe:
+                conn.execute(f"ALTER TABLE EKBE ADD COLUMN {col} TEXT")
         old = {c[1] for c in conn.execute("PRAGMA table_info(ZMIR7_WF_LOG)")}
         if old and "WF_STATUS" not in old:
             conn.execute("DROP TABLE ZMIR7_WF_LOG")

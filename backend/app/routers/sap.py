@@ -9,6 +9,8 @@ SAP integration endpoints — fetch POs from SAP, sync to local DB, post invoice
   POST /api/sap/invoices/{id}/post — post an invoice to SAP (MIRO)
 """
 
+import asyncio
+import json
 import logging
 import os
 from datetime import datetime, timezone
@@ -683,6 +685,40 @@ async def get_sap_grn(po_number: str):
         raise HTTPException(status_code=500, detail="SAP GRN fetch failed — see server logs.")
 
 
+@router.get("/invoices/{invoice_id}/open-grs")
+async def get_invoice_open_grs(invoice_id: int, db: AsyncSession = Depends(get_db)):
+    """Lucky Cement (observation F): goods receipts of the invoice's matched PO
+    that are not yet fully invoiced (live from SAP EKBE), with the ones this
+    invoice has selected. Service items (entry sheets) are left out."""
+    from app.models.purchase_order import PurchaseOrder
+    inv = (await db.execute(select(Invoice).where(Invoice.id == invoice_id, Invoice.is_deleted == 0))).scalar_one_or_none()
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    selected = json.loads(inv.parking_gr_refs) if inv.parking_gr_refs else []
+    if not inv.matched_po_id:
+        return {"po_number": None, "grs": [], "selected": selected, "message": "Match a PO first."}
+    po = (await db.execute(select(PurchaseOrder).options(selectinload(PurchaseOrder.line_items))
+                           .where(PurchaseOrder.id == inv.matched_po_id))).scalar_one_or_none()
+    if not po:
+        return {"po_number": None, "grs": [], "selected": selected}
+    if not settings.SAP_ENABLED:
+        return {"po_number": po.po_number, "grs": [], "selected": selected, "message": "SAP is not enabled."}
+    _ensure_dll()
+    from app.services.sap_po_service import fetch_open_grs
+    try:
+        grs = await asyncio.to_thread(fetch_open_grs, po.po_number)
+    except Exception as exc:
+        logger.exception("Open-GR read failed for PO %s", po.po_number)
+        reason = " ".join(f"{type(exc).__name__}: {exc}".split())[:300]
+        raise HTTPException(status_code=502, detail=f"Could not read goods receipts from SAP — {reason}")
+    lines = {li.item_number: li for li in po.line_items}
+    for g in grs:
+        li = lines.get(g["po_item"])
+        g["description"] = li.description if li else ""
+        g["unit"] = (li.unit if li else "") or ""
+    return {"po_number": po.po_number, "grs": grs, "selected": selected}
+
+
 @router.post("/pos/{po_number}/grn/sync")
 async def sync_sap_grn(po_number: str, db: AsyncSession = Depends(get_db)):
     """Fetch a PO's GRNs from SAP and persist them locally for 3-way matching.
@@ -835,37 +871,22 @@ def _tax_codes_response(company_code, rows):
 
 @router.get("/tax-codes")
 async def get_sap_tax_codes(company_code: str = "1100", db: AsyncSession = Depends(get_db)):
-    """Tax codes for the Park-to-SAP dropdown — served from the local
-    `sap_tax_codes` cache. On first use (empty cache) it lazily syncs from SAP."""
-    from app.models.sap_tax_code import SapTaxCode
+    """Tax codes for the Park-to-SAP dropdown and the AI tax-code suggestion.
 
-    async def _load():
-        res = await db.execute(
-            select(SapTaxCode).where(SapTaxCode.company_code == company_code).order_by(SapTaxCode.code)
-        )
-        return res.scalars().all()
-
-    rows = await _load()
-    if not rows:
-        # No-SAP instance: serve a static Pakistan tax-code set for the dropdown.
-        if not settings.SAP_ENABLED:
-            return {
-                "company_code": company_code,
-                "source": "static",
-                "tax_codes": [
-                    {"code": "I0", "description": "0% — Exempt / no input tax", "rate": 0},
-                    {"code": "I1", "description": "18% — Standard input sales tax", "rate": 18},
-                    {"code": "I2", "description": "17% — Input sales tax", "rate": 17},
-                ],
-            }
-        _ensure_dll()
-        try:
-            await _sync_tax_codes(db, company_code)
-            rows = await _load()
-        except Exception:
-            logger.exception("Tax-code lazy sync failed")
-            return {"company_code": company_code, "tax_codes": [], "source": "empty"}
-    return _tax_codes_response(company_code, rows)
+    Served from Lucky Cement's official list (services/lucky_tax_codes.py, from
+    "Tax Codes Details.xlsx", 2026-11-23) for every company code. It replaced
+    the local sap_tax_codes cache, which on the LAN box still held the fake-SAP
+    fixture texts ("I1 — Sales Tax 18%"; in Lucky's SAP I1 is Zero Rated 0%),
+    so 18% invoices were parked with I1 and refused by SAP with FF 724.
+    """
+    from app.services.lucky_tax_codes import tax_codes
+    return {
+        "company_code": company_code,
+        "procedure": "TAXPK",
+        "country": "PK",
+        "source": "lucky_master",
+        "tax_codes": tax_codes(),
+    }
 
 
 @router.post("/tax-codes/sync")
@@ -1330,6 +1351,45 @@ async def post_invoice_to_sap_endpoint(
                 gi["ref_doc"] = ref["ref_doc"]
                 gi["ref_doc_year"] = ref["ref_doc_year"]
                 gi["ref_doc_item"] = ref["ref_doc_item"]
+
+    # ── Lucky Cement (observation F): park against the GRs the user ticked ──
+    # One ITEMDATA row per selected GR (its open quantity, REF_DOC = that GR),
+    # replacing the default "latest GR" reference for those PO items. Items
+    # with no ticked GR keep the default. Service items are not affected.
+    gr_selection = json.loads(invoice.parking_gr_refs) if invoice.parking_gr_refs else []
+    if gr_selection and eff_layout in ("goods", "both"):
+        from app.services.sap_po_service import fetch_open_grs, split_by_grs
+        try:
+            open_grs = {g["gr_key"]: g for g in fetch_open_grs(po.po_number)}
+        except Exception:
+            logger.exception("Open-GR read failed for PO %s", po.po_number)
+            raise HTTPException(status_code=502, detail="Could not read goods receipts from SAP.")
+        gone = [k for k in gr_selection if k not in open_grs]
+        if gone:
+            raise HTTPException(status_code=422, detail=(
+                "These selected goods receipts are no longer open in SAP (already invoiced or "
+                f"reversed): {', '.join(k.split('/')[1] + '/' + k.split('/')[2] for k in gone)}. "
+                "Refresh the Goods Receipts list and select again."))
+        by_item: dict[int, list] = {}
+        for k in gr_selection:
+            g = open_grs[k]
+            by_item.setdefault(g["po_item"], []).append(g)
+        stray = sorted(set(by_item) - {gi["po_item"] for gi in goods_items})
+        if stray:
+            raise HTTPException(status_code=422, detail=(
+                f"Goods receipts are selected for PO item(s) {', '.join(map(str, stray))}, "
+                "but no invoice line is parked on them. Untick them or select those lines."))
+        split_items = []
+        try:
+            for gi in goods_items:
+                grs_for = by_item.get(gi["po_item"])
+                if grs_for and gi["po_item"] not in service_po_items:
+                    split_items.extend(split_by_grs(gi, sorted(grs_for, key=lambda g: (g["posting_date"], g["gr_key"]))))
+                else:
+                    split_items.append(gi)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+        goods_items = split_items
 
     # Planned delivery costs (freight conditions, e.g. ZFRT) read live from SAP
     # (EKBZ). Only the GR-accrued, still-open amount is invoiceable.

@@ -116,7 +116,7 @@ def _new_invoice(client):
 def _park(client, inv_id):
     _calls.clear()
     return client.post(f"/api/sap/invoices/{inv_id}/post",
-                       json={"mode": "park", "tax_code": "I1", "layout": "goods",
+                       json={"mode": "park", "tax_code": "2I", "layout": "goods",
                              "posting_date": "20260312"})
 
 
@@ -184,7 +184,7 @@ def test_refusals(client):
         vendor_number="0002000101", company_code="1100", currency="PKR", gross_amount=3700000,
         tax_amount=0, po_number=PO, line_items=[{"po_item": 10, "amount": 3700000, "quantity": 20,
                                                  "po_unit": "ST"}],
-        tax_code="I1", mode="park", workflow=True, initiator_sap_user="nohier")
+        tax_code="2I", mode="park", workflow=True, initiator_sap_user="nohier")
     expect("park is reported as failed", res["success"] is False, res.get("message"))
     expect("with SAP's hierarchy message", "hierarchy" in res["message"].lower(), res["message"])
     expect("the event was raised as the VIM user's SAP id",
@@ -385,7 +385,7 @@ def test_resubmit(client):
         doc, objkey = d["sap_document_number"], d["sap_wf_objkey"]
 
         _calls.clear()
-        c = client.post(f"/api/sap/invoices/{inv}/post", json={"mode": "change", "tax_code": "I1"})
+        c = client.post(f"/api/sap/invoices/{inv}/post", json={"mode": "change", "tax_code": "2I"})
         expect(f"change while BLK -> 409 (got {c.status_code})", c.status_code == 409, c.text[:200])
         expect("...and nothing sent to SAP", "BAPI_INCOMINGINVOICE_CHANGE" not in _names(), _names())
 
@@ -393,7 +393,7 @@ def test_resubmit(client):
         expect("SAP rejected it", _refresh(client, inv).json().get("sap_wf_status") == "REJ")
 
         _calls.clear()
-        c = client.post(f"/api/sap/invoices/{inv}/post", json={"mode": "change", "tax_code": "I1"})
+        c = client.post(f"/api/sap/invoices/{inv}/post", json={"mode": "change", "tax_code": "2I"})
         expect(f"change while REJ -> 200 (got {c.status_code})", c.status_code == 200, c.text[:300])
         names = _names()
         expect("change BAPI then one commit, no park, no event",
@@ -418,6 +418,59 @@ def test_resubmit(client):
         expect("SAP restarted the workflow: BLK", _refresh(client, inv).json().get("sap_wf_status") == "BLK")
     finally:
         settings.SAP_WF_RAISE_EVENT = True
+
+
+def test_unit_from_po(client):
+    """Observation B: an invoice line with no unit takes its PO line's unit at
+    PO match; a unit the invoice printed is kept."""
+    print("\nUNIT OF MEASURE FROM THE PO")
+    for given, label in ((None, "no unit on the invoice -> PO's unit"), ("KG", "invoice unit KG is kept")):
+        line = dict(LINE)
+        line["unit"] = given
+        r = client.post("/api/invoices/save", json={
+            "original_filename": "uom.pdf", "stored_filepath": "demo/uom", "mime_type": "application/pdf",
+            "invoice_number": f"UOM-{uuid.uuid4().hex[:8].upper()}", "invoice_date": "2026-03-12",
+            "currency": "PKR", "document_type": "invoice", "status": "validated",
+            "source_type": "upload", "po_reference": PO, "supplier_ntn": "0912345-6",
+            "subtotal_amount": 3700000, "tax_amount": 0, "total_amount": 3700000, "line_items": [line],
+        })
+        inv = r.json()["id"]
+        m = client.post(f"/api/po-matching/invoices/{inv}/match", json={"po_id": _po(client)})
+        unit = (_detail(client, inv)["line_items"][0].get("unit") or "")
+        expect(f"{label} (got {unit!r})", m.status_code == 200 and unit == (given or "ST"), m.text[:150])
+
+
+def test_gr_selection(client):
+    """Observation F: list the PO's open GRs, tick some, park one ITEMDATA row
+    per ticked GR (REF_DOC = that GR); a selection that doesn't add up refuses."""
+    print("\nGR-WISE PARKING (select goods receipts)")
+    settings.SAP_WORKFLOW_ENABLED = False
+    inv = _new_invoice(client)              # PO 4500009001 item 10, 20 units
+    r = client.get(f"/api/sap/invoices/{inv}/open-grs")
+    grs = r.json().get("grs", [])
+    item10 = [g for g in grs if g["po_item"] == 10]
+    expect(f"open GRs listed (got {r.status_code}, {len(grs)})", r.status_code == 200 and len(item10) == 2,
+           [(g["gr_key"], g["open_qty"]) for g in grs])
+    expect("each GR has description/unit from the PO", all(g.get("unit") for g in item10), item10)
+
+    one = [item10[0]["gr_key"]]
+    s = client.put(f"/api/invoices/{inv}/parking-grs", json={"gr_keys": one})
+    expect("selection saved", s.status_code == 200 and _detail(client, inv).get("parking_gr_refs") == one,
+           _detail(client, inv).get("parking_gr_refs"))
+    p = _park(client, inv)
+    expect(f"12 of 20 selected -> park refused with the reason (got {p.status_code})",
+           p.status_code == 422 and "add up" in p.text, p.text[:200])
+    expect("...and nothing parked", "BAPI_INCOMINGINVOICE_PARK" not in _names(), _names())
+
+    both = [g["gr_key"] for g in item10]
+    client.put(f"/api/invoices/{inv}/parking-grs", json={"gr_keys": both})
+    p = _park(client, inv)
+    expect(f"12 + 8 selected -> park 200 (got {p.status_code})", p.status_code == 200, p.text[:200])
+    kw = next(k for n, k in _calls if n == "BAPI_INCOMINGINVOICE_PARK")
+    rows = kw["input_tables"]["ITEMDATA"]
+    got = sorted((r["REF_DOC"], r["QUANTITY"], r["ITEM_AMOUNT"]) for r in rows)
+    expect("one ITEMDATA row per GR, own REF_DOC, quantity and amount",
+           got == [("5000009001", "12.0", "2220000.0"), ("5000009006", "8.0", "1480000.0")], got)
 
 
 def test_t100_text():
@@ -463,6 +516,8 @@ if __name__ == "__main__":
         test_poller_selection(client)
         test_sap_raises(client)
         test_resubmit(client)
+        test_unit_from_po(client)
+        test_gr_selection(client)
 
     print("\n" + "=" * 60)
     if _failures:
