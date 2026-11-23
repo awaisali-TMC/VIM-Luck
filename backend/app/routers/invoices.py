@@ -802,7 +802,8 @@ async def save_invoice(
     if data.supplier_ntn and data.supplier_ntn.strip():
         try:
             from app.services.fbr_verification import verify_ntn as _verify_ntn, check_wht_compliance
-            verification = await _verify_ntn(data.supplier_ntn)
+            # Live FBR fallback when enabled (individuals are in the ATL file by CNIC only).
+            verification = await _verify_ntn(data.supplier_ntn, check_live=settings.FBR_LIVE_LOOKUP_ENABLED)
             invoice.fbr_verification_status = verification["status"]
             invoice.fbr_verified_at = verification["verified_at"]
             invoice.fbr_taxpayer_name = verification.get("taxpayer_name")

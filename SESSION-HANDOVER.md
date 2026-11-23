@@ -5,6 +5,33 @@ Handover from Claude Code sessions on this machine (`D:\VIM\VIM-Luck`). Read
 what is still open. (`HANDOFF.md` is the separate product feature-status doc.)
 Newest session first; §1–§5 below are from session 1 and are still accurate.
 
+## 2026-11-23: "NTN Not Found" for individuals — live FBR fallback on invoice verify — committed, pushed
+
+**Case:** invoice 56, vendor HAMZA TRADING, NTN `1328862-8`. VIM said `not_found` (source
+`local_db`), while FBR's site, searched **by NTN**, shows **Active** with Registration No
+`4220148670085`, which is the owner's CNIC.
+
+**Cause:** FBR's ATL file lists individuals by CNIC. The imported `atl_taxpayers` therefore has no
+row under their NTN. VIM already handles both the 7-digit and 8-digit NTN forms.
+
+**Fix:**
+- The invoice verify (`POST /api/fbr/invoices/{id}/verify-fbr`) and the verify at save
+  (`invoices.py`) now pass `check_live=settings.FBR_LIVE_LOOKUP_ENABLED`.
+- So, with the flag on, an NTN missing from the local table falls through to the live FBR lookup
+  (`live_fbr_lookup`). Before this they never asked for it, even with the flag on.
+- Checked offline with a stubbed live lookup; it is not tried against FBR yet.
+
+**To switch it on (LAN box):**
+1. Set `FBR_LIVE_LOOKUP_ENABLED=true` in `backend/.env` and restart.
+2. Click "Re-verify" on invoice 56.
+
+**Open:**
+- Confirm the box reaches `iris.fbr.gov.pk` / `api.fbr.gov.pk` through the Fortinet proxy
+  (`SSL_CERT_FILE` is already set).
+- **Settled:** the FBR portal searches by the 7-digit NTN base (`1328862`), so `live_fbr_lookup`
+  now drops the check digit of an 8-digit NTN. Checked offline: `1328862-8`, `13288628` and
+  `1328862` are all sent as `1328862`; a CNIC goes unchanged.
+
 ## 2026-11-21 (evening): resubmit tested on AUP — "0000" fiscal-year bug fixed — committed, pushed
 
 The first live resubmits on AUP (invoices 53/54) showed four things:

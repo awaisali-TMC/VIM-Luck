@@ -499,6 +499,11 @@ async def live_fbr_lookup(
         normalized = normalize_cnic(identifier)
     else:
         normalized = normalize_ntn(identifier)
+        # FBR's NTN search takes the 7-digit base only (IRIS portal, 2026-11-23:
+        # "1328862" finds the taxpayer whose invoice prints "1328862-8"), so drop
+        # the check digit of an 8-digit NTN.
+        if normalized.isdigit() and len(normalized) == 8:
+            normalized = normalized[:7]
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(
         None, _query_fbr_api_sync, normalized, identifier_type, protocol_id
