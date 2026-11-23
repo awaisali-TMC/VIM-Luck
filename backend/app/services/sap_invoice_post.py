@@ -63,7 +63,7 @@ _CHANGE_HEADER_FIELDS = ("DOC_DATE", "PSTNG_DATE", "BLINE_DATE", "REF_DOC_NO", "
 
 
 def _change_parked(sap, doc_number: str, fiscal_year: str, header_data: dict,
-                   item_rows: list, tax_rows: list, company_code: str) -> dict:
+                   item_rows: list, tax_rows: list, company_code: str, withtax_rows: list | None = None) -> dict:
     """Update a parked invoice in place; commit on success, roll back on error."""
     doc = (doc_number or "").strip().zfill(10)
     year = (fiscal_year or "").strip()
@@ -81,9 +81,10 @@ def _change_parked(sap, doc_number: str, fiscal_year: str, header_data: dict,
             "HEADERDATA_CHANGE": header_change,
             "HEADERDATA_CHANGEX": {k: "X" for k in header_change},
             # 'X' = the table sent REPLACES the document's table
-            "TABLE_CHANGE": {"ITEMDATA": "X", "TAXDATA": "X"},
+            "TABLE_CHANGE": {"ITEMDATA": "X", "TAXDATA": "X", **({"WITHTAXDATA": "X"} if withtax_rows else {})},
         },
-        input_tables={"ITEMDATA": item_rows, "TAXDATA": tax_rows},
+        input_tables={"ITEMDATA": item_rows, "TAXDATA": tax_rows,
+                      **({"WITHTAXDATA": withtax_rows} if withtax_rows else {})},
         tables=["RETURN"],
         table_fields={"RETURN": ["TYPE", "ID", "NUMBER", "MESSAGE", "MESSAGE_V1", "MESSAGE_V2"]},
         output_params=["INVOICEDOCNUMBER_NEW", "FISCALYEAR_NEW"],
@@ -162,6 +163,7 @@ def post_invoice_to_sap(
     initiator_sap_pwd: str = "",
     change_doc_number: str = "",
     change_fiscal_year: str = "",
+    withtax_rows: list | None = None,
 ) -> dict:
     """
     Post a vendor invoice to SAP via BAPI_INCOMINGINVOICE_CREATE1.
@@ -305,7 +307,14 @@ def post_invoice_to_sap(
 
         if mode == "change":
             return _change_parked(sap, change_doc_number, change_fiscal_year, header_data,
-                                  item_data_rows, tax_data_rows, company_code)
+                                  item_data_rows, tax_data_rows, company_code, withtax_rows or [])
+
+        # WITHTAXDATA (observation G): only when the invoice overrides the vendor's
+        # BP WHT; WI_TAX_TYPE / WI_TAX_CODE confirmed on AUP. SAP derives base
+        # and amount from them.
+        input_tables = {"ITEMDATA": item_data_rows, "TAXDATA": tax_data_rows}
+        if withtax_rows:
+            input_tables["WITHTAXDATA"] = withtax_rows
 
         # ── Call BAPI ────────────────────────────────────────────
         result = sap.call(
@@ -313,10 +322,7 @@ def post_invoice_to_sap(
             input_structures={
                 "HEADERDATA": header_data,
             },
-            input_tables={
-                "ITEMDATA": item_data_rows,
-                "TAXDATA": tax_data_rows,
-            },
+            input_tables=input_tables,
             tables=["RETURN"],
             table_fields={
                 "RETURN": ["TYPE", "ID", "NUMBER", "MESSAGE", "MESSAGE_V1", "MESSAGE_V2"],

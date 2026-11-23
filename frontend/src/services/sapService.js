@@ -24,6 +24,12 @@ export async function syncSAPPO(poNumber) {
   return response.data;
 }
 
+export async function getInvoiceWHT(invoiceId) {
+  // The vendor's withholding tax from its BP in SAP (+ the invoice's override and the PK code list).
+  const response = await api.get(`${BASE}/invoices/${invoiceId}/wht`);
+  return response.data;
+}
+
 export async function getOpenGRs(invoiceId) {
   // Open (not fully invoiced) goods receipts of the invoice's matched PO, live from SAP.
   const response = await api.get(`${BASE}/invoices/${invoiceId}/open-grs`);

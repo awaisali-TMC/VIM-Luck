@@ -286,6 +286,7 @@ def _build_detail_response(invoice: Invoice) -> InvoiceDetailResponse:
         sap_wf_checked_at=invoice.sap_wf_checked_at,
         parking_line_item_ids=(json.loads(invoice.parking_line_item_ids) if invoice.parking_line_item_ids else None),
         parking_gr_refs=(json.loads(invoice.parking_gr_refs) if invoice.parking_gr_refs else None),
+        sap_wht=(json.loads(invoice.sap_wht) if invoice.sap_wht else None),
         # PO matching
         matched_po_id=invoice.matched_po_id,
         latest_po_match_status=invoice.latest_po_match_status,
@@ -1258,6 +1259,11 @@ class ParkingSelection(BaseModel):
     line_item_ids: list[int]
 
 
+class WhtSelection(BaseModel):
+    # [{wht_type, wht_code}]; [] = back to the vendor's BP defaults
+    items: list[dict]
+
+
 class GrSelection(BaseModel):
     gr_keys: list[str]          # "YYYY/BELNR/BUZEI"; [] = latest GR per item (default)
 
@@ -1280,6 +1286,33 @@ async def set_parking_selection(
     invoice.parking_line_item_ids = json.dumps(list(data.line_item_ids))
     await db.commit()
     return {"success": True, "parking_line_item_ids": data.line_item_ids}
+
+
+@router.put("/{invoice_id}/wht")
+async def set_invoice_wht(
+    invoice_id: int,
+    data: WhtSelection,
+    db: AsyncSession = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+):
+    """Observation G: the WHT type/code to park with (overrides the vendor's
+    BP defaults). Empty list = use the BP defaults again."""
+    result = await db.execute(select(Invoice).where(Invoice.id == invoice_id, Invoice.is_deleted == 0))
+    invoice = result.scalar_one_or_none()
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    _assert_can_access(invoice, principal)
+    if _locked_in_sap(invoice):
+        raise HTTPException(status_code=409, detail="Invoice is in SAP — its withholding tax can't be changed.")
+    items = []
+    for it in data.items:
+        wtype = str(it.get("wht_type") or "").strip().upper()
+        wcode = str(it.get("wht_code") or "").strip().upper()
+        if wtype:
+            items.append({"wht_type": wtype[:2], "wht_code": wcode[:2]})
+    invoice.sap_wht = json.dumps(items) if items else None
+    await db.commit()
+    return {"success": True, "sap_wht": items or None}
 
 
 @router.put("/{invoice_id}/parking-grs")

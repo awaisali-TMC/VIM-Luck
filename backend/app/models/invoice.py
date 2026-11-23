@@ -136,6 +136,10 @@ class Invoice(Base):
     # list of "YYYY/BELNR/BUZEI" keys (sap_po_service.fetch_open_grs). Null/empty
     # = let the park pick the latest GR per PO item, as before.
     parking_gr_refs = Column(Text, nullable=True)
+    # Observation G: WHT type/code chosen on the invoice, JSON
+    # [{wht_type, wht_code}]. Null = the vendor's BP (LFBW) defaults, which SAP
+    # applies itself; set = sent as WITHTAXDATA on park.
+    sap_wht = Column(Text, nullable=True)
 
     # Status
     status = Column(String(30), default=InvoiceStatus.DRAFT.value)

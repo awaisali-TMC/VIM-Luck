@@ -45,6 +45,7 @@ async def run_migrations():
         "ALTER TABLE invoices ADD COLUMN detected_taxes TEXT",
         "ALTER TABLE invoices ADD COLUMN parking_line_item_ids TEXT",
         "ALTER TABLE invoices ADD COLUMN parking_gr_refs TEXT",
+        "ALTER TABLE invoices ADD COLUMN sap_wht TEXT",
         "ALTER TABLE atl_taxpayers ADD COLUMN cnic VARCHAR(20)",
         "ALTER TABLE atl_taxpayers ADD COLUMN list_type VARCHAR(4)",
         "ALTER TABLE invoices ADD COLUMN source_type VARCHAR(20) DEFAULT 'upload'",

@@ -632,6 +632,62 @@ def fetch_open_grs(po_number: str) -> list[dict]:
     return out
 
 
+def fetch_vendor_wht(vendor_number: str, company_code: str) -> list[dict]:
+    """Lucky Cement (observation G): the vendor's withholding-tax types and
+    codes maintained in its BP for a company code (LFBW), with each code's rate
+    from T059Z (LAND1 'PK': QSATZ = rate %, QPROZ = % of the base subject to
+    it) and the name from Lucky's WHT list. Field names confirmed on AUP
+    (sap_dd03l.py, 2026-11-24).
+
+    Returns [{wht_type, wht_code, subject, name, rate, portion}].
+    """
+    from app.services.lucky_wht_codes import wht_code_info
+    vendor = (vendor_number or "").strip()
+    if vendor.isdigit():
+        vendor = vendor.zfill(10)
+    bukrs = (company_code or "").strip()
+    if not vendor or not bukrs:
+        return []
+    sap = _get_connector()
+    sap.connect()
+    try:
+        def read(table, opts, fields):
+            res = sap.call(
+                "RFC_READ_TABLE", QUERY_TABLE=table, ROWCOUNT="200", DELIMITER="|",
+                input_tables={"OPTIONS": [{"TEXT": o} for o in opts],
+                              "FIELDS": [{"FIELDNAME": f} for f in fields]},
+                tables=["DATA", "FIELDS"],
+                table_fields={"DATA": ["WA"], "FIELDS": ["FIELDNAME", "OFFSET", "LENGTH"]},
+            )
+            return _parse_delimited_rows(res.get("DATA", []), res.get("FIELDS", []))
+
+        rows = read("LFBW", [f"LIFNR = '{vendor}' ", f"AND BUKRS = '{bukrs}' "],
+                    ["WITHT", "WT_WITHCD", "WT_SUBJCT"])
+        out = []
+        for r in rows:
+            wtype, wcode = r.get("WITHT", "").strip(), r.get("WT_WITHCD", "").strip()
+            if not wtype:
+                continue
+            info = wht_code_info(wtype, wcode)
+            rate, portion = info["rate"], None
+            if wcode:
+                try:
+                    t = read("T059Z", ["LAND1 = 'PK' ", f"AND WITHT = '{wtype}' ", f"AND WT_WITHCD = '{wcode}' "],
+                             ["QSATZ", "QPROZ"])
+                    if t:
+                        rate = _safe_float(t[0].get("QSATZ") or "") if (t[0].get("QSATZ") or "").strip() else rate
+                        portion = _safe_float(t[0].get("QPROZ") or "") if (t[0].get("QPROZ") or "").strip() else None
+                except Exception:
+                    logger.warning("T059Z read failed for %s/%s; using the code list's rate", wtype, wcode)
+            out.append({"wht_type": wtype, "wht_code": wcode,
+                        "subject": r.get("WT_SUBJCT", "").strip().upper() == "X",
+                        "name": info["name"], "rate": rate, "portion": portion})
+        logger.info("Vendor %s / %s WHT: %s", vendor, bukrs, [(w["wht_type"], w["wht_code"]) for w in out])
+        return out
+    finally:
+        sap.disconnect()
+
+
 def split_by_grs(goods_item: dict, grs: list[dict]) -> list[dict]:
     """One ITEMDATA row per selected GR for a PO item: each GR's open quantity,
     the invoice's unit price, and the GR as REF_DOC. Raises ValueError when the

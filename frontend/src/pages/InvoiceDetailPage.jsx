@@ -34,6 +34,7 @@ import MultiCurrencyCard from "../components/detail/MultiCurrencyCard";
 import AttachmentsCard from "../components/detail/AttachmentsCard";
 import Modal from "../components/common/Modal";
 import GoodsReceiptsCard from "../components/detail/GoodsReceiptsCard";
+import WithholdingTaxCard from "../components/detail/WithholdingTaxCard";
 import { postInvoiceToSAP, fetchSAPTaxCodes, fetchSAPCurrencies, unparkInvoiceFromSAP, validateInvoiceForSAP, lookupSAPVendor } from "../services/sapService";
 import { tokens } from "../styles/tokens";
 import { todayIso } from "../utils/dateRange";
@@ -1375,6 +1376,11 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
         ].filter(Boolean)}
         lineItems={invoice.line_items || []}
       />
+
+      {/* Withholding tax (observation G): vendor BP WHT, changeable per invoice */}
+      {!editing && invoice.matched_po_id && (
+        <WithholdingTaxCard invoice={invoice} editable={sapFieldsEditable} onChanged={refetch} />
+      )}
 
       {/* GR-wise parking (observation F): pick the goods receipts to park against */}
       {!editing && invoice.matched_po_id && (

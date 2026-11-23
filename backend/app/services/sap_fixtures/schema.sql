@@ -78,6 +78,24 @@ CREATE TABLE EKBZ (
 -- ── Vendors ─────────────────────────────────────────────────────────────────
 
 -- Lieferantenstamm allgemein — vendor master, general
+-- Vendor withholding tax per company code (BP) — observation G.
+CREATE TABLE LFBW (
+    LIFNR TEXT,
+    BUKRS TEXT,
+    WITHT TEXT,       -- WHT type
+    WT_WITHCD TEXT,   -- WHT code
+    WT_SUBJCT TEXT    -- 'X' = vendor is subject to this WHT type
+);
+
+-- WHT codes per country: rate and portion of the base.
+CREATE TABLE T059Z (
+    LAND1 TEXT,
+    WITHT TEXT,
+    WT_WITHCD TEXT,
+    QSATZ TEXT,       -- rate %
+    QPROZ TEXT        -- % of the base subject to WHT
+);
+
 CREATE TABLE LFA1 (
     LIFNR TEXT,
     NAME1 TEXT,

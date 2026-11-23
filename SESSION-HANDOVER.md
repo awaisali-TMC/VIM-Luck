@@ -5,6 +5,39 @@ Handover from Claude Code sessions on this machine (`D:\VIM\VIM-Luck`). Read
 what is still open. (`HANDOFF.md` is the separate product feature-status doc.)
 Newest session first; §1–§5 below are from session 1 and are still accurate.
 
+## 2026-11-24 (later): client observation G — Withholding Tax — committed, pushed, merged to main
+
+**Basis** granted `TMC_VIM` read access to LFBW, T059Z, DD02L, DD03L and FUPARAREF. The LAN box
+ran `sap_dd03l.py`; the dump is in `content/sap-metadata-dump-2026-11-23.txt` on that box. It
+confirmed:
+- **LFBW:** `LIFNR`, `BUKRS`, `WITHT`, `WT_WITHCD`, `WT_SUBJCT`. The sample rows are company code
+  1200 with `KZ`/`KZ`.
+- **T059Z:** the rate is `QSATZ` and the portion is `QPROZ`.
+- **Park BAPI `WITHTAXDATA`:** `WI_TAX_TYPE`, `WI_TAX_CODE`, `WI_TAX_BASE`, `WI_TAX_AMT`,
+  `WI_TAX_WITHHELD_AMT`.
+
+**Backend:**
+- `sap_po_service.fetch_vendor_wht(vendor, bukrs)` reads LFBW and the T059Z rate; names come from
+  `lucky_wht_codes.py`.
+- `GET /api/sap/invoices/{id}/wht` returns the vendor's WHT, the invoice's override, the 180 PK
+  codes and an estimate on the net amount.
+- `PUT /api/invoices/{id}/wht` stores the override in the new column `invoices.sap_wht`, which has
+  its migration.
+- Park and resubmit send `WITHTAXDATA` with `WI_TAX_TYPE` and `WI_TAX_CODE` **only when
+  overridden**. Otherwise SAP applies the BP defaults itself.
+
+**Frontend:** `components/detail/WithholdingTaxCard.jsx` shows WHT type, code, description, rate
+and estimate. It offers **Change** (a dropdown of the 180 codes) and **Use vendor BP**, and it is
+locked once the invoice is in SAP.
+
+**Fake SAP:** LFBW and T059Z tables, with vendor `0002000101` holding VG 4% and VN 8%.
+`test_sap_workflow` has a new `WITHHOLDING TAX` section. All suites pass and the frontend builds.
+
+**Not checked on AUP or in a browser. Open:**
+- Confirm with Lucky/FI that SAP really derives WHT from the BP at park when `WITHTAXDATA` is
+  empty, and that a code override computes the base and amount itself (VIM sends no
+  `WI_TAX_BASE`).
+
 ## 2026-11-24: client observation F — GR-wise parking — committed, pushed
 
 **Backend:**

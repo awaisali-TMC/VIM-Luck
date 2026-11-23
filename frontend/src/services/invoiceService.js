@@ -114,6 +114,12 @@ export async function addInvoiceLineItem(invoiceId) {
   return response.data;
 }
 
+export async function setInvoiceWHT(invoiceId, items) {
+  // Withholding tax for this invoice: [{wht_type, wht_code}]; [] = vendor BP defaults.
+  const response = await api.put(`/api/invoices/${invoiceId}/wht`, { items });
+  return response.data;
+}
+
 export async function setParkingGRs(invoiceId, grKeys) {
   // GR-wise parking: goods receipts ("YYYY/BELNR/BUZEI") this invoice parks against.
   const response = await api.put(`/api/invoices/${invoiceId}/parking-grs`, { gr_keys: grKeys });

@@ -473,6 +473,39 @@ def test_gr_selection(client):
            got == [("5000009001", "12.0", "2220000.0"), ("5000009006", "8.0", "1480000.0")], got)
 
 
+def test_wht(client):
+    """Observation G: the vendor's WHT from its BP (LFBW + T059Z rate) is shown;
+    parking sends WITHTAXDATA only when the invoice overrides it."""
+    print("\nWITHHOLDING TAX (vendor BP -> invoice -> park)")
+    settings.SAP_WORKFLOW_ENABLED = False
+    inv = _new_invoice(client)              # PO 4500009001 -> vendor 0002000101, company 1100
+    r = client.get(f"/api/sap/invoices/{inv}/wht")
+    body = r.json()
+    got = sorted((w["wht_type"], w["wht_code"], w["rate"], w["subject"]) for w in body.get("vendor_wht", []))
+    expect(f"vendor WHT read from SAP (got {r.status_code})",
+           r.status_code == 200 and got == [("VG", "VG", 4.0, True), ("VN", "VN", 8.0, True)], (got, body.get("message")))
+    vg = next((w for w in body.get("vendor_wht", []) if w["wht_type"] == "VG"), {})
+    expect("named from Lucky's WHT list, with an estimate", "goods" in (vg.get("name") or "").lower()
+           and vg.get("estimate") == round(3700000 * 0.04, 2), vg)
+    expect("PK code list offered for the dropdown", len(body.get("codes", [])) == 180, len(body.get("codes", [])))
+
+    p = _park(client, inv)
+    kw = next(k for n, k in _calls if n == "BAPI_INCOMINGINVOICE_PARK")
+    expect("no override -> no WITHTAXDATA (SAP uses the BP)", p.status_code == 200
+           and "WITHTAXDATA" not in kw["input_tables"], list(kw["input_tables"]))
+
+    inv2 = _new_invoice(client)
+    s = client.put(f"/api/invoices/{inv2}/wht", json={"items": [{"wht_type": "vh", "wht_code": "vh"}]})
+    expect("override saved (upper-cased)", s.status_code == 200
+           and _detail(client, inv2).get("sap_wht") == [{"wht_type": "VH", "wht_code": "VH"}],
+           _detail(client, inv2).get("sap_wht"))
+    p = _park(client, inv2)
+    kw = next(k for n, k in _calls if n == "BAPI_INCOMINGINVOICE_PARK")
+    expect("override -> WITHTAXDATA sent", p.status_code == 200
+           and kw["input_tables"].get("WITHTAXDATA") == [{"WI_TAX_TYPE": "VH", "WI_TAX_CODE": "VH"}],
+           kw["input_tables"].get("WITHTAXDATA"))
+
+
 def test_t100_text():
     """A ZMIR7_ERROR_LOG row with only a message code is shown with its T100 text."""
     print("\nERROR LOG WITH A CODE ONLY -> T100 TEXT")
@@ -518,6 +551,7 @@ if __name__ == "__main__":
         test_resubmit(client)
         test_unit_from_po(client)
         test_gr_selection(client)
+        test_wht(client)
 
     print("\n" + "=" * 60)
     if _failures:

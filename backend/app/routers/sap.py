@@ -719,6 +719,53 @@ async def get_invoice_open_grs(invoice_id: int, db: AsyncSession = Depends(get_d
     return {"po_number": po.po_number, "grs": grs, "selected": selected}
 
 
+@router.get("/invoices/{invoice_id}/wht")
+async def get_invoice_wht(invoice_id: int, db: AsyncSession = Depends(get_db)):
+    """Observation G: the vendor's withholding tax from its BP (LFBW, live from
+    SAP) for the invoice's matched PO vendor and company code, the invoice's
+    own override (sap_wht), the PK WHT code list for the dropdown, and an
+    estimate of each WHT amount on the invoice's net amount (SAP calculates
+    the real amount when parking)."""
+    from app.services.lucky_wht_codes import wht_codes, wht_code_info
+    inv = (await db.execute(select(Invoice).where(Invoice.id == invoice_id, Invoice.is_deleted == 0))).scalar_one_or_none()
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    override = json.loads(inv.sap_wht) if inv.sap_wht else None
+    base = float(inv.subtotal_amount or 0) or max(float(inv.total_amount or 0) - float(inv.tax_amount or 0), 0.0)
+    resp = {"vendor_number": None, "company_code": None, "vendor_wht": [], "override": override,
+            "codes": wht_codes(), "base": round(base, 2), "message": None}
+    po = None
+    if inv.matched_po_id:
+        po = (await db.execute(select(PurchaseOrder).where(PurchaseOrder.id == inv.matched_po_id))).scalar_one_or_none()
+    vendor = (po.sap_vendor_number if po else None) or inv.sap_vendor_number
+    company = (po.company_code if po else None) or inv.sap_company_code
+    resp["vendor_number"], resp["company_code"] = vendor, company
+    if not vendor or not company:
+        resp["message"] = "Match a PO (vendor and company code) to read the vendor's withholding tax."
+        return resp
+    if not settings.SAP_ENABLED:
+        resp["message"] = "SAP is not enabled."
+        return resp
+    _ensure_dll()
+    from app.services.sap_po_service import fetch_vendor_wht
+    try:
+        rows = await asyncio.to_thread(fetch_vendor_wht, vendor, company)
+    except Exception as exc:
+        logger.exception("Vendor WHT read failed for %s/%s", vendor, company)
+        reason = " ".join(f"{type(exc).__name__}: {exc}".split())[:300]
+        raise HTTPException(status_code=502, detail=f"Could not read the vendor's withholding tax from SAP — {reason}")
+    for r in rows:
+        portion = r["portion"] if r["portion"] is not None else 100.0
+        r["estimate"] = round(base * portion / 100.0 * (r["rate"] or 0) / 100.0, 2) if r["rate"] is not None else None
+    if override:
+        for o in override:
+            info = wht_code_info(o["wht_type"], o["wht_code"])
+            o["name"], o["rate"] = info["name"], info["rate"]
+            o["estimate"] = round(base * (info["rate"] or 0) / 100.0, 2) if info["rate"] is not None else None
+    resp["vendor_wht"] = rows
+    return resp
+
+
 @router.post("/pos/{po_number}/grn/sync")
 async def sync_sap_grn(po_number: str, db: AsyncSession = Depends(get_db)):
     """Fetch a PO's GRNs from SAP and persist them locally for 3-way matching.
@@ -1532,6 +1579,10 @@ async def post_invoice_to_sap_endpoint(
             # The MIR7 workflow authenticates the initiator via USERI/PWDI, so it
             # needs this user's SAP password (decrypted from the stored token).
             initiator_sap_pwd=decrypt_sap_password(user.sap_password_enc),
+            # Observation G: the WHT chosen on the invoice; none = SAP applies
+            # the vendor's BP defaults itself.
+            withtax_rows=[{"WI_TAX_TYPE": w["wht_type"], "WI_TAX_CODE": w["wht_code"]}
+                          for w in (json.loads(invoice.sap_wht) if invoice.sap_wht else [])],
             change_doc_number=(invoice.sap_document_number or "") if req.mode == "change" else "",
             change_fiscal_year=(invoice.sap_fiscal_year or "") if req.mode == "change" else "",
         )

@@ -114,3 +114,14 @@ INSERT INTO TCURT (WAERS, SPRAS, LTEXT) VALUES
 -- ── Fake bookkeeping ────────────────────────────────────────────────────────
 -- Parked/posted documents are allocated from here, starting at 5105000001.
 INSERT INTO Z_COUNTER (NAME, VALUE) VALUES ('invoice_doc','5105000000');
+
+-- Observation G: vendor withholding tax (codes from Lucky's PK list).
+INSERT INTO LFBW (LIFNR, BUKRS, WITHT, WT_WITHCD, WT_SUBJCT) VALUES
+ ('0002000101','1100','VG','VG','X'),
+ ('0002000101','1100','VN','VN','X'),
+ ('0002000102','1100','KZ','KZ','');
+INSERT INTO T059Z (LAND1, WITHT, WT_WITHCD, QSATZ, QPROZ) VALUES
+ ('PK','VG','VG','4','100'),
+ ('PK','VH','VH','6','100'),
+ ('PK','VN','VN','8','100'),
+ ('PK','KZ','KZ','0','100');
