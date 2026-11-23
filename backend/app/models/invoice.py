@@ -132,6 +132,10 @@ class Invoice(Base):
     # at submit-for-approval and locked thereafter — so the selection carries
     # through the workflow and everyone sees the same lines. Null = all lines.
     parking_line_item_ids = Column(Text, nullable=True)
+    # Lucky Cement (observation F): goods receipts chosen to park against — JSON
+    # list of "YYYY/BELNR/BUZEI" keys (sap_po_service.fetch_open_grs). Null/empty
+    # = let the park pick the latest GR per PO item, as before.
+    parking_gr_refs = Column(Text, nullable=True)
 
     # Status
     status = Column(String(30), default=InvoiceStatus.DRAFT.value)

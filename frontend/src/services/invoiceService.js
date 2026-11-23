@@ -114,6 +114,12 @@ export async function addInvoiceLineItem(invoiceId) {
   return response.data;
 }
 
+export async function setParkingGRs(invoiceId, grKeys) {
+  // GR-wise parking: goods receipts ("YYYY/BELNR/BUZEI") this invoice parks against.
+  const response = await api.put(`/api/invoices/${invoiceId}/parking-grs`, { gr_keys: grKeys });
+  return response.data;
+}
+
 export async function setParkingSelection(invoiceId, lineItemIds) {
   // Persist which line items are selected for parking (locked at submit).
   const response = await api.put(`/api/invoices/${invoiceId}/parking-selection`, { line_item_ids: lineItemIds });

@@ -24,6 +24,12 @@ export async function syncSAPPO(poNumber) {
   return response.data;
 }
 
+export async function getOpenGRs(invoiceId) {
+  // Open (not fully invoiced) goods receipts of the invoice's matched PO, live from SAP.
+  const response = await api.get(`${BASE}/invoices/${invoiceId}/open-grs`);
+  return response.data;
+}
+
 export async function fetchSAPTaxCodes(companyCode = null) {
   const params = companyCode ? { company_code: companyCode } : {};
   const response = await api.get(`${BASE}/tax-codes`, { params });

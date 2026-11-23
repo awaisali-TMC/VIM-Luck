@@ -333,6 +333,7 @@ class InvoiceDetailResponse(BaseModel):
     sap_wf_posted_doc: Optional[str] = None
     sap_wf_message: Optional[str] = None
     sap_wf_checked_at: Optional[datetime] = None
+    parking_gr_refs: Optional[list[str]] = None  # GRs chosen for parking (observation F)
     parking_line_item_ids: Optional[list[int]] = None  # lines selected for parking (locked at submit)
     # PO matching
     matched_po_id: Optional[int] = None

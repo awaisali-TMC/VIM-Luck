@@ -33,6 +33,7 @@ import InvoiceClassificationCard from "../components/detail/InvoiceClassificatio
 import MultiCurrencyCard from "../components/detail/MultiCurrencyCard";
 import AttachmentsCard from "../components/detail/AttachmentsCard";
 import Modal from "../components/common/Modal";
+import GoodsReceiptsCard from "../components/detail/GoodsReceiptsCard";
 import { postInvoiceToSAP, fetchSAPTaxCodes, fetchSAPCurrencies, unparkInvoiceFromSAP, validateInvoiceForSAP, lookupSAPVendor } from "../services/sapService";
 import { tokens } from "../styles/tokens";
 import { todayIso } from "../utils/dateRange";
@@ -1374,6 +1375,11 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
         ].filter(Boolean)}
         lineItems={invoice.line_items || []}
       />
+
+      {/* GR-wise parking (observation F): pick the goods receipts to park against */}
+      {!editing && invoice.matched_po_id && (
+        <GoodsReceiptsCard invoice={invoice} editable={sapFieldsEditable} onChanged={refetch} />
+      )}
 
       {/* SAP Parking parameters — editable during review, locked at approval */}
       {!editing && (

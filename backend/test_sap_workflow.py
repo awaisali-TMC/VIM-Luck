@@ -440,6 +440,39 @@ def test_unit_from_po(client):
         expect(f"{label} (got {unit!r})", m.status_code == 200 and unit == (given or "ST"), m.text[:150])
 
 
+def test_gr_selection(client):
+    """Observation F: list the PO's open GRs, tick some, park one ITEMDATA row
+    per ticked GR (REF_DOC = that GR); a selection that doesn't add up refuses."""
+    print("\nGR-WISE PARKING (select goods receipts)")
+    settings.SAP_WORKFLOW_ENABLED = False
+    inv = _new_invoice(client)              # PO 4500009001 item 10, 20 units
+    r = client.get(f"/api/sap/invoices/{inv}/open-grs")
+    grs = r.json().get("grs", [])
+    item10 = [g for g in grs if g["po_item"] == 10]
+    expect(f"open GRs listed (got {r.status_code}, {len(grs)})", r.status_code == 200 and len(item10) == 2,
+           [(g["gr_key"], g["open_qty"]) for g in grs])
+    expect("each GR has description/unit from the PO", all(g.get("unit") for g in item10), item10)
+
+    one = [item10[0]["gr_key"]]
+    s = client.put(f"/api/invoices/{inv}/parking-grs", json={"gr_keys": one})
+    expect("selection saved", s.status_code == 200 and _detail(client, inv).get("parking_gr_refs") == one,
+           _detail(client, inv).get("parking_gr_refs"))
+    p = _park(client, inv)
+    expect(f"12 of 20 selected -> park refused with the reason (got {p.status_code})",
+           p.status_code == 422 and "add up" in p.text, p.text[:200])
+    expect("...and nothing parked", "BAPI_INCOMINGINVOICE_PARK" not in _names(), _names())
+
+    both = [g["gr_key"] for g in item10]
+    client.put(f"/api/invoices/{inv}/parking-grs", json={"gr_keys": both})
+    p = _park(client, inv)
+    expect(f"12 + 8 selected -> park 200 (got {p.status_code})", p.status_code == 200, p.text[:200])
+    kw = next(k for n, k in _calls if n == "BAPI_INCOMINGINVOICE_PARK")
+    rows = kw["input_tables"]["ITEMDATA"]
+    got = sorted((r["REF_DOC"], r["QUANTITY"], r["ITEM_AMOUNT"]) for r in rows)
+    expect("one ITEMDATA row per GR, own REF_DOC, quantity and amount",
+           got == [("5000009001", "12.0", "2220000.0"), ("5000009006", "8.0", "1480000.0")], got)
+
+
 def test_t100_text():
     """A ZMIR7_ERROR_LOG row with only a message code is shown with its T100 text."""
     print("\nERROR LOG WITH A CODE ONLY -> T100 TEXT")
@@ -484,6 +517,7 @@ if __name__ == "__main__":
         test_sap_raises(client)
         test_resubmit(client)
         test_unit_from_po(client)
+        test_gr_selection(client)
 
     print("\n" + "=" * 60)
     if _failures:

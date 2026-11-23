@@ -5,6 +5,38 @@ Handover from Claude Code sessions on this machine (`D:\VIM\VIM-Luck`). Read
 what is still open. (`HANDOFF.md` is the separate product feature-status doc.)
 Newest session first; §1–§5 below are from session 1 and are still accurate.
 
+## 2026-11-24: client observation F — GR-wise parking — committed, pushed
+
+**Backend:**
+- `sap_po_service.fetch_open_grs(po)` reads EKBE `VGABE` 1 and 2 with
+  `LFGJA`/`LFBNR`/`LFPOS`. It returns one entry per GR material-document line, with the open
+  quantity: received minus reversed minus posted-invoiced.
+- `split_by_grs()` builds one ITEMDATA row per selected GR.
+- `GET /api/sap/invoices/{id}/open-grs` and `PUT /api/invoices/{id}/parking-grs` are new. The
+  selection is stored in the new column `invoices.parking_gr_refs`, which has its migration.
+- In the park endpoint, ticked GRs replace the "latest GR" reference for their PO item. The park
+  returns 422 when the ticked GRs don't add up to the billed quantity or are no longer open.
+  Nothing ticked = the old behaviour.
+
+**Frontend:** `components/detail/GoodsReceiptsCard.jsx` on the invoice page shows each GR with a
+checkbox, the open quantity and amount, and the selected total per item. It is locked once the
+invoice is in SAP, unless the invoice is REJ.
+
+**Fake SAP:**
+- `EKBE` gains `LFGJA` and `LFPOS`; old file stores get them through `ALTER TABLE`.
+- PO `4500009001` item 10 is now two GRs, 12 + 8 (`5000009001` / `5000009006`).
+- `test_sap_fake`'s GRN check was updated to match, and `test_sap_workflow` has a new
+  `GR-WISE PARKING` section. All suites pass, and the frontend builds.
+
+**Not checked on AUP or in a browser.**
+- `LFGJA` and `LFPOS` are standard EKBE fields, but confirm the reversal and invoice references
+  on a real PO.
+
+**Open — client observation G (WHT):**
+- It waits for the LFBW / park-BAPI `WITHTAXDATA` field names, either as screenshots or through
+  Basis access to DD02L/DD03L/FUPARAREF.
+- It also needs `S_TABU_DIS` for LFBW for `TMC_VIM`; the email draft went to the user.
+
 ## 2026-11-23 (night): client observations A–G — A, B done; G started — A, B + WHT list committed
 
 The client's list (the user said to work from it and set earlier work aside):

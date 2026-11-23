@@ -273,9 +273,10 @@ def test_services():
            svc_detail["line_items"][0]["is_service"] is True, svc_detail["line_items"][0])
 
     grns = po_svc.fetch_grn_for_po(PO_GOODS)
-    expect("GRN is found for the goods PO", len(grns) == 1, grns)
-    expect("GRN nets the received quantity",
-           grns[0]["line_items"][0]["received_quantity"] == 20.0, grns[0]["line_items"][0])
+    # Item 10 arrived in two GRs (12 + 8) — the GR-wise parking demo.
+    expect("GRNs are found for the goods PO", len(grns) == 2, [g["grn_number"] for g in grns])
+    item10 = sum(li["received_quantity"] for g in grns for li in g["line_items"] if li["po_item"] == 10)
+    expect("GRNs net the received quantity (12 + 8)", item10 == 20.0, item10)
 
     partial = po_svc.fetch_grn_for_po(PO_PARTIAL)
     expect("partial PO: only 18 of 30 are received",
