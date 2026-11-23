@@ -5,6 +5,42 @@ Handover from Claude Code sessions on this machine (`D:\VIM\VIM-Luck`). Read
 what is still open. (`HANDOFF.md` is the separate product feature-status doc.)
 Newest session first; §1–§5 below are from session 1 and are still accurate.
 
+## 2026-11-23 (night): client observations A–G — A, B done; G started — A, B + WHT list committed
+
+The client's list (the user said to work from it and set earlier work aside):
+
+**A. FBR status — done:** Income Tax, Sales Tax and Taxpayer Profile are now shown separately.
+Example: income tax Active but sales tax not.
+- `fbr_verification.fbr_status_detail()` reads the local ATL lists IT and ST separately
+  (`_lookup_atl_lists`).
+- With `FBR_LIVE_LOOKUP_ENABLED`, a miss goes live: protocol **1004** for the IT ATL and **1005**
+  for the ST ATL. The profile comes from **1003**, the Taxpayer Profile Inquiry, with outputType 4.
+  These protocol ids are read from IRIS's own portal bundle.
+- The profile keeps Name, Category, Registered On, Tax Office, Registration Status ("Income Tax:
+  Active, Sales Tax: OPERATIVE") and Registered for Sales Tax. **Email and Cell are dropped.**
+- `/api/fbr/verify-ntn` returns `income_tax`, `sales_tax` and `profile`. The Vendor Verification
+  card shows two badges plus the profile block.
+- Tested offline with stubs. The live 1003 reply shape was seen once for NTN 1328862.
+
+**B. Unit of measure from the PO — done:** at PO match, an invoice line with **no** unit takes the
+matched PO line's unit (`po_matching.py`). A printed or typed unit is never overwritten.
+`test_sap_workflow` covers it.
+
+**C.** Tax codes: done in `b681d01`. **D:** resolved by business. **E:** testing only.
+
+**G. Withholding tax — started:** the user chose "show and send to SAP".
+- `services/lucky_wht_codes.py` holds the 180 PK codes from `Book3.xlsx` (T059Z: type, code,
+  name, rate).
+- **Next:** read the vendor's WHT types and codes from BP / `LFBW` (vendor + company code), show a
+  WHT section on the invoice, and send `WITHTAXDATA` in the park BAPI.
+- **Before coding,** confirm the field names on AUP from the LAN box:
+  - `backend/.venv/bin/python backend/sap_dd03l.py LFBW --rows 2`
+  - `backend/.venv/bin/python backend/sap_dd03l.py --fm BAPI_INCOMINGINVOICE_PARK`, which shows
+    the `WITHTAXDATA` structure.
+
+**F. GR-wise parking — to do:** list the PO's not-yet-invoiced GRs with checkboxes; only the ticked
+ones are parked, each line referencing its GR.
+
 ## 2026-11-23 (evening): Lucky's official tax-code list replaces the old codes — committed, pushed
 
 The user supplied `Tax Codes Details.xlsx`: 100 codes with their descriptions.

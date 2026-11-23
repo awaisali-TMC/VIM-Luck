@@ -199,6 +199,113 @@ async def _lookup_atl_pg(normalized: str) -> Optional[dict]:
         return None
 
 
+async def _lookup_atl_lists(normalized: str) -> dict:
+    """{"IT": row | None, "ST": row | None} from the imported ATL. Being on a
+    list means active for that tax (FBR's ATL lists only active filers)."""
+    found = {"IT": None, "ST": None}
+    try:
+        from sqlalchemy import select, or_
+        from app.database import async_session
+        from app.models.atl_taxpayer import AtlTaxpayer
+        digits = re.sub(r"[\s\-/]", "", normalized or "")
+        if not digits:
+            return found
+        candidates = {digits}
+        conds = []
+        if len(digits) == 8:
+            candidates.add(digits[:7])
+        if len(digits) == 7:
+            conds.append(AtlTaxpayer.ntn.like(f"{digits}_"))
+        conds.insert(0, AtlTaxpayer.ntn.in_(candidates))
+        if len(digits) == 13:
+            conds.append(AtlTaxpayer.cnic == digits)
+        async with async_session() as db:
+            rows = (await db.execute(select(AtlTaxpayer).where(or_(*conds)))).scalars().all()
+        for r in rows:
+            kind = (r.list_type or "").upper()
+            if kind in found and found[kind] is None:
+                found[kind] = {"name": r.name, "business_name": r.business_name,
+                               "filing_status": r.filing_status, "status_date": r.status_date}
+    except Exception:
+        logger.debug("ATL list lookup unavailable", exc_info=True)
+    return found
+
+
+def _status_from(filing: str) -> str:
+    f = (filing or "").strip().lower()
+    if not f:
+        return "unknown"
+    return "inactive" if ("inactive" in f or "in-active" in f or "non" in f) else (
+        "active" if f.startswith("active") or "operative" in f else "inactive")
+
+
+# Profile fields shown in VIM. Email and Cell are left out on purpose: FBR
+# returns them masked, and VIM has no use for them.
+_PROFILE_FIELDS = {"Name": "name", "Category": "category", "Registered On": "registered_on",
+                   "Tax Office": "tax_office", "Registration Status": "registration_status",
+                   "Registered for Sales Tax": "sales_tax_registered"}
+
+
+async def fbr_status_detail(identifier: str, live: bool, it_result: Optional[dict] = None) -> dict:
+    """Lucky Cement (observation A): Income Tax and Sales Tax status shown
+    separately, plus the FBR Taxpayer Profile — a vendor can be active for
+    income tax and not for sales tax.
+
+    Local ATL lists first (IT / ST); with `live` (FBR_LIVE_LOOKUP_ENABLED) a
+    list miss is asked of FBR — protocol 1004 (IT ATL), 1005 (ST ATL) — and
+    the profile comes from protocol 1003 (Taxpayer Profile Inquiry). Protocol
+    ids are those IRIS's own portal uses (iris.fbr.gov.pk bundle, 2026-11-23).
+    """
+    normalized, id_type = normalize_identifier(identifier)
+    send = normalized
+    if id_type == "NTN" and normalized.isdigit() and len(normalized) == 8:
+        send = normalized[:7]
+    lists = await _lookup_atl_lists(normalized)
+    loop = asyncio.get_event_loop()
+
+    async def live_raw(protocol, output_type="5"):
+        if not live:
+            return None
+        try:
+            return await loop.run_in_executor(
+                None, lambda: _query_fbr_api_sync(send, id_type, protocol, output_type=output_type, raw=True))
+        except Exception:
+            logger.exception("FBR live %s lookup failed", protocol)
+            return None
+
+    def from_row(row):
+        return {"status": "active", "name": row.get("name"), "business_name": row.get("business_name"),
+                "filing_status": row.get("filing_status") or "Active", "status_date": row.get("status_date"),
+                "source": "local_db"}
+
+    def from_titles(t):
+        if not t:
+            return {"status": "not_found", "source": "live_api" if live else "local_db"}
+        filing = t.get("Filing Status") or t.get("Status") or t.get("STATUS") or ""
+        return {"status": _status_from(filing) if filing else "active", "name": t.get("Name"),
+                "business_name": t.get("Business Name"), "filing_status": filing or None,
+                "status_date": t.get("Filing Status Checking Date"), "source": "live_api"}
+
+    # Income tax
+    if lists["IT"]:
+        income = from_row(lists["IT"])
+    elif it_result and it_result.get("source") == "live_api" and it_result.get("status") != "not_found":
+        income = {"status": "active" if it_result.get("is_active") else "inactive",
+                  "name": it_result.get("taxpayer_name"), "business_name": it_result.get("business_name"),
+                  "filing_status": it_result.get("filing_status"), "status_date": it_result.get("status_date"),
+                  "source": "live_api"}
+    else:
+        income = from_titles(await live_raw(settings.FBR_PROTOCOL_INCOME_TAX))
+    # Sales tax
+    sales = from_row(lists["ST"]) if lists["ST"] else from_titles(await live_raw(settings.FBR_PROTOCOL_SALES_TAX))
+    # Taxpayer profile
+    profile = None
+    titles = await live_raw("1003", output_type="4")
+    if titles:
+        profile = {v: titles.get(k) for k, v in _PROFILE_FIELDS.items() if titles.get(k)}
+    return {"income_tax": income, "sales_tax": sales, "profile": profile}
+
+
 async def lookup_atl(identifier: str) -> Optional[dict]:
     """Look up an NTN/CNIC in the ATL. Prefers the app DB's atl_taxpayers table
     (weekly import); falls back to the local sqlite ATL file if present."""
@@ -410,6 +517,21 @@ def _parse_fbr_response(data: dict, fallback_id: str) -> Optional[dict]:
     return parsed
 
 
+def _fbr_titles(data: dict) -> Optional[dict]:
+    """{Title (without ':'): Value} from an FBR reply, or None for "no record"."""
+    if not isinstance(data, dict) or data.get("status_code") != 1:
+        return None
+    response = data.get("response")
+    if not isinstance(response, list):
+        return None
+    out = {}
+    for item in response:
+        title = (item.get("Title") or "").strip().rstrip(":").strip()
+        if title:
+            out[title] = (item.get("Value") or "").strip()
+    return out or None
+
+
 # ── Core API query function ──────────────────────────────────────────────────
 
 def _query_fbr_api_sync(
@@ -417,6 +539,8 @@ def _query_fbr_api_sync(
     identifier_type: str = "NTN",
     protocol_id: Optional[str] = None,
     _is_retry: bool = False,
+    output_type: str = "5",
+    raw: bool = False,
 ) -> Optional[dict]:
     """
     Query the live FBR ATL API for a single NTN or CNIC.
@@ -444,7 +568,7 @@ def _query_fbr_api_sync(
     # protocolId "1004" = Income Tax ATL, outputType "5" = JSON response.
     payload = {
         "protocolId": protocol_id,
-        "outputType": "5",
+        "outputType": output_type,
         "identifierType": identifier_type,
         "identifier": identifier.strip(),
         "date": "",
@@ -477,12 +601,13 @@ def _query_fbr_api_sync(
                 logger.warning("FBR API returned 401 — token likely expired. Re-extracting...")
                 _invalidate_token_cache()
                 return _query_fbr_api_sync(
-                    identifier, identifier_type, protocol_id, _is_retry=True
+                    identifier, identifier_type, protocol_id, _is_retry=True,
+                    output_type=output_type, raw=raw,
                 )
 
             resp.raise_for_status()
             data = resp.json()
-            return _parse_fbr_response(data, identifier)
+            return _fbr_titles(data) if raw else _parse_fbr_response(data, identifier)
 
         except requests.exceptions.Timeout:
             logger.warning("FBR API timeout on attempt %d.", attempt)

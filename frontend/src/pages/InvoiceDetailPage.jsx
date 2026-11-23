@@ -1233,8 +1233,41 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
                     <div className="text-neutral-400 mt-0.5">Source: {fbrInfo.source === "local_db" ? "FBR ATL" : fbrInfo.source === "live_api" ? "FBR Live" : fbrInfo.source}</div>
                   </div>
                 )}
-                {fbrInfo && fbrInfo.status === "not_found" && (
+                {fbrInfo && fbrInfo.status === "not_found" && !fbrInfo.income_tax && (
                   <div className="text-2xs text-warning-dark">NTN not on the Active Taxpayer List.</div>
+                )}
+                {/* Lucky Cement: Income Tax and Sales Tax are separate — a vendor
+                    can be active for one and not the other — plus FBR's profile. */}
+                {fbrInfo && (fbrInfo.income_tax || fbrInfo.sales_tax) && (
+                  <div className="flex flex-col gap-1 text-2xs mt-0.5">
+                    {[["Income Tax", fbrInfo.income_tax], ["Sales Tax", fbrInfo.sales_tax]].map(([label, s]) => {
+                      const st = s?.status || "unknown";
+                      const tone = st === "active"
+                        ? "text-success-dark bg-success-bg border-success-base"
+                        : st === "inactive" || st === "not_found"
+                        ? "text-danger-dark bg-danger-bg border-danger-base"
+                        : "text-neutral-600 bg-neutral-50 border-neutral-200";
+                      const text = st === "active" ? "Active" : st === "inactive" ? "Inactive"
+                        : st === "not_found" ? "Not on ATL" : "Unknown";
+                      return (
+                        <div key={label} className="flex items-center gap-1.5">
+                          <span className="text-neutral-500 w-[68px]">{label}:</span>
+                          <span className={`inline-flex items-center text-[10px] font-semibold px-1.5 py-0.5 rounded border ${tone}`}>{text}</span>
+                          {s?.source && <span className="text-neutral-400">{s.source === "live_api" ? "FBR live" : "FBR ATL"}</span>}
+                        </div>
+                      );
+                    })}
+                    {fbrInfo.profile && (
+                      <div className="mt-1 text-neutral-600 flex flex-col gap-0.5 border-t border-neutral-100 pt-1">
+                        <span className="text-neutral-500 font-semibold">FBR Taxpayer Profile</span>
+                        {fbrInfo.profile.registration_status && <div><span className="text-neutral-400">Registration:</span> {fbrInfo.profile.registration_status}</div>}
+                        {fbrInfo.profile.sales_tax_registered && <div><span className="text-neutral-400">Sales tax registered:</span> {fbrInfo.profile.sales_tax_registered}</div>}
+                        {fbrInfo.profile.tax_office && <div><span className="text-neutral-400">Tax office:</span> {fbrInfo.profile.tax_office}</div>}
+                        {fbrInfo.profile.registered_on && <div><span className="text-neutral-400">Registered on:</span> {fbrInfo.profile.registered_on}</div>}
+                        {fbrInfo.profile.category && <div><span className="text-neutral-400">Category:</span> {fbrInfo.profile.category}</div>}
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
             ) : (

@@ -65,6 +65,11 @@ async def verify_ntn_endpoint(req: VerifyNTNRequest):
     from app.config import settings as _settings
     live = bool(req.check_live or _settings.FBR_LIVE_LOOKUP_ENABLED)
     result = await verify_ntn(req.ntn, check_live=live, protocol_id=req.protocol_id)
+    from app.services.fbr_verification import fbr_status_detail
+    try:
+        result.update(await fbr_status_detail(req.ntn, live=live, it_result=result))
+    except Exception:
+        logger.exception("FBR IT/ST/profile detail failed for %s", req.ntn)
     return FBRVerificationResponse(**result)
 
 

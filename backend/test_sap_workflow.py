@@ -420,6 +420,26 @@ def test_resubmit(client):
         settings.SAP_WF_RAISE_EVENT = True
 
 
+def test_unit_from_po(client):
+    """Observation B: an invoice line with no unit takes its PO line's unit at
+    PO match; a unit the invoice printed is kept."""
+    print("\nUNIT OF MEASURE FROM THE PO")
+    for given, label in ((None, "no unit on the invoice -> PO's unit"), ("KG", "invoice unit KG is kept")):
+        line = dict(LINE)
+        line["unit"] = given
+        r = client.post("/api/invoices/save", json={
+            "original_filename": "uom.pdf", "stored_filepath": "demo/uom", "mime_type": "application/pdf",
+            "invoice_number": f"UOM-{uuid.uuid4().hex[:8].upper()}", "invoice_date": "2026-03-12",
+            "currency": "PKR", "document_type": "invoice", "status": "validated",
+            "source_type": "upload", "po_reference": PO, "supplier_ntn": "0912345-6",
+            "subtotal_amount": 3700000, "tax_amount": 0, "total_amount": 3700000, "line_items": [line],
+        })
+        inv = r.json()["id"]
+        m = client.post(f"/api/po-matching/invoices/{inv}/match", json={"po_id": _po(client)})
+        unit = (_detail(client, inv)["line_items"][0].get("unit") or "")
+        expect(f"{label} (got {unit!r})", m.status_code == 200 and unit == (given or "ST"), m.text[:150])
+
+
 def test_t100_text():
     """A ZMIR7_ERROR_LOG row with only a message code is shown with its T100 text."""
     print("\nERROR LOG WITH A CODE ONLY -> T100 TEXT")
@@ -463,6 +483,7 @@ if __name__ == "__main__":
         test_poller_selection(client)
         test_sap_raises(client)
         test_resubmit(client)
+        test_unit_from_po(client)
 
     print("\n" + "=" * 60)
     if _failures:
