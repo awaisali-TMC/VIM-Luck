@@ -98,6 +98,9 @@ export default function GoodsReceiptsCard({ invoice, editable = false, onChanged
             <div key={g.gr_key} className="py-0.5">
               <span className="font-mono">{g.gr_doc}/{String(g.gr_item).replace(/^0+/, "")} {g.gr_year}</span>
               {" · "}item {g.po_item} · received {fmtNum(g.received)} {g.unit} · invoiced {fmtNum(g.invoiced)} · <strong>{g.reason}</strong>
+              {(g.moves || []).length > 0 && (
+                <span> ({g.moves.map((m) => `${m.bwart} ${m.qty > 0 ? "+" : ""}${fmtNum(m.qty)}`).join(", ")})</span>
+              )}
             </div>
           ))}
         </details>
@@ -133,7 +136,14 @@ export default function GoodsReceiptsCard({ invoice, editable = false, onChanged
                   <td className="py-1.5 px-2">{fmtDate(g.posting_date)}</td>
                   <td className="py-1.5 px-2">{g.po_item}{g.description ? <span className="text-neutral-500"> · {g.description}</span> : null}</td>
                   <td className="py-1.5 px-2 text-right">{fmtNum(g.received)} {g.unit}</td>
-                  <td className="py-1.5 px-2 text-right">{fmtNum(g.invoiced)}</td>
+                  <td className="py-1.5 px-2 text-right">
+                    {fmtNum(g.invoiced)}
+                    {g.parked > 0 && (
+                      <div className="text-2xs text-warning-dark" title={`Parked invoice ${(g.parked_docs || []).join(", ")}`}>
+                        {fmtNum(g.parked)} parked
+                      </div>
+                    )}
+                  </td>
                   <td className="py-1.5 px-2 text-right font-semibold">{fmtNum(g.open_qty)} {g.unit}</td>
                   <td className="py-1.5 px-2 text-right font-mono">{fmtNum(g.open_amount)}</td>
                 </tr>

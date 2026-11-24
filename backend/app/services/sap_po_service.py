@@ -556,9 +556,14 @@ def fetch_gr_overview(po_number: str) -> dict:
     GR material-document line, so the user can choose which GRs an invoice
     parks against — and see why a list is empty.
 
-    From EKBE: receipts (VGABE 1, BWART 101/103, SHKZG S) are the GR lines;
-    reversals (VGABE 1, SHKZG H) and posted invoices (VGABE 2; H = credit memo)
-    point at their GR through LFGJA/LFBNR/LFPOS and reduce its open quantity.
+    From EKBE: receipts (VGABE 1, BWART 101/103, SHKZG S) are the GR lines, and
+    the documents an invoice references. Every other VGABE 1 row that points at
+    one through LFGJA/LFBNR/LFPOS moves its quantity (S adds, H subtracts). That
+    matters for a TWO-STEP receipt: the 103 (into blocked stock) carries no
+    quantity of its own; the 105 releases do (Lucky PO 1010027884, 2026-11-24,
+    where skipping them left every GR negative). Posted invoices (VGABE 2; H =
+    credit memo) reduce the open quantity. Parked invoices (VGABE P) are only
+    reported ("parked"): whether SAP always clears those rows is unconfirmed.
 
     Returns {"open": [...], "closed": [...], "rows": EKBE rows read,
     "unused": [{vgabe, bwart, shkzg, count}]}. A GR is {gr_key
@@ -602,43 +607,48 @@ def fetch_gr_overview(po_number: str) -> dict:
 
     others = []
     for r in rows:   # receipts first, so references below find their GR
-        vgabe, shkzg = r.get("VGABE", "").strip(), r.get("SHKZG", "").strip()
-        if vgabe != "1" or shkzg == "H":
+        bwart = r.get("BWART", "").strip()
+        if r.get("VGABE", "").strip() != "1" or r.get("SHKZG", "").strip() == "H" or bwart not in ("101", "103"):
             others.append(r)
-            continue
-        if r.get("BWART", "").strip() not in ("101", "103"):
-            skip(r)                       # 105 = release of a 103, not a receipt
             continue
         k = key(r.get("GJAHR"), r.get("BELNR"), r.get("BUZEI") or "1")
         g = grs.setdefault(k, {
             "gr_key": k, "gr_year": r.get("GJAHR", "").strip(), "gr_doc": r.get("BELNR", "").strip(),
             "gr_item": (r.get("BUZEI", "").strip() or "1"),
             "po_item": int(r.get("EBELP", "0") or "0"),
-            "posting_date": r.get("BUDAT", "").strip(), "received": 0.0, "reversed": 0.0,
-            "invoiced": 0.0, "amount": 0.0,
+            "posting_date": r.get("BUDAT", "").strip(), "received": 0.0,
+            "invoiced": 0.0, "parked": 0.0, "parked_docs": [], "amount": 0.0, "moves": [],
         })
-        g["received"] += _safe_float(r.get("MENGE") or "") or 0.0
-        g["amount"] += _safe_float(r.get("DMBTR") or "") or 0.0
+        if bwart == "101":               # a 103 only counts through its 105 releases
+            g["received"] += _safe_float(r.get("MENGE") or "") or 0.0
+            g["amount"] += _safe_float(r.get("DMBTR") or "") or 0.0
     for r in others:
         vgabe, shkzg = r.get("VGABE", "").strip(), r.get("SHKZG", "").strip()
         g = grs.get(key(r.get("LFGJA"), r.get("LFBNR"), r.get("LFPOS") or "1"))
-        if g is None or vgabe not in ("1", "2"):
+        if g is None or vgabe not in ("1", "2", "P"):
             skip(r)
             continue
-        qty = _safe_float(r.get("MENGE") or "") or 0.0
+        sign = -1 if shkzg == "H" else 1
+        qty = (_safe_float(r.get("MENGE") or "") or 0.0) * sign
         if vgabe == "1":
-            g["reversed"] += qty
+            g["received"] += qty
+            g["amount"] += (_safe_float(r.get("DMBTR") or "") or 0.0) * sign
+            g["moves"].append({"doc": r.get("BELNR", "").strip(), "bwart": r.get("BWART", "").strip(), "qty": round(qty, 3)})
+        elif vgabe == "2":
+            g["invoiced"] += qty
         else:
-            g["invoiced"] += -qty if shkzg == "H" else qty
+            g["parked"] += qty
+            g["parked_docs"].append(r.get("BELNR", "").strip())
 
     out, closed = [], []
     for g in grs.values():
-        net = g["received"] - g.pop("reversed")
+        net = round(g["received"], 3)
         open_qty = round(net - g["invoiced"], 3)
-        g["received"], g["invoiced"] = round(net, 3), round(g["invoiced"], 3)
+        g["received"], g["invoiced"], g["parked"] = net, round(g["invoiced"], 3), round(g["parked"], 3)
         g["open_qty"] = max(open_qty, 0.0)
-        g["open_amount"] = round(g["amount"] * (open_qty / net), 2) if net and open_qty > 0 else 0.0
-        g["reason"] = None if open_qty > 0 else ("reversed" if round(net, 3) <= 0 else "fully invoiced")
+        g["open_amount"] = round(g["amount"] * (open_qty / net), 2) if net > 0 and open_qty > 0 else 0.0
+        g["reason"] = None if open_qty > 0 else (
+            "fully invoiced" if net > 0 else "reversed" if g["moves"] else "in blocked stock, not released (105)")
         (out if open_qty > 0 else closed).append(g)
     for lst in (out, closed):
         lst.sort(key=lambda g: (g["posting_date"], g["gr_key"]))

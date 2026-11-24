@@ -5,6 +5,18 @@ Handover from Claude Code sessions on this machine (`D:\VIM\VIM-Luck`). Read
 what is still open. (`HANDOFF.md` is the separate product feature-status doc.)
 Newest session first; §1–§5 below are from session 1 and are still accurate.
 
+## 2026-11-24 (LAN test 2): two-step GRs (103/105) - fixed (dev-shahzaib only, not verified on AUP)
+
+`7e27e79`'s card showed the cause for PO `1010027884`: 7 GRs, all "received" negative. They are
+**two-step receipts**: the 103 has no quantity, the 105 releases have it (13 rows), and the code
+skipped every 105 while still subtracting the reversals. `fetch_gr_overview()` now counts the 105s
+on their 103 (S adds, H subtracts); each GR lists its movements.
+- The last six GRs total **424.94**, exactly what invoice 56 bills.
+- **Not confirmed:** the 105 rows' `LFBNR` pointing at the 103 (if not, they show as "unused 105"
+  again), and the net: 13 S rows against 8 H rows, so some GRs may really be reversed.
+- EKBE has a `P` row: parked invoices **are** in EKBE, the earlier notes were wrong. They are
+  reported ("parked"), not subtracted, until MM/ABAP say when SAP clears them.
+
 ## 2026-11-24 (LAN test): FBR profile works; GR list empty for PO 1010027884 (dev-shahzaib only)
 
 - **A works on the LAN box:** the FBR profile (NTN Details) shows for NTN 1328862-8, with Income Tax
@@ -14,8 +26,6 @@ Newest session first; §1–§5 below are from session 1 and are still accurate.
   type. The list could not say which, so `fetch_gr_overview()` now also returns the closed GRs with a
   reason, the EKBE row count and a count of rows that took no part; the card shows them and the log
   has `GRs for PO ...`. The filter itself is unchanged. Compare with ME23N > PO history.
-- EKBE is now read for every VGABE. Earlier notes say parked invoices are not in EKBE; that was
-  never checked (look for event `P` in the counts).
 - The user asked to hold merges to `main` until LAN testing is done. `main` was already at
   `b9546c9` when that message arrived; it was left there.
 

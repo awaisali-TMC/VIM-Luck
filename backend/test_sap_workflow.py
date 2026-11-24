@@ -500,7 +500,26 @@ def test_gr_overview():
     expect("partly invoiced stays open with the rest", [(g["gr_doc"], g["open_qty"]) for g in ov["open"]]
            == [("5000000096", 5.0)], ov["open"])
     expect("other rows are counted, not hidden", {(u["vgabe"], u["bwart"]): u["count"] for u in ov["unused"]}
-           == {("1", "105"): 1, ("P", ""): 1}, ov["unused"])
+           == {("1", "105"): 1}, ov["unused"])
+    expect("a parked invoice is reported on its GR, not subtracted",
+           [(g["parked"], g["parked_docs"]) for g in ov["closed"] if g["gr_doc"] == "5000000091"] == [(4.0, ["5100000095"])],
+           ov["closed"])
+    # Two-step receipt, as on Lucky's PO 1010027884: 103 without quantity, 105 releases.
+    row("5000000100", "1", "103", 0)
+    row("5000000101", "1", "105", 57.52, ref="5000000100")
+    row("5000000102", "1", "106", 57.52, "H", ref="5000000100")
+    row("5000000103", "1", "105", 57.52, ref="5000000100")      # released again
+    row("5000000104", "1", "103", 0)
+    row("5000000105", "1", "105", 58.96, ref="5000000104")
+    row("5000000106", "1", "106", 58.96, "H", ref="5000000104")  # released, then reversed
+    row("5000000107", "1", "103", 0)                             # never released
+    conn.commit()
+    ov = fetch_gr_overview("4599999999")
+    two = {g["gr_doc"]: g for g in ov["open"] + ov["closed"]}
+    expect("105 releases count for their 103 (the reference document)",
+           two["5000000100"]["open_qty"] == 57.52, two["5000000100"])
+    expect("released then reversed -> closed, reversed", two["5000000104"]["reason"] == "reversed", two["5000000104"])
+    expect("never released -> says so", "blocked stock" in (two["5000000107"]["reason"] or ""), two["5000000107"])
     expect("open list is the same one the park uses", fetch_open_grs("4599999999") == ov["open"])
     conn.execute("DELETE FROM EKBE WHERE EBELN = '4599999999'")
     conn.commit()
