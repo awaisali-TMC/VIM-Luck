@@ -337,6 +337,7 @@ class InvoiceDetailResponse(BaseModel):
     sap_wf_message: Optional[str] = None
     sap_wf_checked_at: Optional[datetime] = None
     parking_gr_refs: Optional[list[str]] = None  # GRs chosen for parking (observation F)
+    sap_messages: Optional[list[dict]] = None  # SAP's own messages, newest run first
     srn_list: Optional[list[dict]] = None      # SRNs on the attached GRN summary
     sap_delivery: Optional[list[dict]] = None  # planned delivery costs to park
     sap_wht: Optional[list[dict]] = None  # WHT type/code override (observation G)

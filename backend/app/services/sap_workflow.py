@@ -328,9 +328,8 @@ def read_workflow_status(sap, objkeys: list[str]) -> dict[str, dict]:
         if row["objkey"] not in newest or order >= newest[row["objkey"]]["_order"]:
             newest[row["objkey"]] = {**row, "_order": order}
     # Messages logged as a code only (no ZMESSAGE): one T100 read for all.
-    t100 = _read_t100(sap, {k for r in newest.values()
-                            if (r.get("type") or "").upper() in ("E", "A") and not (r.get("message") or "").strip()
-                            for k in [_msg_key(r)] if k})
+    t100 = _read_t100(sap, set(sorted({k for r in err_rows if not (r.get("message") or "").strip()
+                                       for k in [_msg_key(r)] if k})[:40]))
     for key, row in newest.items():
         entry = out.setdefault(key, {"status": "", "label": "No workflow record",
                                      "posted_doc": "", "error": ""})
@@ -339,6 +338,15 @@ def read_workflow_status(sap, objkeys: list[str]) -> dict[str, dict]:
             entry["error"] = _message_text(row, t100)
         elif kind == "S":
             entry["error"] = ""
+    # The whole log for the invoice page, newest first.
+    for row in sorted(err_rows, key=lambda r: (r.get("cdate", ""), r.get("ctime", "")), reverse=True):
+        if row["objkey"] in out:
+            mkey = _msg_key(row)
+            out[row["objkey"]].setdefault("log", []).append({
+                "type": (row.get("type") or "I").upper()[:1],
+                "id": mkey[0] if mkey else "", "number": mkey[1] if mkey else "",
+                "text": _message_text(row, t100)[:400],
+                "at": " ".join(p for p in (row.get("cdate", ""), row.get("ctime", "")) if p)})
     # APP normally means posted, but a posting error logged after it means SAP
     # approved and could not post: keep it parked and show the error.
     for entry in out.values():
@@ -375,6 +383,8 @@ def apply_status(invoice, info: dict | None, now: datetime) -> bool:
         invoice.sap_wf_status = info["status"] or invoice.sap_wf_status or ""
         invoice.sap_wf_posted_doc = info["posted_doc"] or invoice.sap_wf_posted_doc
         invoice.sap_wf_message = (info["error"] or None) and info["error"][:500]
+        from app.services.sap_messages import record_workflow_log
+        record_workflow_log(invoice, info.get("log") or [])
         if info["status"] == WF_APP and info["posted_doc"] and invoice.status == "parked":
             invoice.status = "posted"
             invoice.sap_doc_status = "posted"

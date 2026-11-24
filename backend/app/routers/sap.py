@@ -33,6 +33,7 @@ from app.services.duplicate_detection import duplicate_block_message, find_key_d
 from app.services.gr_suggest import (
     choose_grs, freight_on_other_invoices, sibling_choices, suggest_freight, suggest_grs, why_not_suggested,
 )
+from app.services import sap_messages
 from app.services.sap_credentials import decrypt_sap_password
 from app.services.srn_list import check_receipts, listed_numbers
 from app.services.invoice_line_rules import (
@@ -1762,6 +1763,8 @@ async def post_invoice_to_sap_endpoint(
     if settings.SAP_HIERARCHY_CHECK_ENABLED and req.mode in ("park", "validate", "change"):
         hier = await _hierarchy_or_error(user, gross_amount, eff_currency)
         if not hier["ok"]:
+            sap_messages.record(invoice, "hierarchy", None, summary=hier["message"], ok=False)
+            await db.commit()
             if req.mode == "validate":
                 return {"ok": False, "message": hier["message"], "sap_return": []}
             raise HTTPException(status_code=422, detail={"message": hier["message"], "sap_return": []})
@@ -1834,12 +1837,18 @@ async def post_invoice_to_sap_endpoint(
         # failure can be read without shell access to the server log. RFC error
         # texts carry no credentials; PWDI is never echoed by SAP.
         reason = " ".join(f"{type(exc).__name__}: {exc}".split())[:400]
+        sap_messages.record(invoice, req.mode, None, summary=f"The call to SAP failed ({kind}): {reason}", ok=False)
+        await db.commit()
         raise HTTPException(
             status_code=502,
             detail=f"SAP posting call failed ({kind}) — {reason}",
         )
 
-    # ── VALIDATE (dry run): return the outcome, never touch the DB ──
+    # ── VALIDATE (dry run): return the outcome; only SAP's messages are kept ──
+    if req.mode == "validate" or not sap_result.get("success"):
+        sap_messages.record(invoice, req.mode, sap_result.get("return_messages"),
+                            summary=sap_result.get("message") or "", ok=bool(sap_result.get("success")))
+        await db.commit()
     if req.mode == "validate":
         return {
             "ok": sap_result.get("success", False),
@@ -1882,6 +1891,7 @@ async def post_invoice_to_sap_endpoint(
         invoice.sap_wf_posted_doc = None
         invoice.sap_wf_message = None
         invoice.sap_wf_checked_at = None
+    sap_messages.record(invoice, req.mode, sap_result.get("return_messages"), summary=sap_result.get("message") or "")
 
     await db.commit()
 
@@ -1989,11 +1999,17 @@ async def unpark_invoice_endpoint(
     try:
         from app.services.sap_invoice_post import unpark_invoice_in_sap
         sap_result = unpark_invoice_in_sap(invoice.sap_document_number, invoice.sap_fiscal_year)
-    except Exception:
+    except Exception as exc:
         logger.exception("SAP unpark call failed for invoice %s", invoice.id)
-        raise HTTPException(status_code=502, detail="SAP unpark call failed — see server logs.")
+        reason = " ".join(f"{type(exc).__name__}: {exc}".split())[:400]
+        sap_messages.record(invoice, "unpark", None, summary=f"The call to SAP failed: {reason}", ok=False)
+        await db.commit()
+        raise HTTPException(status_code=502, detail=f"SAP unpark call failed — {reason}")
 
+    sap_messages.record(invoice, "unpark", sap_result.get("return_messages"),
+                        summary=sap_result.get("message") or "", ok=bool(sap_result.get("success")))
     if not sap_result.get("success"):
+        await db.commit()
         raise HTTPException(
             status_code=422,
             detail={

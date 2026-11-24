@@ -48,6 +48,7 @@ from app.services.duplicate_detection import (
 )
 from app.services.invoice_classifier import classify_invoice
 from app.services.po_units import missing_line_units
+from app.services import sap_messages
 from app.services.srn_list import clean_receipts, share_receipts
 
 logger = logging.getLogger(__name__)
@@ -289,6 +290,7 @@ def _build_detail_response(invoice: Invoice) -> InvoiceDetailResponse:
         parking_line_item_ids=(json.loads(invoice.parking_line_item_ids) if invoice.parking_line_item_ids else None),
         parking_gr_refs=(json.loads(invoice.parking_gr_refs) if invoice.parking_gr_refs else None),
         sap_wht=(json.loads(invoice.sap_wht) if invoice.sap_wht else None),
+        sap_messages=sap_messages.load(invoice) or None,
         srn_list=(json.loads(invoice.srn_list) if invoice.srn_list else None),
         sap_delivery=(json.loads(invoice.sap_delivery) if invoice.sap_delivery else None),
         # PO matching
@@ -991,6 +993,8 @@ async def get_invoice(
     for li in resp.line_items:
         if li.id in units:
             li.unit = units[li.id]
+    if principal.kind == "supplier":
+        resp.sap_messages = None        # internal
     return resp
 
 

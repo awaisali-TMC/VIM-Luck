@@ -18,6 +18,7 @@ import InvoiceDetailFields from "../components/detail/InvoiceDetailFields";
 import SAPPostingCard from "../components/detail/SAPPostingCard";
 import SAPWorkflowStatus from "../components/detail/SAPWorkflowStatus";
 import DeliveryCostsCard from "../components/detail/DeliveryCostsCard";
+import SAPMessagesCard from "../components/detail/SAPMessagesCard";
 import WHTComplianceCard from "../components/detail/WHTComplianceCard";
 import LineItemsTable from "../components/upload/LineItemsTable";
 import SalesTaxCard from "../components/upload/SalesTaxCard";
@@ -599,6 +600,7 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
     } catch (err) {
       const detail = err.response?.data?.detail;
       setActionError(typeof detail === "object" ? detail.message || JSON.stringify(detail) : detail || "Failed to unpark from SAP");
+      await refetch();
     } finally {
       setActionBusy(false);
     }
@@ -777,6 +779,7 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
         ? " This invoice is approved, so use Flag Exception to edit its lines first."
         : "";
       setSapPostError(base + hint);
+      await refetch();          // SAP's messages were stored with the invoice
     } finally {
       setSapPosting(false);
     }
@@ -1047,6 +1050,9 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
           </div>
         </div>
       )}
+
+      {/* ── SAP's own messages (park, resubmit, unpark, workflow) ── */}
+      <SAPMessagesCard runs={invoice.sap_messages} />
 
       {/* ── Duplicate Warning ── */}
       <DuplicateWarningCard

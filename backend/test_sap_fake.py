@@ -405,7 +405,7 @@ def test_end_to_end(client):
     #
     # 1. SAP refuses it. The request is well-formed, reaches the BAPI, and comes
     #    back with a RETURN row of TYPE 'E'.
-    _, bad = _park_via_api(client, PO_BLOCKED, [
+    bad_id, bad = _park_via_api(client, PO_BLOCKED, [
         {"description": "Industrial Solvent Drums 200L", "quantity": 100, "unit": "EA",
          "unit_price": 3500, "amount": 350000},
     ], label="blocked vendor: ")
@@ -413,6 +413,10 @@ def test_end_to_end(client):
            bad.status_code >= 400, bad.text[:200])
     expect("the SAP message reaches the user verbatim",
            "blocked for posting" in bad.text.lower(), bad.text[:240])
+    run = (client.get(f"/api/invoices/{bad_id}").json().get("sap_messages") or [{}])[0]
+    expect("...and stays on the invoice, with SAP's type, class and number",
+           run.get("action") == "park" and [(m["type"], m["id"], m["number"]) for m in run["messages"]] == [("E", "M8", "534")]
+           and "blocked for posting" in run["messages"][0]["text"], run)
 
     # 2. The app refuses it first. PO 4500009003 is under GR-based invoice
     #    verification (WEBRE='X') with no goods receipt, so nothing is ever sent.

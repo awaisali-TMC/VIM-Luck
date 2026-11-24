@@ -259,6 +259,14 @@ def test_flow(client):
     expect("APP, no posted document, error text", r["sap_wf_status"] == "APP" and not r["sap_wf_posted_doc"]
            and "Posting period" in (r["sap_wf_message"] or ""), r)
     expect("invoice is still parked", r["status"] == "parked", r["status"])
+    runs = _detail(client, inv)["sap_messages"] or []
+    log = next((x for x in runs if x["action"] == "workflow"), {})
+    expect("SAP's workflow log is on the invoice, with its error",
+           any(m["type"] == "E" and "Posting period" in m["text"] for m in log.get("messages", [])), runs)
+    expect("the park's own answer is kept next to it", any(x["action"] == "park" for x in runs), runs)
+    _refresh(client, inv)
+    expect("reading it again does not add it twice",
+           sum(x["action"] == "workflow" for x in _detail(client, inv)["sap_messages"]) == 1)
 
     print("\nREJECTED: stays parked, can be unparked")
     inv, d = _park_with_workflow(client, "reject case")
@@ -269,6 +277,9 @@ def test_flow(client):
     u = client.post(f"/api/sap/invoices/{inv}/unpark")
     expect(f"unpark a rejected invoice -> 200 (got {u.status_code})", u.status_code == 200, u.text[:200])
     d3 = _detail(client, inv)
+    top = (d3["sap_messages"] or [{}])[0]
+    expect("SAP's answer to the unpark is kept; M8 417 (sent as E) reads as success",
+           top.get("action") == "unpark" and [(m["type"], m["id"], m["number"]) for m in top["messages"]] == [("S", "M8", "417")], top)
     expect("unparking clears the workflow fields", not d3.get("sap_wf_objkey") and not d3.get("sap_wf_status"),
            (d3.get("sap_wf_objkey"), d3.get("sap_wf_status")))
 
