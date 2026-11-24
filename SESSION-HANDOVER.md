@@ -23,13 +23,16 @@ commit, on `dev-shahzaib` only.
 (WHT), bulk delete, the new tax-code dropdown, the T100 text (it still showed only `FF 724`).
 
 **Known weak points:**
-- **WHT override (G):** choosing another code also changes the WHT *type* (`WithholdingTaxCard.jsx`
-  sets both). A type missing from the vendor's BP may be refused by SAP. `WITHTAXDATA` is sent
-  without base, amount or `SPLIT_KEY`. "SAP applies the BP defaults when nothing is sent" is an
-  **assumption**; CLAUDE.md states it as fact until ABAP/FI confirm.
-- **Sales-tax badge (A):** a live 1005 reply with no status field is shown as **Active**
-  (`from_titles`). The 1005 reply shape was never inspected, and any FBR failure shows as "Not on
-  ATL". Check this against the client's vendor that is income-tax active / sales-tax inactive.
+- **WHT (G), fixed after `3f62181`:** the 180 codes are one per type, so
+  "another code" always meant another type. The card now ticks the vendor's own BP types, and the
+  park refuses (422) any other type. **Still open with ABAP/FI:** `WITHTAXDATA` goes without base,
+  amount or `SPLIT_KEY`; whether an unticked type is really dropped; whether SAP applies the BP
+  defaults when nothing is sent.
+- **Sales-tax badge (A), fixed after `3f62181`:** an unrecognised status or no
+  answer from FBR is now **Unknown** (it was "Active" / "Not on ATL"); "Inoperative" is no longer
+  read as active. New `test_fbr_status.py`. The real 1005 reply is still not inspected: if the
+  badge says Unknown, the backend log has `FBR 1005 reply: status not recognised (fields: …)`.
+  The big ATL badge above still says "NTN Not Found" when FBR does not answer.
 - **Tax rate (C):** "first n% in the description", so `I5` (17% + 2%) counts as 17. VIM still does
   not read the PO item's tax code (`EKPO-MWSKZ`) or warn on a mismatch.
 - **GRs (F):** GRs already used by a *parked* invoice still show as open. `LFGJA`/`LFPOS` are not yet

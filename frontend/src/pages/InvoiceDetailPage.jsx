@@ -1255,7 +1255,7 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
                         <div key={label} className="flex items-center gap-1.5">
                           <span className="text-neutral-500 w-[68px]">{label}:</span>
                           <span className={`inline-flex items-center text-[10px] font-semibold px-1.5 py-0.5 rounded border ${tone}`}>{text}</span>
-                          {s?.source && <span className="text-neutral-400">{s.source === "live_api" ? "FBR live" : "FBR ATL"}</span>}
+                          {s?.source && <span className="text-neutral-400">{s.source === "live_api" ? "FBR live" : "FBR ATL"}{s.note ? ` · ${s.note}` : ""}</span>}
                         </div>
                       );
                     })}

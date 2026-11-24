@@ -758,10 +758,13 @@ async def get_invoice_wht(invoice_id: int, db: AsyncSession = Depends(get_db)):
         portion = r["portion"] if r["portion"] is not None else 100.0
         r["estimate"] = round(base * portion / 100.0 * (r["rate"] or 0) / 100.0, 2) if r["rate"] is not None else None
     if override:
+        bp = {r["wht_type"]: r for r in rows}
         for o in override:
-            info = wht_code_info(o["wht_type"], o["wht_code"])
+            r = bp.get(o["wht_type"])
+            info = r or wht_code_info(o["wht_type"], o["wht_code"])
             o["name"], o["rate"] = info["name"], info["rate"]
-            o["estimate"] = round(base * (info["rate"] or 0) / 100.0, 2) if info["rate"] is not None else None
+            o["estimate"] = r["estimate"] if r else None
+            o["in_bp"] = r is not None
     resp["vendor_wht"] = rows
     return resp
 
@@ -1437,6 +1440,23 @@ async def post_invoice_to_sap_endpoint(
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
         goods_items = split_items
+
+    # ── Observation G: an invoice may only carry WHT types its vendor has in
+    # its BP — another type has no vendor data in SAP. Re-checked here because
+    # the BP may have changed since the choice was saved.
+    chosen_wht = json.loads(invoice.sap_wht) if invoice.sap_wht else []
+    if chosen_wht:
+        from app.services.sap_po_service import fetch_vendor_wht
+        try:
+            bp_types = {w["wht_type"] for w in fetch_vendor_wht(vendor_number, company_code)}
+        except Exception:
+            logger.exception("Vendor WHT read failed for %s/%s", vendor_number, company_code)
+            raise HTTPException(status_code=502, detail="Could not read the vendor's withholding tax from SAP.")
+        foreign = sorted({w["wht_type"] for w in chosen_wht} - bp_types)
+        if foreign:
+            raise HTTPException(status_code=422, detail=(
+                f"Withholding tax type(s) {', '.join(foreign)} are not maintained in vendor {vendor_number}'s BP "
+                f"for company code {company_code}. Choose from the vendor's own types in the Withholding Tax card."))
 
     # Planned delivery costs (freight conditions, e.g. ZFRT) read live from SAP
     # (EKBZ). Only the GR-accrued, still-open amount is invoiceable.

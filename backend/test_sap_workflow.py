@@ -499,11 +499,18 @@ def test_wht(client):
     expect("override saved (upper-cased)", s.status_code == 200
            and _detail(client, inv2).get("sap_wht") == [{"wht_type": "VH", "wht_code": "VH"}],
            _detail(client, inv2).get("sap_wht"))
+    w = client.get(f"/api/sap/invoices/{inv2}/wht").json()
+    expect("a type outside the BP is flagged", w["override"][0].get("in_bp") is False, w["override"])
     p = _park(client, inv2)
-    kw = next(k for n, k in _calls if n == "BAPI_INCOMINGINVOICE_PARK")
-    expect("override -> WITHTAXDATA sent", p.status_code == 200
-           and kw["input_tables"].get("WITHTAXDATA") == [{"WI_TAX_TYPE": "VH", "WI_TAX_CODE": "VH"}],
-           kw["input_tables"].get("WITHTAXDATA"))
+    expect(f"a type outside the BP -> park refused, by name (got {p.status_code})",
+           p.status_code == 422 and "VH" in p.text, p.text[:200])
+    expect("...and nothing parked", "BAPI_INCOMINGINVOICE_PARK" not in _names(), _names())
+    client.put(f"/api/invoices/{inv2}/wht", json={"items": [{"wht_type": "VN", "wht_code": "VN"}]})
+    p = _park(client, inv2)
+    kw = next((k for n, k in _calls if n == "BAPI_INCOMINGINVOICE_PARK"), {"input_tables": {}})
+    expect("one of the BP's own types -> WITHTAXDATA sent", p.status_code == 200
+           and kw["input_tables"].get("WITHTAXDATA") == [{"WI_TAX_TYPE": "VN", "WI_TAX_CODE": "VN"}],
+           (p.text[:150], kw["input_tables"].get("WITHTAXDATA")))
 
 
 def test_t100_text():

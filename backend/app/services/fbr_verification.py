@@ -232,11 +232,21 @@ async def _lookup_atl_lists(normalized: str) -> dict:
 
 
 def _status_from(filing: str) -> str:
+    """active / inactive from FBR's wording; anything not recognised is
+    "unknown" — a guess here would show a wrong tax status."""
     f = (filing or "").strip().lower()
-    if not f:
-        return "unknown"
-    return "inactive" if ("inactive" in f or "in-active" in f or "non" in f) else (
-        "active" if f.startswith("active") or "operative" in f else "inactive")
+    if re.search(r"\b(in|non|not|un|de)[\s-]*(active|operative)\b|suspend|black\s*list|cancel", f):
+        return "inactive"
+    return "active" if re.search(r"\b(active|operative)\b", f) else "unknown"
+
+
+def _fbr_no_record(data) -> bool:
+    """FBR answered, and the answer is "no record": status_code 1 with a plain
+    sentence saying so. Not the same as no / unreadable reply."""
+    if not isinstance(data, dict) or data.get("status_code") not in (1, "1"):
+        return False
+    r = data.get("response")
+    return isinstance(r, str) and bool(re.search(r"\bno\b.*\b(record|data)|not\s+found", r, re.I))
 
 
 # Named profile fields (kept for callers that want one value). The client asked
@@ -275,15 +285,29 @@ async def fbr_status_detail(identifier: str, live: bool, it_result: Optional[dic
             return None
 
     def from_row(row):
-        return {"status": "active", "name": row.get("name"), "business_name": row.get("business_name"),
+        # On FBR's list = active, unless the row itself says otherwise.
+        filing = row.get("filing_status")
+        return {"status": _status_from(filing) if filing else "active", "name": row.get("name"), "business_name": row.get("business_name"),
                 "filing_status": row.get("filing_status") or "Active", "status_date": row.get("status_date"),
                 "source": "local_db"}
 
-    def from_titles(t):
+    def from_titles(t, protocol):
+        if not live:
+            return {"status": "not_found", "source": "local_db"}
+        if t is None:
+            return {"status": "unknown", "note": "FBR did not answer", "source": "live_api"}
         if not t:
-            return {"status": "not_found", "source": "live_api" if live else "local_db"}
-        filing = t.get("Filing Status") or t.get("Status") or t.get("STATUS") or ""
-        return {"status": _status_from(filing) if filing else "active", "name": t.get("Name"),
+            return {"status": "not_found", "source": "live_api"}
+        # The field is "Filing Status" on 1004; take any "... Status" title
+        # (not the checking date) so another wording on 1005 is still read.
+        filing = t.get("Filing Status") or next(
+            (v for k, v in t.items() if "status" in k.lower() and "date" not in k.lower() and v), "")
+        status = _status_from(filing)
+        if status == "unknown":
+            # Titles only: enough to fix the mapping, no taxpayer data in the log.
+            logger.warning("FBR %s reply: status not recognised (fields: %s)", protocol, list(t))
+        return {"status": status, "name": t.get("Name"),
+                "note": None if status != "unknown" else "status not recognised in FBR's reply",
                 "business_name": t.get("Business Name"), "filing_status": filing or None,
                 "status_date": t.get("Filing Status Checking Date"),
                 "registration_no": t.get("Registration No"), "source": "live_api"}
@@ -292,14 +316,15 @@ async def fbr_status_detail(identifier: str, live: bool, it_result: Optional[dic
     if lists["IT"]:
         income = from_row(lists["IT"])
     elif it_result and it_result.get("source") == "live_api" and it_result.get("status") != "not_found":
-        income = {"status": "active" if it_result.get("is_active") else "inactive",
+        income = {"status": _status_from(it_result.get("filing_status")),
                   "name": it_result.get("taxpayer_name"), "business_name": it_result.get("business_name"),
                   "filing_status": it_result.get("filing_status"), "status_date": it_result.get("status_date"),
                   "source": "live_api"}
     else:
-        income = from_titles(await live_raw(settings.FBR_PROTOCOL_INCOME_TAX))
+        income = from_titles(await live_raw(settings.FBR_PROTOCOL_INCOME_TAX), settings.FBR_PROTOCOL_INCOME_TAX)
     # Sales tax
-    sales = from_row(lists["ST"]) if lists["ST"] else from_titles(await live_raw(settings.FBR_PROTOCOL_SALES_TAX))
+    sales = from_row(lists["ST"]) if lists["ST"] else from_titles(
+        await live_raw(settings.FBR_PROTOCOL_SALES_TAX), settings.FBR_PROTOCOL_SALES_TAX)
     # Taxpayer profile
     profile = None
     titles = await live_raw("1003", output_type="4") or await live_raw("1003", output_type="5")
@@ -647,8 +672,10 @@ def _query_fbr_api_sync(
                 # plain text that only looks like JSON — resp.json() fails on
                 # it, which left the profile empty (2026-11-24). Fall back to
                 # reading the text's Title/Value pairs.
+                # {} = FBR says "no record"; None = no usable answer.
                 try:
-                    return _fbr_titles(resp.json())
+                    data = resp.json()
+                    return {} if _fbr_no_record(data) else _fbr_titles(data)
                 except ValueError:
                     titles = _fbr_titles(resp.text)
                     if titles is None:
