@@ -59,7 +59,7 @@ def _sap_date(iso_date: str | None, default: str | None = None) -> str:
 # in BAPI_INCINV_CHNG_HEADER / ..._HEADERX on AUP (SE11, 2026-11-20). Document
 # type, company code and currency are never changed on a parked invoice.
 _CHANGE_HEADER_FIELDS = ("DOC_DATE", "PSTNG_DATE", "BLINE_DATE", "REF_DOC_NO", "GROSS_AMOUNT",
-                         "CALC_TAX_IND", "HEADER_TXT", "ITEM_TEXT", "EXCH_RATE", "EXCH_RATE_V")
+                         "CALC_TAX_IND", "HEADER_TXT", "ITEM_TEXT", "EXCH_RATE", "EXCH_RATE_V", "DIFF_INV")
 
 
 def _change_parked(sap, doc_number: str, fiscal_year: str, header_data: dict,
@@ -165,6 +165,7 @@ def post_invoice_to_sap(
     change_fiscal_year: str = "",
     withtax_rows: list | None = None,
     tax_rows: list | None = None,
+    diff_inv: str = "",
 ) -> dict:
     """
     Post a vendor invoice to SAP via BAPI_INCOMINGINVOICE_CREATE1.
@@ -238,6 +239,10 @@ def post_invoice_to_sap(
             "HEADER_TXT": ((settings.SAP_DRY_RUN_HEADER_TEXT or "VALIDATE")[:25] if mode == "validate"
                            else build_header_text(header_text or f"einv-{invoice_number}", initiator_sap_user)),
         }
+        # Invoicing party, only when it is not the PO's vendor (a transporter's own
+        # freight invoice). Without it SAP takes the vendor from the PO.
+        if diff_inv:
+            header_data["DIFF_INV"] = diff_inv.strip().zfill(10)
         if item_text:
             header_data["ITEM_TEXT"] = item_text[:50]  # Details "Text" (SGTXT)
 

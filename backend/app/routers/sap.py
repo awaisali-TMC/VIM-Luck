@@ -31,7 +31,7 @@ from app.security import get_current_internal_user, require_admin
 from app.routers.role_permissions import role_labels, humanize_role
 from app.services.duplicate_detection import duplicate_block_message, find_key_duplicates
 from app.services.gr_suggest import (
-    choose_grs, freight_on_other_invoices, sibling_choices, suggest_freight, suggest_grs,
+    choose_grs, freight_on_other_invoices, sibling_choices, suggest_freight, suggest_grs, why_not_suggested,
 )
 from app.services.sap_credentials import decrypt_sap_password
 from app.services.srn_list import check_receipts, listed_numbers
@@ -731,7 +731,8 @@ async def get_invoice_open_grs(invoice_id: int, db: AsyncSession = Depends(get_d
             "ekbe_rows": ov["rows"], "unused": ov["unused"], "selected": selected,
             # chosen: a selection was saved, even an empty one (the user unticked all).
             "chosen": inv.parking_gr_refs is not None,
-            "suggested": await suggest_grs(db, inv, po, ov["open"]),
+            "suggested": (suggested := await suggest_grs(db, inv, po, ov["open"])),
+            "why_not": None if suggested else await why_not_suggested(db, inv, po, ov["open"]),
             # The attached GRN summary: how many SRNs it lists, and what SAP disagrees with.
             "srn_count": len(receipts), "srn_problems": check_receipts(receipts, ov["open"], ov["closed"])}
 
@@ -740,6 +741,19 @@ def _other_vendor(cost_vendor: str, vendor_number: str | None) -> bool:
     """A delivery cost SAP assigned to another (freight) vendor than the invoice's."""
     a, b = (cost_vendor or "").strip().lstrip("0"), (vendor_number or "").strip().lstrip("0")
     return bool(a and b and a != b)
+
+
+def _foreign_freight(cost_vendor: str, po_vendor: str | None, party: str | None) -> bool:
+    """May this party not bill this delivery cost? SAP defaults the freight vendor to
+    the PO's vendor, so only a specific other freight vendor excludes a party."""
+    return _other_vendor(cost_vendor, po_vendor) and _other_vendor(cost_vendor, party)
+
+
+async def _invoice_party(inv: Invoice, company_code: str | None, po_vendor: str | None,
+                         cost_vendors: list[str]) -> dict:
+    from app.services.sap_po_service import freight_party
+    return await asyncio.to_thread(freight_party, inv.supplier_ntn or "", inv.supplier_name or "",
+                                   company_code or "", po_vendor or "", cost_vendors)
 
 
 @router.get("/invoices/{invoice_id}/delivery-costs")
@@ -776,11 +790,23 @@ async def get_invoice_delivery_costs(invoice_id: int, db: AsyncSession = Depends
     receipts = json.loads(inv.srn_list) if inv.srn_list else []
     siblings = await sibling_choices(db, inv) if alone else []
     lines = {li.item_number: li for li in po.line_items}
-    vendor = inv.sap_vendor_number or po.sap_vendor_number
+    po_vendor = po.sap_vendor_number
+    vendor, party, party_problem = po_vendor, None, None
+    if alone and costs:
+        try:
+            found = await _invoice_party(inv, po.company_code, po_vendor, [c["vendor"] for c in costs])
+            vendor = found["vendor_number"]
+            party = {**found, "different": _other_vendor(vendor, po_vendor)}
+        except ValueError as exc:
+            party_problem = str(exc)
+        except Exception as exc:
+            logger.exception("Vendor of freight invoice %s not read", inv.id)
+            party_problem = ("Could not read the vendor from SAP — "
+                             + " ".join(f"{type(exc).__name__}: {exc}".split())[:200])
     for c in costs:
         c["description"] = lines[c["po_item"]].description if c["po_item"] in lines else ""
         c["unit"] = (lines[c["po_item"]].unit if c["po_item"] in lines else "") or ""
-        c["other_vendor"] = _other_vendor(c["vendor"], vendor)
+        c["other_vendor"] = _foreign_freight(c["vendor"], po_vendor, vendor)
         c["grs"] = [] if abs(c["unassigned"]) > 0.01 else sorted(
             ({"gr_key": k, "srn": grs[k]["srn"], "posting_date": grs[k]["posting_date"], **v,
               "listed": bool(listed_numbers(receipts, grs[k])),
@@ -795,7 +821,8 @@ async def get_invoice_delivery_costs(invoice_id: int, db: AsyncSession = Depends
             c["problem"] = None
         except ValueError as exc:
             c["park_amount"], c["park_quantity"], c["problem"] = None, None, str(exc)
-    return {"costs": costs, "chosen": chosen, "grs_ticked": len(gr_keys), "message": None}
+    return {"costs": costs, "chosen": chosen, "grs_ticked": len(gr_keys), "message": None,
+            "party": party, "party_problem": party_problem}
 
 
 @router.get("/invoices/{invoice_id}/wht")
@@ -827,6 +854,17 @@ async def get_invoice_wht(invoice_id: int, db: AsyncSession = Depends(get_db)):
         resp["message"] = "SAP is not enabled."
         return resp
     _ensure_dll()
+    if inv.sap_layout == "delivery":      # a freight invoice is parked for its own vendor
+        try:
+            vendor = (await _invoice_party(inv, company, vendor, []))["vendor_number"]
+        except ValueError as exc:
+            resp["message"] = str(exc)
+            return resp
+        except Exception as exc:
+            logger.exception("Vendor of freight invoice %s not read", inv.id)
+            raise HTTPException(status_code=502, detail="Could not read the vendor from SAP — "
+                                + " ".join(f"{type(exc).__name__}: {exc}".split())[:300])
+        resp["vendor_number"] = vendor
     from app.services.sap_po_service import fetch_vendor_wht
     try:
         rows = await asyncio.to_thread(fetch_vendor_wht, vendor, company)
@@ -1554,27 +1592,11 @@ async def post_invoice_to_sap_endpoint(
             raise HTTPException(status_code=422, detail=str(exc))
         goods_items = split_items
 
-    # ── Observation G: an invoice may only carry WHT types its vendor has in
-    # its BP and is subject to (LFBW-WT_SUBJCT). Re-checked here because the BP
-    # may have changed since the choice was saved.
-    chosen_wht = json.loads(invoice.sap_wht) if invoice.sap_wht else []
-    if chosen_wht:
-        from app.services.sap_po_service import fetch_vendor_wht
-        try:
-            bp_types = {w["wht_type"] for w in fetch_vendor_wht(vendor_number, company_code) if w["subject"]}
-        except Exception:
-            logger.exception("Vendor WHT read failed for %s/%s", vendor_number, company_code)
-            raise HTTPException(status_code=502, detail="Could not read the vendor's withholding tax from SAP.")
-        foreign = sorted({w["wht_type"] for w in chosen_wht} - bp_types)
-        if foreign:
-            raise HTTPException(status_code=422, detail=(
-                f"Withholding tax type(s) {', '.join(foreign)} are not maintained as subject in vendor {vendor_number}'s BP "
-                f"for company code {company_code}. Choose from the vendor's own types in the Withholding Tax card."))
-
     # Planned delivery costs (freight conditions, e.g. FRC1) read live from SAP
     # (EKBZ): only those ticked on the invoice (sap_delivery), each with its own
     # tax code, for the ticked GRs (or everything still open when none is ticked).
     delivery_items = []
+    po_vendor_number, diff_inv = vendor_number, ""
     if eff_layout in ("delivery", "both"):
         from app.services.sap_po_service import delivery_for_grs, fetch_delivery_costs, fetch_gr_overview
         chosen_dc = json.loads(invoice.sap_delivery) if invoice.sap_delivery else []
@@ -1590,6 +1612,17 @@ async def post_invoice_to_sap_endpoint(
         except Exception:
             logger.exception("Failed to read delivery costs for PO %s", po.po_number)
             raise HTTPException(status_code=502, detail="Could not read planned delivery costs from SAP.")
+        if eff_layout == "delivery":      # a freight invoice is parked for its own vendor
+            picked = [dcs[k]["vendor"] for c in chosen_dc if (k := (c["po_item"], c["cond_type"])) in dcs]
+            try:
+                vendor_number = (await _invoice_party(invoice, company_code, po_vendor_number, picked))["vendor_number"]
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc))
+            except Exception:
+                logger.exception("Vendor of freight invoice %s not read", invoice.id)
+                raise HTTPException(status_code=502, detail="Could not read the freight invoice's vendor from SAP.")
+            if _other_vendor(vendor_number, po_vendor_number):
+                diff_inv = vendor_number
         for c in chosen_dc:
             cost = dcs.get((c["po_item"], c["cond_type"]))
             name = f"{c['cond_type']} (PO item {c['po_item']})"
@@ -1597,7 +1630,7 @@ async def post_invoice_to_sap_endpoint(
                 raise HTTPException(status_code=422, detail=(
                     f"Delivery cost {name} has nothing left to invoice in SAP: no goods receipt was posted "
                     "for it, or it is already invoiced."))
-            if _other_vendor(cost["vendor"], vendor_number):
+            if _foreign_freight(cost["vendor"], po_vendor_number, vendor_number):
                 raise HTTPException(status_code=422, detail=(
                     f"Delivery cost {name} belongs to vendor {cost['vendor'].lstrip('0')}, but this invoice is "
                     f"parked for vendor {vendor_number.lstrip('0')}. Untick it."))
@@ -1627,6 +1660,23 @@ async def post_invoice_to_sap_endpoint(
                 "tax_code": c["tax_code"],
                 "cond_type": cost["cond_type"],   # marks this as a delivery cost
             })
+
+    # ── Observation G: an invoice may only carry WHT types its vendor has in
+    # its BP and is subject to (LFBW-WT_SUBJCT). Re-checked here because the BP
+    # may have changed since the choice was saved.
+    chosen_wht = json.loads(invoice.sap_wht) if invoice.sap_wht else []
+    if chosen_wht:
+        from app.services.sap_po_service import fetch_vendor_wht
+        try:
+            bp_types = {w["wht_type"] for w in fetch_vendor_wht(vendor_number, company_code) if w["subject"]}
+        except Exception:
+            logger.exception("Vendor WHT read failed for %s/%s", vendor_number, company_code)
+            raise HTTPException(status_code=502, detail="Could not read the vendor's withholding tax from SAP.")
+        foreign = sorted({w["wht_type"] for w in chosen_wht} - bp_types)
+        if foreign:
+            raise HTTPException(status_code=422, detail=(
+                f"Withholding tax type(s) {', '.join(foreign)} are not maintained as subject in vendor {vendor_number}'s BP "
+                f"for company code {company_code}. Choose from the vendor's own types in the Withholding Tax card."))
 
     if eff_layout == "goods":
         sap_line_items = goods_items
@@ -1769,6 +1819,7 @@ async def post_invoice_to_sap_endpoint(
             withtax_rows=[{"WI_TAX_TYPE": w["wht_type"], "WI_TAX_CODE": w["wht_code"]}
                           for w in (json.loads(invoice.sap_wht) if invoice.sap_wht else [])],
             tax_rows=sorted(tax_by_code.items()) if delivery_items else None,
+            diff_inv=diff_inv,
             change_doc_number=(invoice.sap_document_number or "") if req.mode == "change" else "",
             change_fiscal_year=(invoice.sap_fiscal_year or "") if req.mode == "change" else "",
         )
@@ -1812,7 +1863,7 @@ async def post_invoice_to_sap_endpoint(
     invoice.sap_company_code = company_code
     if gr_auto:
         invoice.parking_gr_refs = json.dumps(gr_selection)   # what was really parked
-    invoice.sap_vendor_number = invoice.sap_vendor_number or vendor_number
+    invoice.sap_vendor_number = vendor_number if diff_inv else (invoice.sap_vendor_number or vendor_number)
     po.company_code = po.company_code or company_code  # backfill POs synced before the column
     invoice.sap_posted_at = datetime.now(timezone.utc)
     invoice.sap_doc_status = doc_status

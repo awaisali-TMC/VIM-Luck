@@ -995,6 +995,76 @@ def lookup_vendor(ntn: str = "", name: str = "") -> dict:
         sap.disconnect()
 
 
+def vendors_by_ntn(ntn: str, company_code: str = "") -> list[dict]:
+    """Every SAP vendor (LFA1, not deleted) with this tax number, maintained in the
+    company code (LFB1; not checked when LFB1 can't be read). [{vendor_number, name}]
+
+    NTNs are stored with and without the check digit ("1328862-8" / "1328862"), so
+    the 7-digit base and what follows it are tried as well."""
+    digits = "".join(ch for ch in (ntn or "") if ch.isdigit())
+    if len(digits) < 7:
+        return []
+    variants = [(ntn or "").strip(), digits]
+    if len(digits) == 8:
+        variants += [digits[:7], f"{digits[:7]}-{digits[7]}"]
+    variants = [v.replace("'", "") for v in dict.fromkeys(variants)]
+    sap = _get_connector()
+    sap.connect()
+    try:
+        def read(table, where_rows, fields):
+            r = sap.call(
+                "RFC_READ_TABLE", QUERY_TABLE=table, DELIMITER="|", ROWCOUNT="50",
+                input_tables={"OPTIONS": [{"TEXT": w} for w in where_rows],
+                              "FIELDS": [{"FIELDNAME": f} for f in fields]},
+                tables=["DATA", "FIELDS"],
+                table_fields={"DATA": ["WA"], "FIELDS": ["FIELDNAME", "OFFSET", "LENGTH"]},
+            )
+            return _parse_delimited_rows(r.get("DATA", []), r.get("FIELDS", []))
+
+        conds = [f"{f} = '{v}'" for v in variants for f in ("STCD1", "STCD2", "STCD3")]
+        if len(digits) == 7:            # printed without the check digit, stored with it
+            conds += [f"STCD1 LIKE '{digits}-_'", f"STCD1 LIKE '{digits}_'"]
+        rows = read("LFA1", [("" if i == 0 else "OR ") + c + " " for i, c in enumerate(conds)],
+                    ["LIFNR", "NAME1", "LOEVM"])
+        out = [{"vendor_number": r["LIFNR"].strip(), "name": r.get("NAME1", "").strip()}
+               for r in rows if r.get("LIFNR", "").strip() and r.get("LOEVM", "").strip() != "X"]
+        if company_code and out:
+            try:
+                kept = []
+                for v in out:
+                    if read("LFB1", [f"LIFNR = '{v['vendor_number']}' ", f"AND BUKRS = '{company_code}' "], ["LIFNR"]):
+                        kept.append(v)
+                out = kept
+            except Exception:
+                logger.warning("LFB1 is not readable; vendors of NTN %s not checked for company %s", ntn, company_code)
+        return out
+    finally:
+        sap.disconnect()
+
+
+def freight_party(ntn: str, supplier: str, company_code: str, po_vendor: str, cost_vendors: list[str]) -> dict:
+    """The vendor a freight-only invoice is parked for: the one that issued it, found
+    by its NTN. Raises ValueError when that is not exactly one SAP vendor."""
+    def same(a, b):
+        return (a or "").strip().lstrip("0") == (b or "").strip().lstrip("0")
+
+    if not "".join(ch for ch in (ntn or "") if ch.isdigit()):
+        raise ValueError("The freight invoice has no vendor NTN, so its SAP vendor is unknown. Enter the vendor's NTN.")
+    who = f"{supplier or 'the vendor'} (NTN {ntn})"
+    found = vendors_by_ntn(ntn, company_code)
+    if not found:
+        raise ValueError(f"No SAP vendor of company code {company_code} has the tax number of {who}. "
+                         "Maintain the vendor in SAP, or correct the NTN.")
+    for wanted in [po_vendor, *cost_vendors]:
+        hit = next((v for v in found if wanted and same(v["vendor_number"], wanted)), None)
+        if hit:
+            return hit
+    if len(found) > 1:
+        raise ValueError(f"Several SAP vendors have the tax number of {who}: "
+                         f"{', '.join(v['vendor_number'].lstrip('0') for v in found)}.")
+    return found[0]
+
+
 def search_vendors(query: str, max_rows: int = 20) -> list[dict]:
     """Search the SAP vendor master (LFA1) for the admin onboarding picker.
 

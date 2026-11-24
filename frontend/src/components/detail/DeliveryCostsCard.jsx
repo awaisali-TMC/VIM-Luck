@@ -24,7 +24,7 @@ export default function DeliveryCostsCard({ invoice, layout, taxCodes = [], edit
   const [error, setError] = useState(null);
 
   const alone = layout === "delivery";
-  const grKey = `${(invoice?.parking_gr_refs || []).join(",")}|${invoice?.sap_layout}|${(invoice?.srn_list || []).length}`;
+  const grKey = `${(invoice?.parking_gr_refs || []).join(",")}|${invoice?.sap_layout}|${(invoice?.srn_list || []).length}|${invoice?.supplier_ntn || ""}`;
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -97,6 +97,15 @@ export default function DeliveryCostsCard({ invoice, layout, taxCodes = [], edit
       action={<Button variant="ghost" size="xs" onClick={load} disabled={loading}>{loading ? "Loading…" : "Refresh"}</Button>}
     >
       {error && <div className="mb-3 bg-danger-bg border border-danger-base rounded-md px-3 py-2 text-2xs text-danger-dark">{error}</div>}
+      {alone && data?.party && (
+        <div className={`mb-2 text-2xs ${data.party.different ? "text-warning-dark" : "text-neutral-500"}`}>
+          Parked for vendor <strong>{data.party.vendor_number.replace(/^0+/, "")} {data.party.name}</strong>
+          {data.party.different ? " (by the invoice's NTN; not the PO's vendor, sent to SAP as the invoicing party)." : ", the PO's vendor."}
+        </div>
+      )}
+      {alone && data?.party_problem && (
+        <div className="mb-2 bg-danger-bg border border-danger-base rounded-md px-3 py-2 text-2xs text-danger-dark">{data.party_problem}</div>
+      )}
       {data?.message && <div className="text-2xs text-neutral-500">{data.message}</div>}
       {!loading && data && !data.message && costs.length === 0 && (
         <div className="text-2xs text-neutral-500">SAP has no open planned delivery cost for this PO.</div>

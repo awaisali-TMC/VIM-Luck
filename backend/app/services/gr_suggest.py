@@ -16,7 +16,6 @@ from app.models.invoice import Invoice
 from app.models.purchase_order import POMatchResult, PurchaseOrder
 from app.services.invoice_line_rules import route_invoice_lines
 from app.services.srn_list import listed_numbers
-from app.services.srn_list import listed_numbers
 
 
 async def billed_by_po_item(db: AsyncSession, invoice: Invoice, po: PurchaseOrder) -> dict[int, float]:
@@ -30,7 +29,10 @@ async def billed_by_po_item(db: AsyncSession, invoice: Invoice, po: PurchaseOrde
     pairs = {m.invoice_line_item_id: item_no[m.po_line_item_id]
              for m in (mr.line_matches if mr else [])
              if m.invoice_line_item_id and item_no.get(m.po_line_item_id) is not None}
-    selected = set(json.loads(invoice.parking_line_item_ids)) if invoice.parking_line_item_ids else None
+    # Like the invoice page, ignore saved line ids that no longer exist (lines are
+    # recreated by a full edit); none left = every line.
+    selected = set(json.loads(invoice.parking_line_item_ids)) if invoice.parking_line_item_ids else set()
+    selected &= {li.id for li in invoice.line_items}
     single = po.line_items[0].item_number if len(po.line_items) == 1 else None
     routed, _ = route_invoice_lines(invoice.line_items, selected or None, pairs, single)
     billed: dict[int, float] = {}
@@ -40,18 +42,18 @@ async def billed_by_po_item(db: AsyncSession, invoice: Invoice, po: PurchaseOrde
     return billed
 
 
-async def grs_on_other_invoices(db: AsyncSession, invoice: Invoice) -> set[str]:
-    """GRs ticked on another live GOODS invoice of the same PO that is not posted yet
+async def grs_on_other_invoices(db: AsyncSession, invoice: Invoice) -> dict[str, str]:
+    """{gr_key: "151 (#57)"}: GRs ticked on another live GOODS invoice of the same PO that is not posted yet
     (a posted one already reduces the GR's open quantity in SAP). A freight-only
     invoice (layout "delivery") bills no goods."""
     rows = (await db.execute(
-        select(Invoice.parking_gr_refs).where(
+        select(Invoice.id, Invoice.invoice_number, Invoice.parking_gr_refs).where(
             Invoice.matched_po_id == invoice.matched_po_id, Invoice.id != invoice.id,
             Invoice.is_deleted == 0, Invoice.parking_gr_refs.is_not(None),
             Invoice.status.notin_(("posted", "exception")),
             Invoice.sap_layout.is_distinct_from("delivery"))
-    )).scalars().all()
-    return {k for r in rows for k in json.loads(r)}
+    )).all()
+    return {k: f"{number or ''} (#{i})".strip() for i, number, refs in rows for k in json.loads(refs)}
 
 
 async def freight_on_other_invoices(db: AsyncSession, invoice: Invoice) -> dict[tuple, dict]:
@@ -78,7 +80,7 @@ def _doc(number) -> str:
     return str(number or "").strip().lstrip("0")
 
 
-def matching_grs(billed: dict[int, float], open_grs: list[dict], taken: set[str], own_doc: str | None,
+def matching_grs(billed: dict[int, float], open_grs: list[dict], taken: dict[str, str], own_doc: str | None,
                  receipts: list[dict] | None = None) -> list[str]:
     """gr_keys of every open GR of each billed PO item whose open quantities add up
     to the billed quantity, unless one of them is already used by another invoice
@@ -149,6 +151,36 @@ async def choose_grs(db: AsyncSession, invoice: Invoice, billed: dict[int, float
             if subset and (keys := matching_grs(billed, subset, taken, invoice.sap_document_number)):
                 return keys
     return []
+
+
+async def why_not_suggested(db: AsyncSession, invoice: Invoice, po: PurchaseOrder, open_grs: list[dict]) -> str | None:
+    """In words, why the card ticks nothing for an invoice it could still change."""
+    if not open_grs:
+        return None
+    billed = await billed_by_po_item(db, invoice, po)
+    if not billed:
+        return "no invoice line selected for parking is matched to a PO item."
+    taken = await grs_on_other_invoices(db, invoice)
+    own = json.loads(invoice.srn_list) if invoice.srn_list else []
+    listed = [g for g in open_grs if listed_numbers(own, g)]
+    why = []
+    for item, qty in billed.items():
+        grs = [g for g in (listed or open_grs) if g["po_item"] == item]
+        what = "the SRNs of the GRN summary" if listed else "the open receipts"
+        if not grs:
+            why.append(f"PO item {item} has no open receipt{' on the GRN summary' if listed else ''}.")
+            continue
+        others = sorted({taken[g["gr_key"]] for g in grs if g["gr_key"] in taken})
+        docs = sorted({d for g in grs if g["parked"] > 0 for d in g["parked_docs"]
+                       if _doc(d) != _doc(invoice.sap_document_number)})
+        total = round(sum(g["open_qty"] for g in grs), 3)
+        if others:
+            why.append(f"PO item {item}: receipts are ticked on invoice {', '.join(others)}.")
+        elif docs:
+            why.append(f"PO item {item}: receipts are on parked SAP document {', '.join(docs)}.")
+        elif abs(total - round(qty, 3)) > 0.001:
+            why.append(f"PO item {item}: {what} add up to {total:g}, the invoice bills {qty:g}.")
+    return " ".join(why) or None
 
 
 async def suggest_grs(db: AsyncSession, invoice: Invoice, po: PurchaseOrder, open_grs: list[dict]) -> list[str]:

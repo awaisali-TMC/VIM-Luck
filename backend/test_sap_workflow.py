@@ -511,22 +511,31 @@ def test_gr_selection(client):
     expect("12 + 8 = the 20 billed, nothing chosen yet -> both suggested, the other PO item not",
            body["chosen"] is False and sorted(body["suggested"]) == both, (body["chosen"], body["suggested"]))
     sql("UPDATE invoice_line_items SET quantity = 15 WHERE invoice_id = ?", inv)
-    expect("15 billed against 20 open -> nothing suggested", og(inv)["suggested"] == [], og(inv)["suggested"])
+    b = og(inv)
+    expect("15 billed against 20 open -> nothing suggested, and why",
+           b["suggested"] == [] and "add up to 20" in (b["why_not"] or "") and "bills 15" in b["why_not"], (b["suggested"], b["why_not"]))
     sql("UPDATE invoice_line_items SET quantity = 20 WHERE invoice_id = ?", inv)
+    sql("UPDATE invoices SET parking_line_item_ids = '[999999]' WHERE id = ?", inv)
+    expect("saved line ids that no longer exist are ignored", sorted(og(inv)["suggested"]) == both, og(inv))
+    sql("UPDATE invoices SET parking_line_item_ids = NULL WHERE id = ?", inv)
     client.put(f"/api/invoices/{inv}/parking-grs", json={"gr_keys": []})
     expect("all unticked by the user -> remembered, not ticked again",
            og(inv)["chosen"] is True and og(inv)["selected"] == [], og(inv))
     expect("...stored as an empty selection", _detail(client, inv).get("parking_gr_refs") == [])
     inv2 = _new_invoice(client, tick_grs=False)
     client.put(f"/api/invoices/{inv2}/parking-grs", json={"gr_keys": both[:1]})
-    expect("a GR ticked on another open invoice -> not suggested", og(inv)["suggested"] == [], og(inv)["suggested"])
+    b = og(inv)
+    expect("a GR ticked on another open invoice -> not suggested, the invoice is named",
+           b["suggested"] == [] and f"(#{inv2})" in (b["why_not"] or ""), (b["suggested"], b["why_not"]))
     client.delete(f"/api/invoices/{inv2}")
     expect("...and suggested again once that invoice is deleted", sorted(og(inv)["suggested"]) == both, og(inv)["suggested"])
     conn = fake._store()
     conn.execute("INSERT INTO EKBE (EBELN, EBELP, GJAHR, BELNR, BUZEI, VGABE, BWART, BUDAT, MENGE, DMBTR, SHKZG, LFGJA, LFBNR, LFPOS) "
                  "VALUES (?,'00010','2026','5100099999','0001','P','','20260301','8','1','S','2026','5000009006','0001')", (PO,))
     conn.commit()
-    expect("a GR with a parked SAP invoice -> not suggested", og(inv)["suggested"] == [], og(inv)["suggested"])
+    b = og(inv)
+    expect("a GR with a parked SAP invoice -> not suggested, the document is named",
+           b["suggested"] == [] and "5100099999" in (b["why_not"] or ""), (b["suggested"], b["why_not"]))
     conn.execute("DELETE FROM EKBE WHERE BELNR = '5100099999'")
     conn.commit()
 
@@ -782,6 +791,68 @@ def test_delivery_costs(client):
     expect(f"the other SRN's freight at 17% (got {p.status_code})",
            p.status_code == 200 and tax == [{"TAX_CODE": "I2", "TAX_AMOUNT": "1700.0"}] and float(gross) == 11700,
            (p.text[:200], tax, gross))
+    # Freight billed by a transporter (another SAP vendor), or by the PO's vendor.
+    def header():
+        return next(k for n, k in _calls if n == "BAPI_INCOMINGINVOICE_PARK")["input_structures"]["HEADERDATA"]
+
+    forget()
+    f4 = freight(15000)
+    pick(f4, [A])
+    p = parkd(f4)
+    expect(f"the PO's own vendor: no invoicing party sent (got {p.status_code})",
+           p.status_code == 200 and "DIFF_INV" not in header(), p.text[:200])
+    forget()
+    f5 = freight(15000)
+    client.put(f"/api/invoices/{f5}", json={"supplier_ntn": "0456789", "supplier_name": "Bestway Cement Ltd"})
+    pick(f5, [A])
+    b = client.get(f"/api/sap/invoices/{f5}/delivery-costs").json()
+    expect("the transporter is found by NTN (stored with a check digit) and shown as different",
+           (b["party"] or {}).get("vendor_number") == "0002000102" and b["party"]["different"] is True
+           and b["costs"][0]["other_vendor"] is False, (b["party"], b["party_problem"]))
+    w = client.get(f"/api/sap/invoices/{f5}/wht").json()
+    expect("its WHT card reads the transporter's BP", w["vendor_number"] == "0002000102", w)
+    p = parkd(f5)
+    expect(f"parked with the transporter as invoicing party (got {p.status_code})",
+           p.status_code == 200 and header().get("DIFF_INV") == "0002000102", p.text[:200])
+    expect("...and remembered as the invoice's vendor", _detail(client, f5)["sap_vendor_number"] == "0002000102")
+    forget()
+    conn.execute("UPDATE EKBZ SET LIFNR = '0002000103' WHERE EBELN = ?", (PO,))
+    conn.commit()
+    f6 = freight(15000)
+    client.put(f"/api/invoices/{f6}", json={"supplier_ntn": "0456789-1"})
+    pick(f6, [A])
+    p = parkd(f6)
+    expect(f"SAP names another freight vendor -> refused (got {p.status_code})", p.status_code == 422 and "2000103" in p.text, p.text[:200])
+    client.put(f"/api/invoices/{f6}", json={"supplier_ntn": "1234567-8"})
+    p = parkd(f6)
+    expect(f"the freight vendor SAP names -> parked for it (got {p.status_code})",
+           p.status_code == 200 and header().get("DIFF_INV") == "0002000103", p.text[:200])
+    conn.execute("UPDATE EKBZ SET LIFNR = '0002000101' WHERE EBELN = ?", (PO,))
+    conn.commit()
+    forget()
+    f7 = freight(15000)
+    pick(f7, [A])
+    for ntn, why in (("9999999-9", "No SAP vendor"), ("", "no vendor NTN")):
+        client.put(f"/api/invoices/{f7}", json={"supplier_ntn": ntn})
+        p = parkd(f7)
+        expect(f"NTN {ntn!r} -> refused, never paid to the PO's vendor (got {p.status_code})",
+               p.status_code == 422 and why in p.text, p.text[:200])
+    conn.execute("INSERT INTO LFA1 (LIFNR, NAME1, MCOD1, ORT01, STCD1, STCD2, STCD3, LOEVM, SPERR) VALUES "
+                 "('0002000199','Bestway Branch','BESTWAY BRANCH','Karachi','0456789-1','','','','')")
+    conn.execute("INSERT INTO LFB1 (LIFNR, BUKRS, AKONT, ZTERM, LOEVM, SPERR) VALUES ('0002000199','1100','','','','')")
+    conn.commit()
+    client.put(f"/api/invoices/{f7}", json={"supplier_ntn": "0456789-1"})
+    p = parkd(f7)
+    expect(f"two vendors with that NTN -> refused, both named (got {p.status_code})",
+           p.status_code == 422 and "2000102" in p.text and "2000199" in p.text, p.text[:200])
+    conn.execute("DELETE FROM LFB1 WHERE LIFNR = '0002000199'")
+    conn.commit()
+    p = parkd(f7)
+    expect(f"only one of them is in the company code -> that one (got {p.status_code})",
+           p.status_code == 200 and header().get("DIFF_INV") == "0002000102", p.text[:200])
+    conn.execute("DELETE FROM LFA1 WHERE LIFNR = '0002000199'")
+    conn.commit()
+    forget()
     f3 = freight(5000)
     client.put(f"/api/invoices/{f3}/parking-grs", json={"gr_keys": [A, B]})
     client.delete(f"/api/invoices/{goods}")

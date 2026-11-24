@@ -35,7 +35,7 @@ export default function WithholdingTaxCard({ invoice, editable = false, onChange
     }
   }, [invoice?.id]);
 
-  useEffect(() => { if (invoice?.id) load(); }, [load, invoice?.id, invoice?.matched_po_id]);
+  useEffect(() => { if (invoice?.id) load(); }, [load, invoice?.id, invoice?.matched_po_id, invoice?.sap_layout, invoice?.supplier_ntn]);
 
   const bpRows = data?.vendor_wht || [];        // only these may be chosen
   const fmt = (n) => (n == null ? "—" : Number(n).toLocaleString(undefined, { maximumFractionDigits: 2 }));

@@ -5,6 +5,23 @@ Handover from Claude Code sessions on this machine (`D:\VIM\VIM-Luck`). Read
 what is still open. (`HANDOFF.md` is the separate product feature-status doc.)
 Newest session first; §1–§5 below are from session 1 and are still accurate.
 
+## 2026-11-24 (LAN test 6): invoice 58, GRs still not ticked
+
+Second screenshot after the pull: SRN numbers show, WHT right, unit MT, but none of the six GRs is ticked.
+**Cause not known** (not readable from the screenshot): an empty choice saved earlier (`[]`), GRs ticked on
+another live invoice of PO 1010027885, or saved line ids that no longer exist. Fixed the last one
+(`billed_by_po_item`), and the card now says why nothing is ticked (`why_not`) and offers "Tick them" when
+the receipts add up but something else was saved. Next: read that line on LAN, or tick by hand and Resubmit.
+
+## 2026-11-24 (after `debb352`): the freight vendor may differ from the PO's vendor
+
+Client's answer: "dosra hoskta hay kbi same hota hay". A freight-only invoice is now parked for the vendor
+that issued it (by NTN), sent as `HEADERDATA-DIFF_INV` when it is not the PO's vendor; details in CLAUDE.md.
+Offline tests and build pass, not run on AUP. **Before the first transporter park, confirm on AUP:**
+`DIFF_INV` in `BAPI_INCINV_CREATE_HEADER` / `BAPI_INCINV_CHNG_HEADER` (`sap_dd03l.py <structure>`; PyRFC raises on
+an unknown field), and that `TMC_VIM` may read LFB1 (skipped with a log line if not). A freight and a goods
+invoice with the **same** number, vendor and PO are still a duplicate. Still open: freight tax code.
+
 ## 2026-11-24 (after `4fc4b84`): the papers need not arrive together; the summary is optional
 
 User: "zarori nahe ek wqt may saari invoice ho" and "mil jaye to theek, nahe millay to asis chlay".

@@ -163,9 +163,6 @@ export default function GoodsReceiptsCard({ invoice, editable = false, onChanged
             <button type="button" className="ml-2 underline bg-transparent border-none cursor-pointer" onClick={forgetSrns}>Remove the SRNs</button>
           )}
           {(data.srn_problems || []).map((p) => <div key={p}>{p}</div>)}
-          {editable && data.suggested?.length > 0 && !isSuggested && (
-            <button type="button" className="underline bg-transparent border-none cursor-pointer" disabled={saving} onClick={useSuggested}>Tick the SRNs of the summary</button>
-          )}
         </div>
       )}
       {grs.length > 0 && (
@@ -216,6 +213,15 @@ export default function GoodsReceiptsCard({ invoice, editable = false, onChanged
               ))}
             </tbody>
           </table>
+          {editable && data.suggested?.length > 0 && !isSuggested && (
+            <div className="mt-2 text-2xs text-warning-dark">
+              {data.suggested.length} receipt(s) {data.srn_count > 0 ? "of the GRN summary " : ""}add up to the billed quantity.
+              <button type="button" className="ml-1 underline bg-transparent border-none cursor-pointer" disabled={saving} onClick={useSuggested}>Tick them</button>
+            </div>
+          )}
+          {editable && data.why_not && selected.size === 0 && (
+            <div className="mt-2 text-2xs text-warning-dark">Not ticked automatically: {data.why_not}</div>
+          )}
           <div className="mt-2 text-2xs text-neutral-500">
             {selected.size === 0
               ? "No GR ticked — parking uses the latest goods receipt for each PO item, and is refused if the invoice bills more than that receipt."
