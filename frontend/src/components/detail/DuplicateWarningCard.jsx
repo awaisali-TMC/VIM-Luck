@@ -87,7 +87,7 @@ export default function DuplicateWarningCard({ invoiceId, refreshKey }) {
               <tr className="border-b border-opacity-20">
                 <th className="text-left py-1 font-semibold">Invoice #</th>
                 <th className="text-left py-1 font-semibold">Supplier</th>
-                <th className="text-right py-1 font-semibold">Amount</th>
+                <th className="text-right py-1 pr-6 font-semibold">Amount</th>
                 <th className="text-left py-1 font-semibold">Date</th>
                 <th className="text-left py-1 font-semibold">Status</th>
                 <th className="text-left py-1 font-semibold">Match</th>
@@ -98,9 +98,10 @@ export default function DuplicateWarningCard({ invoiceId, refreshKey }) {
                 <tr key={`${m.match_type}-${m.id}`} className="border-b border-opacity-10">
                   <td className="py-1 font-medium">
                     <Link to={`/invoices/${m.id}`} className="underline">{m.invoice_number || `#${m.id}`}</Link>
+                    {m.invoice_number && <span className="ml-1 opacity-60">#{m.id}</span>}
                   </td>
                   <td className="py-1">{m.supplier_name || "—"}</td>
-                  <td className="py-1 text-right">{m.currency} {Number(m.total_amount || 0).toLocaleString()}</td>
+                  <td className="py-1 pr-6 text-right">{m.currency} {Number(m.total_amount || 0).toLocaleString()}</td>
                   <td className="py-1">{m.invoice_date || "—"}</td>
                   <td className="py-1"><Badge status={m.status} size="xs" /></td>
                   <td className="py-1" title={m.matched_on ? `Matched on ${m.matched_on.join(", ")}` : undefined}>

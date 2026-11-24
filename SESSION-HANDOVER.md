@@ -5,6 +5,17 @@ Handover from Claude Code sessions on this machine (`D:\VIM\VIM-Luck`). Read
 what is still open. (`HANDOFF.md` is the separate product feature-status doc.)
 Newest session first; §1–§5 below are from session 1 and are still accurate.
 
+## 2026-11-24 (LAN, reported by the LAN session at `ef28709`)
+
+- Pulled and restarted, `sap_messages` column present, both servers 200.
+- Invoice 58: the GRs were not ticked because an **empty choice `[]` was saved** (not a bug in the
+  matching); now all six are saved (424.94). `sap_messages` still empty: nothing sent since the feature.
+- **`DIFF_INV` (CHAR 10) exists** in `BAPI_INCINV_CREATE_HEADER` and `BAPI_INCINV_CHNG_HEADER`.
+- **Duplicate at Validate works on LAN:** invoice 61 (151, PO 1010027885) was refused, naming invoice 60
+  (parked). Invoice 58 (same number and PO, SAP `5105660695`) was not named: unknown whether it was unparked
+  in SAP or only deleted in VIM; if the latter, SAP now holds **two** parked documents for 151.
+- Next: the user clicks Resubmit on invoice 58, then MIR4 `5105660695` (same number, six lines).
+
 ## 2026-11-24 (after `e071bff`): SAP's messages shown in VIM
 
 Client: SAP's error messages must appear in VIM. Before, a refused park was one joined line that vanished
