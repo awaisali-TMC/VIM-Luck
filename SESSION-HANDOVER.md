@@ -5,6 +5,61 @@ Handover from Claude Code sessions on this machine (`D:\VIM\VIM-Luck`). Read
 what is still open. (`HANDOFF.md` is the separate product feature-status doc.)
 Newest session first; §1–§5 below are from session 1 and are still accurate.
 
+## START HERE — state at the end of 2026-11-24, to pick up on 2026-11-25
+
+**Git:** `dev-shahzaib` = `66098dc` plus this handover; `main` = `b9546c9` (15 commits behind). LAN runs
+`ef28709` or `66098dc` (`66098dc` is frontend only). Everything built is pushed to `dev-shahzaib`.
+
+**How the user works (keep to it):**
+- Reply in simple **Roman Urdu**. Ask before every commit; commit and push together, as `ai.engineers1`
+  with the Co-Authored-By line.
+- **`dev-shahzaib` only.** The user holds merges to `main` until LAN testing is finished.
+- This Windows machine cannot reach SAP or SSH to the LAN box (192.168.15.10, AUP client 100). The user
+  relays results; a second Claude session on the LAN box pulls, restarts and reads its database.
+- Simulation (MIR7 Simulate / Messages before the park) is parked by the user, see the questions.
+
+**Confirmed on AUP / LAN:** GR-wise park (invoice 60 -> `5105660701/2027`, six GRs, EKBE `P` rows per GR),
+the 103/105 GR list with Lucky's SRN numbers, WHT types from the BP (VI, FB, FE, V7, K1), unit MT, FBR
+badges and profile, duplicate refused at Validate, SAP status re-read on page open, `DIFF_INV` in both
+BAPI headers. Invoice 58 (`5105660695`) is deleted in VIM and, per the user, in SAP. Invoice 61 is a copy of
+151 that the user was asked to delete.
+
+**Built, offline tests pass, never run on AUP:** freight park (EKBZ read, `KT` 15%, SRN choice, transporter
+as invoicing party), WHT choice (`WITHTAXDATA`), SAP Messages card, reading a GRN summary (Gemini was
+stubbed, no real scan seen yet), the combination auto-tick, the park refusal when nothing is ticked and the
+bill is more than the latest GR, resubmit of a document with several GR lines.
+
+**Tests for tomorrow, in this order:**
+1. MIR4 `5105660701/2027`: six lines, tax `2I` 45,893.52, gross 300,857.52, and the **WHT tab** (VIM sent no
+   WHT: did SAP apply the BP types?).
+2. Have that document **rejected** in SAP, change e.g. Item Text in VIM, **Resubmit**: same number, six lines,
+   workflow back to BLK. Screenshot of the SAP Messages card.
+3. Freight card, look only: an invoice not in SAP, matched to PO `1010027885`, Items to Park = Planned
+   delivery costs: expect `FRC1` 2,124,700 and the SRNs, or the error text (is EKBZ readable, are
+   `SHKZG`/`GJAHR`/`BELNR`/`BUZEI`/`LIFNR` right?). LFB1 may need read access for `TMC_VIM`.
+4. A real freight invoice, Hamza's own first (no `DIFF_INV`), then a transporter's.
+5. GRN summary: attach a scan as Supporting Document "Goods Receipt / GRN summary" and compare the numbers.
+6. Client's vendor with income tax active and sales tax inactive (FBR badges).
+
+**Questions still open:**
+- ABAP/FI: nothing sent in `WITHTAXDATA` = SAP applies the BP types? Type + code enough? Is an unticked type
+  dropped? Which of the five really apply to goods (VI 4.5% and FB 5.5% are both subject)?
+- ABAP: does `BAPI_INCOMINGINVOICE_CREATE1` + ROLLBACK start a workflow or leave a document? ("no" = the
+  posting simulation, and so SAP's posting messages such as FF 724 before the park, can be built.)
+- ABAP: is the `VALIDATE` check in `ZMIR7_PARK` live (then `SAP_WF_DRY_RUN_SAFE=true`)? When does SAP clear EKBE `P`
+  rows? Extra workflows of `5105660678` and of invoice 46.
+- FI: `I2` or `2I` on document `5105660691`. Basis: read access to T100 (and LFB1, EKBZ if refused), RFC on
+  `ZINI_VERIFY`. Network: `ztmc_login` from 192.168.15.10.
+- Client: can one GR be billed by two invoices (not confirmed; today a ticked GR is billed with all it has
+  open)? A sample GRN summary PDF and a freight invoice.
+
+**Known gaps, told to the user, not built:** a ticked GR that another *parked* SAP document uses is not refused
+(only never auto-ticked); an invoice deleted from VIM only, or set to `exception`, no longer blocks its copy;
+invoices entered directly in SAP are unknown to VIM; `1234` and `INV-1234` are different numbers; goods and
+freight invoices with the same number, vendor and PO are duplicates; a quantity is not converted where
+order unit and OPU differ; the big ATL badge still says "NTN Not Found" when FBR does not answer; match
+reasoning shows `424.94000000000005`.
+
 ## 2026-11-24 (LAN, reported by the LAN session at `ef28709`)
 
 - Pulled and restarted, `sap_messages` column present, both servers 200.
@@ -12,9 +67,12 @@ Newest session first; §1–§5 below are from session 1 and are still accurate.
   matching); now all six are saved (424.94). `sap_messages` still empty: nothing sent since the feature.
 - **`DIFF_INV` (CHAR 10) exists** in `BAPI_INCINV_CREATE_HEADER` and `BAPI_INCINV_CHNG_HEADER`.
 - **Duplicate at Validate works on LAN:** invoice 61 (151, PO 1010027885) was refused, naming invoice 60
-  (parked). Invoice 58 (same number and PO, SAP `5105660695`) was not named: unknown whether it was unparked
-  in SAP or only deleted in VIM; if the latter, SAP now holds **two** parked documents for 151.
-- Next: the user clicks Resubmit on invoice 58, then MIR4 `5105660695` (same number, six lines).
+  (parked). Invoice 58 (SAP `5105660695`) was deleted in VIM and, per the user, by hand in SAP too, so 151
+  has one parked document again (invoice 60's). The Resubmit of 58 was therefore never tested.
+- **GR-wise park CONFIRMED on AUP (invoice 60, `5105660701/2027`, in SAP approval):** all six GRs ticked and
+  locked, and SAP's EKBE now has a parked (`P`) row of exactly each GR's quantity on each 103 document, so
+  SAP took one line per GR and `P` rows point at the 103. No SAP Messages card: it was parked at 1:13 PM,
+  before `ef28709` was running. MIR4 not seen: tax, WHT tab and line layout are still to be checked.
 
 ## 2026-11-24 (after `e071bff`): SAP's messages shown in VIM
 
@@ -202,7 +260,7 @@ on their 103 (S adds, H subtracts); each GR lists its movements.
 - The user asked to hold merges to `main` until LAN testing is done. `main` was already at
   `b9546c9` when that message arrived; it was left there.
 
-## 2026-11-24: OPEN ITEMS and corrections (read this first)
+## 2026-11-24: OPEN ITEMS and corrections (up to `263f676`; START HERE above is newer)
 
 Everything up to `263f676` is on both `main` and `dev-shahzaib`. This handover update is the next
 commit, on `dev-shahzaib` only.
