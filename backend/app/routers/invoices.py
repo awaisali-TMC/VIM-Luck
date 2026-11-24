@@ -1087,6 +1087,7 @@ async def update_invoice(
             await db.execute(sa_delete(POMatchResult).where(POMatchResult.id.in_(mr_ids)))
             invoice.matched_po_id = None
             invoice.latest_po_match_status = None
+            invoice.parking_gr_refs = None
 
         # Remove existing line items
         for existing_li in list(invoice.line_items):
@@ -1340,7 +1341,9 @@ async def set_parking_grs(
     if _locked_in_sap(invoice):
         raise HTTPException(status_code=409, detail="Invoice is in SAP — its goods receipts can't be changed.")
     keys = [k.strip() for k in data.gr_keys if k and k.strip()]
-    invoice.parking_gr_refs = json.dumps(keys) if keys else None
+    # An empty list is kept as "[]" (the user unticked all): NULL means nothing
+    # was chosen yet, and the card then ticks its suggestion.
+    invoice.parking_gr_refs = json.dumps(keys)
     await db.commit()
     return {"success": True, "parking_gr_refs": keys}
 

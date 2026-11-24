@@ -11,6 +11,8 @@ import { setParkingGRs } from "../../services/invoiceService";
  * from SAP EKBE) with a checkbox each. The ticked GRs are saved on the invoice
  * (parking_gr_refs); parking then sends one item per ticked GR, referencing it.
  * With nothing ticked, parking picks the latest GR per PO item as before.
+ * When all open GRs of a PO item add up to the billed quantity (data.suggested)
+ * and nothing was chosen yet, they are ticked and saved automatically.
  *
  * Props: invoice, editable (false once the invoice is in SAP), onChanged().
  */
@@ -39,6 +41,23 @@ export default function GoodsReceiptsCard({ invoice, editable = false, onChanged
 
   useEffect(() => { load(); }, [load]);
 
+  // Nothing chosen yet and the backend has a suggestion: tick and save it once.
+  useEffect(() => {
+    if (!editable || !data || data.chosen || !data.suggested?.length) return;
+    const keys = data.suggested;
+    setData((d) => ({ ...d, chosen: true }));
+    setSelected(new Set(keys));
+    setSaving(true);
+    setParkingGRs(invoice.id, keys)
+      .then(() => onChanged?.())
+      .catch((err) => {
+        const d = err.response?.data?.detail;
+        setError(typeof d === "string" ? d : "Could not save the selection.");
+        setSelected(new Set());
+      })
+      .finally(() => setSaving(false));
+  }, [data, editable, invoice?.id, onChanged]);
+
   if (!invoice?.matched_po_id) return null;
 
   const toggle = async (key) => {
@@ -66,6 +85,8 @@ export default function GoodsReceiptsCard({ invoice, editable = false, onChanged
   for (const g of grs) {
     if (selected.has(g.gr_key)) selectedByItem[g.po_item] = (selectedByItem[g.po_item] || 0) + g.open_qty;
   }
+  const isSuggested = data?.suggested?.length > 0 && data.suggested.length === selected.size
+    && data.suggested.every((k) => selected.has(k));
   const fmtDate = (d) => (d && d.length === 8 ? `${d.slice(6, 8)}.${d.slice(4, 6)}.${d.slice(0, 4)}` : d || "—");
   const fmtNum = (n) => Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 3 });
 
@@ -155,6 +176,7 @@ export default function GoodsReceiptsCard({ invoice, editable = false, onChanged
               ? "No GR ticked — parking uses the latest goods receipt for each PO item."
               : <>Selected: {Object.entries(selectedByItem).map(([item, q]) => `item ${item}: ${fmtNum(q)}`).join(" · ")}.
                   {" "}The ticked GRs must add up to the quantity the invoice bills for each item.</>}
+            {isSuggested && <span className="ml-1">Ticked automatically: all open GRs add up to the billed quantity.</span>}
             {!editable && <span className="ml-1">(Locked — the invoice is in SAP.)</span>}
           </div>
         </>

@@ -5,6 +5,19 @@ Handover from Claude Code sessions on this machine (`D:\VIM\VIM-Luck`). Read
 what is still open. (`HANDOFF.md` is the separate product feature-status doc.)
 Newest session first; §1–§5 below are from session 1 and are still accurate.
 
+## 2026-11-24: GRs ticked automatically when they add up (after `3e51416`)
+
+Live example from the client: Hamza Trading invoice **151**, PO `1010026689`, 424.94 x 600 + 18%, no
+GRN printed: **one invoice, several GRNs** (supported by ticking several GRs, one SAP document). On the
+user's yes, the card now ticks all open GRs of a PO item when they add up to the billed quantity
+(`services/gr_suggest.py`; details in CLAUDE.md). Offline tests and build pass; not checked in a
+browser or on AUP.
+- The paper has `5105656318` handwritten and a 13 Aug 2024 stamp: probably already posted in SAP, so
+  the GRs of `1010026689` may show as "fully invoiced" (check MIR4).
+- Invoice 56 bills the same 424.94 on PO `1010027884`; same number + another PO is not a duplicate.
+- Asked of the client, unanswered: is one invoice with several GRNs parked as **one** document or one
+  per GRN (the second would be blocked as a duplicate)? May one GRN carry partial invoices?
+
 ## 2026-11-24: duplicates are also refused at Validate
 
 Client: "Invoice 1234 / GRN 12345" twice must not be parked. It already was refused (the key has

@@ -30,6 +30,7 @@ from app.models.internal_user import InternalUser
 from app.security import get_current_internal_user, require_admin
 from app.routers.role_permissions import role_labels, humanize_role
 from app.services.duplicate_detection import duplicate_block_message, find_key_duplicates
+from app.services.gr_suggest import suggest_grs
 from app.services.sap_credentials import decrypt_sap_password
 from app.services.invoice_line_rules import (
     find_zero_quantity_goods,
@@ -694,7 +695,8 @@ async def get_invoice_open_grs(invoice_id: int, db: AsyncSession = Depends(get_d
     invoice has selected; plus the closed ones and what else EKBE holds, so an
     empty list explains itself."""
     from app.models.purchase_order import PurchaseOrder
-    inv = (await db.execute(select(Invoice).where(Invoice.id == invoice_id, Invoice.is_deleted == 0))).scalar_one_or_none()
+    inv = (await db.execute(select(Invoice).options(selectinload(Invoice.line_items))
+                            .where(Invoice.id == invoice_id, Invoice.is_deleted == 0))).scalar_one_or_none()
     if not inv:
         raise HTTPException(status_code=404, detail="Invoice not found")
     selected = json.loads(inv.parking_gr_refs) if inv.parking_gr_refs else []
@@ -720,7 +722,10 @@ async def get_invoice_open_grs(invoice_id: int, db: AsyncSession = Depends(get_d
         g["description"] = li.description if li else ""
         g["unit"] = (li.unit if li else "") or ""
     return {"po_number": po.po_number, "grs": ov["open"], "closed": ov["closed"],
-            "ekbe_rows": ov["rows"], "unused": ov["unused"], "selected": selected}
+            "ekbe_rows": ov["rows"], "unused": ov["unused"], "selected": selected,
+            # chosen: a selection was saved, even an empty one (the user unticked all).
+            "chosen": inv.parking_gr_refs is not None,
+            "suggested": await suggest_grs(db, inv, po, ov["open"])}
 
 
 @router.get("/invoices/{invoice_id}/wht")

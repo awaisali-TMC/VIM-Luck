@@ -492,6 +492,40 @@ def test_gr_selection(client):
            [(g["gr_key"], g["open_qty"]) for g in grs])
     expect("each GR has description/unit from the PO", all(g.get("unit") for g in item10), item10)
 
+    def og(i):
+        return client.get(f"/api/sap/invoices/{i}/open-grs").json()
+
+    import sqlite3
+    db_path = settings.DATABASE_URL.split("///", 1)[-1]
+
+    def sql(q, *a):
+        with sqlite3.connect(db_path) as c:
+            c.execute(q, a)
+
+    both = sorted(g["gr_key"] for g in item10)
+    body = r.json()
+    expect("12 + 8 = the 20 billed, nothing chosen yet -> both suggested, the other PO item not",
+           body["chosen"] is False and sorted(body["suggested"]) == both, (body["chosen"], body["suggested"]))
+    sql("UPDATE invoice_line_items SET quantity = 15 WHERE invoice_id = ?", inv)
+    expect("15 billed against 20 open -> nothing suggested", og(inv)["suggested"] == [], og(inv)["suggested"])
+    sql("UPDATE invoice_line_items SET quantity = 20 WHERE invoice_id = ?", inv)
+    client.put(f"/api/invoices/{inv}/parking-grs", json={"gr_keys": []})
+    expect("all unticked by the user -> remembered, not ticked again",
+           og(inv)["chosen"] is True and og(inv)["selected"] == [], og(inv))
+    expect("...stored as an empty selection", _detail(client, inv).get("parking_gr_refs") == [])
+    inv2 = _new_invoice(client)
+    client.put(f"/api/invoices/{inv2}/parking-grs", json={"gr_keys": both[:1]})
+    expect("a GR ticked on another open invoice -> not suggested", og(inv)["suggested"] == [], og(inv)["suggested"])
+    client.delete(f"/api/invoices/{inv2}")
+    expect("...and suggested again once that invoice is deleted", sorted(og(inv)["suggested"]) == both, og(inv)["suggested"])
+    conn = fake._store()
+    conn.execute("INSERT INTO EKBE (EBELN, EBELP, GJAHR, BELNR, BUZEI, VGABE, BWART, BUDAT, MENGE, DMBTR, SHKZG, LFGJA, LFBNR, LFPOS) "
+                 "VALUES (?,'00010','2026','5100099999','0001','P','','20260301','8','1','S','2026','5000009006','0001')", (PO,))
+    conn.commit()
+    expect("a GR with a parked SAP invoice -> not suggested", og(inv)["suggested"] == [], og(inv)["suggested"])
+    conn.execute("DELETE FROM EKBE WHERE BELNR = '5100099999'")
+    conn.commit()
+
     one = [item10[0]["gr_key"]]
     s = client.put(f"/api/invoices/{inv}/parking-grs", json={"gr_keys": one})
     expect("selection saved", s.status_code == 200 and _detail(client, inv).get("parking_gr_refs") == one,
@@ -510,6 +544,7 @@ def test_gr_selection(client):
     got = sorted((r["REF_DOC"], r["QUANTITY"], r["ITEM_AMOUNT"]) for r in rows)
     expect("one ITEMDATA row per GR, own REF_DOC, quantity and amount",
            got == [("5000009001", "12.0", "2220000.0"), ("5000009006", "8.0", "1480000.0")], got)
+    expect("in SAP -> no suggestion any more", og(inv)["suggested"] == [], og(inv)["suggested"])
 
 
 def test_gr_overview():
