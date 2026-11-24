@@ -160,6 +160,7 @@ async def _refresh_pos_from_sap(db: AsyncSession, vendor_number: str, force: boo
                     description=li_data["description"],
                     quantity=li_data["quantity"],
                     unit=li_data["unit"],
+                    price_unit=li_data["price_unit"],
                     unit_price=li_data["unit_price"],
                     amount=li_data["amount"],
                 ))

@@ -129,3 +129,7 @@ INSERT INTO T059Z (LAND1, WITHT, WT_WITHCD, QSATZ, QPROZ) VALUES
  ('PK','K1','K1','80','100'),
  ('PK','PA','PA','2','100'),
  ('PK','KZ','KZ','0','100');
+
+-- OPU = OUn, except the deep freezers (ordered in ST, priced per EA).
+UPDATE EKPO SET BPRME = MEINS;
+UPDATE EKPO SET BPRME = 'EA' WHERE EBELN = '4500009001' AND EBELP = '00020';

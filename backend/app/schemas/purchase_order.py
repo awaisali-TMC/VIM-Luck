@@ -30,6 +30,7 @@ class POLineItemResponse(BaseModel):
     description: Optional[str] = None
     quantity: Optional[float] = None
     unit: Optional[str] = None
+    price_unit: Optional[str] = None
     unit_price: Optional[float] = None
     amount: Optional[float] = None
     model_config = {"from_attributes": True}

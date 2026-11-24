@@ -88,7 +88,8 @@ class POLineItem(Base):
     item_number = Column(Integer)
     description = Column(Text, nullable=False)
     quantity = Column(Float, nullable=False)
-    unit = Column(String(50))
+    unit = Column(String(50))         # order unit (EKPO-MEINS)
+    price_unit = Column(String(50))   # OPU in ME23N (EKPO-BPRME)
     unit_price = Column(Float, nullable=False)
     amount = Column(Float)
 

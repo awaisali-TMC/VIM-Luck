@@ -47,6 +47,7 @@ from app.services.duplicate_detection import (
     find_key_duplicates,
 )
 from app.services.invoice_classifier import classify_invoice
+from app.services.po_units import missing_line_units
 
 logger = logging.getLogger(__name__)
 
@@ -971,7 +972,14 @@ async def get_invoice(
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
     _assert_can_access(invoice, principal)
-    return _build_detail_response(invoice)
+    resp = _build_detail_response(invoice)
+    # Observation B: a line without a unit shows the PO's (OPU), also when it was
+    # matched before that existed or is not matched yet. Shown, not stored.
+    units = await missing_line_units(db, invoice, use_reference=principal.kind != "supplier")
+    for li in resp.line_items:
+        if li.id in units:
+            li.unit = units[li.id]
+    return resp
 
 
 def _document_download_name(original: str | None, invoice_id: int, path) -> str:

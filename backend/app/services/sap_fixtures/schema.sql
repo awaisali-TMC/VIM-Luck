@@ -34,7 +34,8 @@ CREATE TABLE EKPO (
     TXZ01 TEXT,   -- short text
     MATNR TEXT,   -- material number
     MENGE TEXT,   -- quantity
-    MEINS TEXT,   -- unit of measure
+    MEINS TEXT,   -- order unit (OUn)
+    BPRME TEXT,   -- order price unit (OPU)
     NETPR TEXT,   -- net price
     NETWR TEXT,   -- net value
     WERKS TEXT,   -- plant

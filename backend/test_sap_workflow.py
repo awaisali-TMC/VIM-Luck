@@ -439,6 +439,45 @@ def test_unit_from_po(client):
         unit = (_detail(client, inv)["line_items"][0].get("unit") or "")
         expect(f"{label} (got {unit!r})", m.status_code == 200 and unit == (given or "ST"), m.text[:150])
 
+    import sqlite3
+    db_path = settings.DATABASE_URL.split("///", 1)[-1]
+
+    def sql(q, *a):
+        with sqlite3.connect(db_path) as c:
+            return c.execute(q, a).fetchall()
+
+    def save(desc, qty, price):
+        r = client.post("/api/invoices/save", json={
+            "original_filename": "opu.pdf", "stored_filepath": "demo/opu", "mime_type": "application/pdf",
+            "invoice_number": f"OPU-{uuid.uuid4().hex[:8].upper()}", "invoice_date": "2026-03-12",
+            "currency": "PKR", "document_type": "invoice", "status": "validated",
+            "source_type": "upload", "po_reference": f"PO {PO}", "supplier_ntn": "0912345-6",
+            "subtotal_amount": qty * price, "tax_amount": 0, "total_amount": qty * price,
+            "line_items": [{"description": desc, "quantity": qty, "unit_price": price, "amount": qty * price}],
+        })
+        return r.json()["id"]
+
+    def unit_of(inv):
+        return _detail(client, inv)["line_items"][0].get("unit")
+
+    po_id = _po(client)
+    # A PO synced before price_unit existed: read from SAP at the next match.
+    sql("UPDATE po_line_items SET price_unit = NULL WHERE po_id = ?", po_id)
+    inv = save("Deep Freezer 500L", 5, 240000)
+    client.post(f"/api/po-matching/invoices/{inv}/match", json={"po_id": po_id})
+    expect(f"the unit is the OPU (EA), not the order unit (ST) (got {unit_of(inv)!r})", unit_of(inv) == "EA")
+    expect("...and the PO line now has both units",
+           sql("SELECT unit, price_unit FROM po_line_items WHERE po_id = ? AND item_number = 20", po_id) == [("ST", "EA")])
+    # Matched before the unit was filled at match: shown from the pairing.
+    sql("UPDATE invoice_line_items SET unit = NULL WHERE invoice_id = ?", inv)
+    expect("matched earlier, unit never stored -> still shown from the PO", unit_of(inv) == "EA", unit_of(inv))
+    # Not matched yet: the PO number on the invoice, only when its items share one unit.
+    inv = save("Something else", 1, 100)
+    expect("not matched, PO items differ in unit -> left empty", not unit_of(inv), unit_of(inv))
+    sql("UPDATE po_line_items SET price_unit = 'ST' WHERE po_id = ? AND item_number = 20", po_id)
+    expect("not matched, one unit on the whole PO -> shown", unit_of(inv) == "ST", unit_of(inv))
+    sql("UPDATE po_line_items SET price_unit = 'EA' WHERE po_id = ? AND item_number = 20", po_id)
+
 
 def test_gr_selection(client):
     """Observation F: list the PO's open GRs, tick some, park one ITEMDATA row

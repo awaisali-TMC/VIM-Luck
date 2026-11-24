@@ -199,7 +199,8 @@ def fetch_po_detail(po_number: str) -> dict | None:
                     {"FIELDNAME": "TXZ01"},   # Short text / description
                     {"FIELDNAME": "MATNR"},   # Material number
                     {"FIELDNAME": "MENGE"},   # Quantity
-                    {"FIELDNAME": "MEINS"},   # Unit of measure
+                    {"FIELDNAME": "MEINS"},   # Order unit (OUn in ME23N)
+                    {"FIELDNAME": "BPRME"},   # Order price unit (OPU in ME23N)
                     {"FIELDNAME": "NETPR"},   # Net price
                     {"FIELDNAME": "NETWR"},   # Net value
                     {"FIELDNAME": "WERKS"},   # Plant
@@ -236,6 +237,7 @@ def fetch_po_detail(po_number: str) -> dict | None:
                 "material_number": item.get("MATNR", ""),
                 "quantity": _safe_float(item.get("MENGE", "0")),
                 "unit": item.get("MEINS", ""),
+                "price_unit": item.get("BPRME", "") or item.get("MEINS", ""),
                 "unit_price": _safe_float(item.get("NETPR", "0")),
                 "net_value": _safe_float(item.get("NETWR", "0")),
                 "plant": item.get("WERKS", ""),
@@ -1064,6 +1066,7 @@ def sync_po_to_db(po_data: dict, db_session) -> dict:
                 "description": li.get("description", ""),
                 "quantity": li.get("quantity", 0),
                 "unit": li.get("unit", ""),
+                "price_unit": li.get("price_unit", ""),
                 "unit_price": li.get("unit_price", 0),
                 "amount": li.get("net_value", 0),
             }

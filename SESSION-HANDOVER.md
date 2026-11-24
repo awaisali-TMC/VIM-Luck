@@ -5,6 +5,18 @@ Handover from Claude Code sessions on this machine (`D:\VIM\VIM-Luck`). Read
 what is still open. (`HANDOFF.md` is the separate product feature-status doc.)
 Newest session first; §1–§5 below are from session 1 and are still accurate.
 
+## 2026-11-24 (LAN test 4): unit of measure = OPU from the PO
+
+Client on invoice 151 (GYPSUM, unit empty): the unit must come from ME23N, **OPU** = MT. The line was
+empty because the invoice was **not matched to its PO yet** (no "on PO" badge; PO `1010026689` only
+suggested), and the unit was only filled at match, from the order unit. Now `EKPO-BPRME` is read and
+kept as `po_line_items.price_unit` (new column, migrated at startup) and used first; the invoice page
+also shows it before the match when the printed PO is in VIM with one unit (`services/po_units.py`).
+- A fake SAP file (`SAP_FAKE_DB_PATH`) made before this lacks `EKPO.BPRME`: delete it once.
+- **Open:** if OPU and order unit differ, the park still sends the billed quantity with the order
+  unit, unconverted (as before). Not checked on AUP or in a browser.
+- The WHT and Goods Receipts cards only appear **after** the PO match (they need its vendor/GRs).
+
 ## 2026-11-24 (after `2ff7419`): WHT card, subject types ticked by default
 
 The user clarified: the `subject = true` types must be **checked**, only those. The card shows a ticked

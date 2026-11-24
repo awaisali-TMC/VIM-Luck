@@ -549,6 +549,7 @@ async def sync_single_po(po_number: str, db: AsyncSession = Depends(get_db)):
                 description=li_data["description"],
                 quantity=li_data["quantity"],
                 unit=li_data["unit"],
+                price_unit=li_data["price_unit"],
                 unit_price=li_data["unit_price"],
                 amount=li_data["amount"],
             )
@@ -636,6 +637,7 @@ async def sync_all_pos(
                         description=li_data["description"],
                         quantity=li_data["quantity"],
                         unit=li_data["unit"],
+                        price_unit=li_data["price_unit"],
                         unit_price=li_data["unit_price"],
                         amount=li_data["amount"],
                     )
@@ -827,7 +829,7 @@ async def sync_sap_grn(po_number: str, db: AsyncSession = Depends(get_db)):
             pli = POLineItem(
                 po_id=po.id, item_number=li_data["item_number"],
                 description=li_data["description"], quantity=li_data["quantity"],
-                unit=li_data["unit"], unit_price=li_data["unit_price"], amount=li_data["amount"],
+                unit=li_data["unit"], price_unit=li_data["price_unit"], unit_price=li_data["unit_price"], amount=li_data["amount"],
             )
             db.add(pli)
             new_lines.append(pli)
