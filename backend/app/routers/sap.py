@@ -689,7 +689,8 @@ async def get_sap_grn(po_number: str):
 async def get_invoice_open_grs(invoice_id: int, db: AsyncSession = Depends(get_db)):
     """Lucky Cement (observation F): goods receipts of the invoice's matched PO
     that are not yet fully invoiced (live from SAP EKBE), with the ones this
-    invoice has selected. Service items (entry sheets) are left out."""
+    invoice has selected; plus the closed ones and what else EKBE holds, so an
+    empty list explains itself."""
     from app.models.purchase_order import PurchaseOrder
     inv = (await db.execute(select(Invoice).where(Invoice.id == invoice_id, Invoice.is_deleted == 0))).scalar_one_or_none()
     if not inv:
@@ -704,19 +705,20 @@ async def get_invoice_open_grs(invoice_id: int, db: AsyncSession = Depends(get_d
     if not settings.SAP_ENABLED:
         return {"po_number": po.po_number, "grs": [], "selected": selected, "message": "SAP is not enabled."}
     _ensure_dll()
-    from app.services.sap_po_service import fetch_open_grs
+    from app.services.sap_po_service import fetch_gr_overview
     try:
-        grs = await asyncio.to_thread(fetch_open_grs, po.po_number)
+        ov = await asyncio.to_thread(fetch_gr_overview, po.po_number)
     except Exception as exc:
         logger.exception("Open-GR read failed for PO %s", po.po_number)
         reason = " ".join(f"{type(exc).__name__}: {exc}".split())[:300]
         raise HTTPException(status_code=502, detail=f"Could not read goods receipts from SAP — {reason}")
     lines = {li.item_number: li for li in po.line_items}
-    for g in grs:
+    for g in ov["open"] + ov["closed"]:
         li = lines.get(g["po_item"])
         g["description"] = li.description if li else ""
         g["unit"] = (li.unit if li else "") or ""
-    return {"po_number": po.po_number, "grs": grs, "selected": selected}
+    return {"po_number": po.po_number, "grs": ov["open"], "closed": ov["closed"],
+            "ekbe_rows": ov["rows"], "unused": ov["unused"], "selected": selected}
 
 
 @router.get("/invoices/{invoice_id}/wht")

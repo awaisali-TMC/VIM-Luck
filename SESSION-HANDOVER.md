@@ -5,6 +5,20 @@ Handover from Claude Code sessions on this machine (`D:\VIM\VIM-Luck`). Read
 what is still open. (`HANDOFF.md` is the separate product feature-status doc.)
 Newest session first; §1–§5 below are from session 1 and are still accurate.
 
+## 2026-11-24 (LAN test): FBR profile works; GR list empty for PO 1010027884 (dev-shahzaib only)
+
+- **A works on the LAN box:** the FBR profile (NTN Details) shows for NTN 1328862-8, with Income Tax
+  and Sales Tax Active. The client's vendor (sales tax inactive) is still to be tried.
+- **F:** `open-grs` returned `grs: []` without an error for PO `1010027884` (invoice 56). The cause is
+  **not known yet**: every GR may really be invoiced, or the 101/103 filter may hide Lucky's movement
+  type. The list could not say which, so `fetch_gr_overview()` now also returns the closed GRs with a
+  reason, the EKBE row count and a count of rows that took no part; the card shows them and the log
+  has `GRs for PO ...`. The filter itself is unchanged. Compare with ME23N > PO history.
+- EKBE is now read for every VGABE. Earlier notes say parked invoices are not in EKBE; that was
+  never checked (look for event `P` in the counts).
+- The user asked to hold merges to `main` until LAN testing is done. `main` was already at
+  `b9546c9` when that message arrived; it was left there.
+
 ## 2026-11-24: OPEN ITEMS and corrections (read this first)
 
 Everything up to `263f676` is on both `main` and `dev-shahzaib`. This handover update is the next

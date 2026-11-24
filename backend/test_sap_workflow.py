@@ -473,6 +473,39 @@ def test_gr_selection(client):
            got == [("5000009001", "12.0", "2220000.0"), ("5000009006", "8.0", "1480000.0")], got)
 
 
+def test_gr_overview():
+    """Why a GR list is empty: closed GRs carry a reason, other EKBE rows are counted."""
+    print("\nGR OVERVIEW (why nothing is open)")
+    from app.services.sap_po_service import fetch_gr_overview, fetch_open_grs
+    conn = fake._store()
+
+    def row(doc, vgabe, bwart, qty, shkzg="S", ref="", item="0001"):
+        conn.execute("INSERT INTO EKBE (EBELN, EBELP, GJAHR, BELNR, BUZEI, VGABE, BWART, BUDAT, MENGE, DMBTR, SHKZG, "
+                     "LFGJA, LFBNR, LFPOS) VALUES ('4599999999','00010','2026',?,?,?,?,'20260301',?,'1000',?,?,?,?)",
+                     (doc, item, vgabe, bwart, str(qty), shkzg, "2026" if ref else "", ref, "0001" if ref else ""))
+
+    expect("no history -> 0 rows", fetch_gr_overview("4599999999")["rows"] == 0)
+    row("5000000091", "1", "101", 10)
+    row("5100000091", "2", "", 10, ref="5000000091")          # fully invoiced
+    row("5000000092", "1", "101", 5)
+    row("5000000093", "1", "102", 5, "H", ref="5000000092")   # reversed
+    row("5000000094", "1", "105", 7)                          # not a receipt movement
+    row("5100000095", "P", "", 4, ref="5000000091")           # another event
+    row("5000000096", "1", "101", 8)
+    row("5100000096", "2", "", 3, ref="5000000096")           # partly invoiced
+    conn.commit()
+    ov = fetch_gr_overview("4599999999")
+    expect("closed GRs carry the reason", {g["gr_doc"]: g["reason"] for g in ov["closed"]}
+           == {"5000000091": "fully invoiced", "5000000092": "reversed"}, ov["closed"])
+    expect("partly invoiced stays open with the rest", [(g["gr_doc"], g["open_qty"]) for g in ov["open"]]
+           == [("5000000096", 5.0)], ov["open"])
+    expect("other rows are counted, not hidden", {(u["vgabe"], u["bwart"]): u["count"] for u in ov["unused"]}
+           == {("1", "105"): 1, ("P", ""): 1}, ov["unused"])
+    expect("open list is the same one the park uses", fetch_open_grs("4599999999") == ov["open"])
+    conn.execute("DELETE FROM EKBE WHERE EBELN = '4599999999'")
+    conn.commit()
+
+
 def test_wht(client):
     """Observation G: the vendor's WHT from its BP (LFBW + T059Z rate) is shown;
     parking sends WITHTAXDATA only when the invoice overrides it."""
@@ -558,6 +591,7 @@ if __name__ == "__main__":
         test_resubmit(client)
         test_unit_from_po(client)
         test_gr_selection(client)
+        test_gr_overview()
         test_wht(client)
 
     print("\n" + "=" * 60)

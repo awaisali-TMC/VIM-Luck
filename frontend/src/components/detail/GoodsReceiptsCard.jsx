@@ -60,6 +60,7 @@ export default function GoodsReceiptsCard({ invoice, editable = false, onChanged
   };
 
   const grs = data?.grs || [];
+  const closed = data?.closed || [];
   // Selected open quantity per PO item, to compare with what the invoice bills.
   const selectedByItem = {};
   for (const g of grs) {
@@ -79,7 +80,27 @@ export default function GoodsReceiptsCard({ invoice, editable = false, onChanged
       )}
       {data?.message && !grs.length && <div className="text-2xs text-neutral-500">{data.message}</div>}
       {!loading && data && !grs.length && !data.message && (
-        <div className="text-2xs text-neutral-500">No open goods receipts on this PO in SAP.</div>
+        <div className="text-2xs text-neutral-500">
+          {closed.length > 0
+            ? "No open goods receipts: every GR on this PO is already invoiced or reversed in SAP."
+            : data.ekbe_rows === 0
+            ? "SAP has no goods receipt or invoice history for this PO."
+            : "SAP has history for this PO, but no goods receipt of movement type 101 or 103."}
+          {!closed.length && (data.unused || []).length > 0 && (
+            <span> Found: {data.unused.map((u) => `${u.count} × event ${u.vgabe || "—"}${u.bwart ? `, movement ${u.bwart}` : ""}`).join(" · ")}.</span>
+          )}
+        </div>
+      )}
+      {closed.length > 0 && (
+        <details className="mb-2 mt-1 text-2xs text-neutral-500">
+          <summary className="cursor-pointer">Closed goods receipts ({closed.length})</summary>
+          {closed.map((g) => (
+            <div key={g.gr_key} className="py-0.5">
+              <span className="font-mono">{g.gr_doc}/{String(g.gr_item).replace(/^0+/, "")} {g.gr_year}</span>
+              {" · "}item {g.po_item} · received {fmtNum(g.received)} {g.unit} · invoiced {fmtNum(g.invoiced)} · <strong>{g.reason}</strong>
+            </div>
+          ))}
+        </details>
       )}
       {grs.length > 0 && (
         <>

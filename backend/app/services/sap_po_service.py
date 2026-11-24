@@ -547,18 +547,26 @@ def fetch_service_grn_refs(po_number: str) -> dict[int, dict]:
 
 
 def fetch_open_grs(po_number: str) -> list[dict]:
-    """Lucky Cement (observation F): the PO's goods-receipt lines that are not
-    yet (fully) invoiced, one entry per GR material-document line, so the user
-    can choose which GRs an invoice parks against.
+    """The GR lines of a PO that can still be invoiced (see fetch_gr_overview)."""
+    return fetch_gr_overview(po_number)["open"]
+
+
+def fetch_gr_overview(po_number: str) -> dict:
+    """Lucky Cement (observation F): the PO's goods-receipt lines, one entry per
+    GR material-document line, so the user can choose which GRs an invoice
+    parks against — and see why a list is empty.
 
     From EKBE: receipts (VGABE 1, BWART 101/103, SHKZG S) are the GR lines;
-    reversals (VGABE 1, SHKZG H) and invoices (VGABE 2; H = credit memo) point
-    at their GR through LFGJA/LFBNR/LFPOS and reduce its open quantity. Parked
-    (not posted) invoices are not in EKBE, so they do not reduce it.
+    reversals (VGABE 1, SHKZG H) and posted invoices (VGABE 2; H = credit memo)
+    point at their GR through LFGJA/LFBNR/LFPOS and reduce its open quantity.
 
-    Returns [{gr_key "YYYY/BELNR/BUZEI", gr_year, gr_doc, gr_item, po_item,
-    posting_date, received, invoiced, open_qty, amount, open_amount}], oldest
-    first, open_qty > 0 only.
+    Returns {"open": [...], "closed": [...], "rows": EKBE rows read,
+    "unused": [{vgabe, bwart, shkzg, count}]}. A GR is {gr_key
+    "YYYY/BELNR/BUZEI", gr_year, gr_doc, gr_item, po_item, posting_date,
+    received, invoiced, open_qty, amount, open_amount, reason}, oldest first;
+    "closed" = nothing left to invoice, with the reason. "unused" counts the
+    EKBE rows that took no part (another movement type or event, or a reversal
+    / invoice that names no GR above): numbers only, to spot a wrong filter.
     """
     sap = _get_connector()
     sap.connect()
@@ -570,8 +578,7 @@ def fetch_open_grs(po_number: str) -> list[dict]:
             ROWCOUNT="5000",
             DELIMITER="|",
             input_tables={
-                "OPTIONS": [{"TEXT": f"EBELN = '{po_num}' "},
-                            {"TEXT": "AND ( VGABE = '1' OR VGABE = '2' ) "}],
+                "OPTIONS": [{"TEXT": f"EBELN = '{po_num}' "}],
                 "FIELDS": [{"FIELDNAME": f} for f in (
                     "EBELP", "GJAHR", "BELNR", "BUZEI", "VGABE", "BWART", "BUDAT",
                     "MENGE", "DMBTR", "SHKZG", "LFGJA", "LFBNR", "LFPOS")],
@@ -587,11 +594,21 @@ def fetch_open_grs(po_number: str) -> list[dict]:
         return f"{(year or '').strip()}/{(doc or '').strip().zfill(10)}/{(item or '').strip().zfill(4)}"
 
     grs: dict[str, dict] = {}
+    unused: dict[tuple, int] = {}
+
+    def skip(r):
+        k = tuple((r.get(f) or "").strip() for f in ("VGABE", "BWART", "SHKZG"))
+        unused[k] = unused.get(k, 0) + 1
+
+    others = []
     for r in rows:   # receipts first, so references below find their GR
-        if r.get("VGABE", "").strip() != "1" or r.get("SHKZG", "").strip() == "H":
+        vgabe, shkzg = r.get("VGABE", "").strip(), r.get("SHKZG", "").strip()
+        if vgabe != "1" or shkzg == "H":
+            others.append(r)
             continue
         if r.get("BWART", "").strip() not in ("101", "103"):
-            continue                      # 105 = release of a 103, not a receipt
+            skip(r)                       # 105 = release of a 103, not a receipt
+            continue
         k = key(r.get("GJAHR"), r.get("BELNR"), r.get("BUZEI") or "1")
         g = grs.setdefault(k, {
             "gr_key": k, "gr_year": r.get("GJAHR", "").strip(), "gr_doc": r.get("BELNR", "").strip(),
@@ -602,13 +619,11 @@ def fetch_open_grs(po_number: str) -> list[dict]:
         })
         g["received"] += _safe_float(r.get("MENGE") or "") or 0.0
         g["amount"] += _safe_float(r.get("DMBTR") or "") or 0.0
-    for r in rows:
+    for r in others:
         vgabe, shkzg = r.get("VGABE", "").strip(), r.get("SHKZG", "").strip()
-        if vgabe == "1" and shkzg != "H":
-            continue
-        ref = key(r.get("LFGJA"), r.get("LFBNR"), r.get("LFPOS") or "1")
-        g = grs.get(ref)
-        if g is None:
+        g = grs.get(key(r.get("LFGJA"), r.get("LFBNR"), r.get("LFPOS") or "1"))
+        if g is None or vgabe not in ("1", "2"):
+            skip(r)
             continue
         qty = _safe_float(r.get("MENGE") or "") or 0.0
         if vgabe == "1":
@@ -616,20 +631,23 @@ def fetch_open_grs(po_number: str) -> list[dict]:
         else:
             g["invoiced"] += -qty if shkzg == "H" else qty
 
-    out = []
+    out, closed = [], []
     for g in grs.values():
-        net = g["received"] - g["reversed"]
+        net = g["received"] - g.pop("reversed")
         open_qty = round(net - g["invoiced"], 3)
-        if open_qty <= 0:
-            continue
-        g["open_qty"] = open_qty
-        g["open_amount"] = round(g["amount"] * (open_qty / net), 2) if net else 0.0
-        g["received"] = round(net, 3)
-        g.pop("reversed")
-        out.append(g)
-    out.sort(key=lambda g: (g["posting_date"], g["gr_key"]))
-    logger.info("Open GRs for PO %s: %s", po_number, [(g["gr_key"], g["open_qty"]) for g in out])
-    return out
+        g["received"], g["invoiced"] = round(net, 3), round(g["invoiced"], 3)
+        g["open_qty"] = max(open_qty, 0.0)
+        g["open_amount"] = round(g["amount"] * (open_qty / net), 2) if net and open_qty > 0 else 0.0
+        g["reason"] = None if open_qty > 0 else ("reversed" if round(net, 3) <= 0 else "fully invoiced")
+        (out if open_qty > 0 else closed).append(g)
+    for lst in (out, closed):
+        lst.sort(key=lambda g: (g["posting_date"], g["gr_key"]))
+    logger.info("GRs for PO %s: %d EKBE rows, open %s, closed %s, unused (VGABE, BWART, SHKZG) %s",
+                po_number, len(rows), [(g["gr_key"], g["open_qty"]) for g in out],
+                [(g["gr_key"], g["reason"]) for g in closed], unused)
+    return {"open": out, "closed": closed, "rows": len(rows),
+            "unused": [{"vgabe": k[0], "bwart": k[1], "shkzg": k[2], "count": n}
+                       for k, n in sorted(unused.items())]}
 
 
 def fetch_vendor_wht(vendor_number: str, company_code: str) -> list[dict]:
