@@ -8,9 +8,10 @@ import { setInvoiceWHT } from "../../services/invoiceService";
  * Lucky Cement (observation G) — withholding tax.
  *
  * Shows the vendor's WHT types/codes from its BP in SAP (LFBW, rate from
- * T059Z) with an estimate on the invoice's net amount. The user can tick which
- * of the vendor's OWN types apply to this invoice (Lucky has one code per
- * type); those are then sent as WITHTAXDATA. Without a change nothing is sent.
+ * T059Z) with an estimate per type. Only the types the vendor is subject to are
+ * listed, all ticked; the user can untick the ones that don't apply to this
+ * invoice (Lucky has one code per type), and the rest are then sent as
+ * WITHTAXDATA. With every type ticked (= the vendor BP) nothing is sent.
  *
  * Props: invoice, editable, onChanged().
  */
@@ -42,11 +43,12 @@ export default function WithholdingTaxCard({ invoice, editable = false, onChange
   const override = data?.override;
   const rows = override || bpRows;
 
-  // Starts from this invoice's own choice, else empty: a vendor can be subject
-  // to several types that don't all apply to one invoice (4.5% and 5.5% goods).
+  // Starts from this invoice's own choice, else every subject type ticked.
   const startEdit = () => setDraft(new Set(
-    (override || []).filter((r) => bpRows.some((b) => b.wht_type === r.wht_type)).map((r) => r.wht_type)));
-  const draftItems = () => bpRows.filter((r) => draft.has(r.wht_type))
+    (override || bpRows).filter((r) => bpRows.some((b) => b.wht_type === r.wht_type)).map((r) => r.wht_type)));
+  const allTicked = draft != null && draft.size === bpRows.length;
+  // Everything ticked is exactly the vendor BP, so it is saved as "no override".
+  const draftItems = () => allTicked ? [] : bpRows.filter((r) => draft.has(r.wht_type))
     .map((r) => ({ wht_type: r.wht_type, wht_code: r.wht_code || r.wht_type }));
   const save = async (items) => {
     setSaving(true);
@@ -90,6 +92,7 @@ export default function WithholdingTaxCard({ invoice, editable = false, onChange
         <table className="w-full border-collapse text-xs">
           <thead>
             <tr className="text-2xs text-neutral-500 uppercase tracking-wider">
+              <th className="text-left py-1.5 px-2">Subject</th>
               <th className="text-left py-1.5 px-2">WHT type</th>
               <th className="text-left py-1.5 px-2">WHT code</th>
               <th className="text-left py-1.5 px-2">Description</th>
@@ -100,6 +103,9 @@ export default function WithholdingTaxCard({ invoice, editable = false, onChange
           <tbody>
             {rows.map((r) => (
               <tr key={`${r.wht_type}/${r.wht_code}`} className="border-t border-neutral-100">
+                <td className="py-1.5 px-2">
+                  <input type="checkbox" checked={r.in_bp !== false} disabled readOnly aria-label={`${r.wht_type} subject`} />
+                </td>
                 <td className="py-1.5 px-2 font-mono">{r.wht_type}</td>
                 <td className="py-1.5 px-2 font-mono">{r.wht_code || "—"}</td>
                 <td className="py-1.5 px-2">
@@ -119,7 +125,7 @@ export default function WithholdingTaxCard({ invoice, editable = false, onChange
 
       {draft && (
         <div className="flex flex-col gap-2 text-xs">
-          <div className="text-2xs text-neutral-500">Tick the vendor's WHT types that apply to this invoice.</div>
+          <div className="text-2xs text-neutral-500">The vendor's subject types are ticked. Untick the ones that don't apply to this invoice.</div>
           {bpRows.map((r) => (
             <label key={r.wht_type} className="flex items-center gap-2 cursor-pointer">
               <input
@@ -135,6 +141,7 @@ export default function WithholdingTaxCard({ invoice, editable = false, onChange
               <span>{r.name || "—"}{r.rate == null ? "" : ` · ${fmt(r.rate)}%`}</span>
             </label>
           ))}
+          {allTicked && <div className="text-2xs text-neutral-500">All ticked = the vendor BP; nothing is sent to SAP.</div>}
           {draft.size === 0 && <div className="text-2xs text-danger-dark">Tick at least one, or use the vendor BP.</div>}
           <div className="flex justify-end gap-2">
             <Button variant="secondary" size="xs" type="button" onClick={() => setDraft(null)} disabled={saving}>Cancel</Button>

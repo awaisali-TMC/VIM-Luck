@@ -5,6 +5,14 @@ Handover from Claude Code sessions on this machine (`D:\VIM\VIM-Luck`). Read
 what is still open. (`HANDOFF.md` is the separate product feature-status doc.)
 Newest session first; §1–§5 below are from session 1 and are still accurate.
 
+## 2026-11-24 (after `2ff7419`): WHT card, subject types ticked by default
+
+The user clarified: the `subject = true` types must be **checked**, only those. The card shows a ticked
+Subject box per type and **Change** starts with all of them ticked; unticking some saves a choice
+(sent as `WITHTAXDATA`), all ticked = vendor BP = nothing sent. Frontend only, not checked in a browser.
+**Watch on AUP:** the vendor of invoice 56 is subject to VI 4.5% *and* FB 5.5%; check in MIR4 which
+types SAP really calculates when nothing is sent.
+
 ## 2026-11-24 (LAN test 3): WHT card, only subject types; estimate base fixed (dev-shahzaib only)
 
 The LAN `/wht` read works: vendor `0053001052` / `1200` is subject to VI, FB, FE, V7, K1; KZ, V1, VG
@@ -13,8 +21,7 @@ shows and offers **only** `WT_SUBJCT = X` types, and the park refuses (422) any 
 - The estimate of sales-tax WHT (V7, K1...) was on the net amount (V7 showed 254,964 = 100% of net).
   It is now on the sales tax (`wht_base_kind()`, read from the code's name); C1, K5, PL, V2, V5 and
   W5 have no clear base in their name, so they get no estimate. Display only, nothing sent to SAP.
-- **Change** starts unticked unless the invoice already has a choice. "Check" was read as a filter,
-  not as "tick them all": VI 4.5% and FB 5.5% would not both apply to one invoice.
+- **Change** started unticked in this commit ("Check" was read as a filter); superseded above.
 - Tests and build pass. **Not checked** in a browser or on AUP; a WHT park has never run on AUP.
 - Still not back from LAN: the GR card of invoice 56 after `675bb9d`.
 
