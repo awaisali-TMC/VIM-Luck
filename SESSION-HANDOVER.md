@@ -5,6 +5,13 @@ Handover from Claude Code sessions on this machine (`D:\VIM\VIM-Luck`). Read
 what is still open. (`HANDOFF.md` is the separate product feature-status doc.)
 Newest session first; §1–§5 below are from session 1 and are still accurate.
 
+## 2026-11-24: SAP status re-read when the invoice page opens (after `ee4842d`)
+
+User: the status must refresh on load, without clicking "Refresh from SAP". `SAPWorkflowStatus.jsx`
+now calls the refresh once per page open when the invoice has a workflow and is not posted; the
+button stays. Frontend only. Seen on LAN: invoice 58 (number 151) parked as `5105660695/2027`,
+company code 1200, then `REJ` in SAP.
+
 ## 2026-11-24: GRs ticked automatically when they add up (after `3e51416`)
 
 Live example from the client: Hamza Trading invoice **151**, PO `1010026689`, 424.94 x 600 + 18%, no

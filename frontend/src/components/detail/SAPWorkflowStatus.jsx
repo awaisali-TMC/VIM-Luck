@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { refreshSAPWorkflow } from "../../services/sapService";
 
 // SAP approval workflow (Lucky Cement, ZMIR7_PARK → WS90000096): parking started
 // it; SAP routes the approvals and posts the invoice itself. This line shows
 // where it stands, as last read from ZMIR7_WF_LOG / ZMIR7_ERROR_LOG, and lets
-// the user re-read it now instead of waiting for the background poller.
+// the user re-read it now. It is also re-read once when the page opens, unless
+// SAP has already posted the document.
 const STATES = {
   INIT: { label: "Workflow not started in SAP", tone: "text-danger-dark", hint: "SAP saved the document but did not start its approval. Unpark it and park again, or check in SAP." },
   BLK: { label: "In SAP approval", tone: "text-warning-dark", hint: "Approvers are working on it in SAP." },
@@ -15,18 +16,14 @@ const STATES = {
 export default function SAPWorkflowStatus({ invoice, onChanged }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  const autoRefreshed = useRef(null);           // invoice id already re-read on open
 
-  if (!invoice?.sap_wf_objkey) return null;
-
-  const status = invoice.sap_wf_status || "";
-  const state = STATES[status] || { label: "Approval workflow started — waiting for SAP", tone: "text-neutral-600" };
-  const approvedNotPosted = status === "APP" && !invoice.sap_wf_posted_doc;
-
-  const refresh = async () => {
+  const invoiceId = invoice?.id;
+  const refresh = useCallback(async () => {
     setBusy(true);
     setError(null);
     try {
-      await refreshSAPWorkflow(invoice.id);
+      await refreshSAPWorkflow(invoiceId);
       await onChanged?.();
     } catch (err) {
       const detail = err.response?.data?.detail;
@@ -34,7 +31,20 @@ export default function SAPWorkflowStatus({ invoice, onChanged }) {
     } finally {
       setBusy(false);
     }
-  };
+  }, [invoiceId, onChanged]);
+
+  const readOnOpen = !!invoice?.sap_wf_objkey && invoice.sap_doc_status !== "posted";
+  useEffect(() => {
+    if (!readOnOpen || autoRefreshed.current === invoiceId) return;
+    autoRefreshed.current = invoiceId;
+    refresh();
+  }, [readOnOpen, invoiceId, refresh]);
+
+  if (!invoice?.sap_wf_objkey) return null;
+
+  const status = invoice.sap_wf_status || "";
+  const state = STATES[status] || { label: "Approval workflow started — waiting for SAP", tone: "text-neutral-600" };
+  const approvedNotPosted = status === "APP" && !invoice.sap_wf_posted_doc;
 
   return (
     <div className="mt-2 pt-2 border-t border-emerald-200 text-2xs">
