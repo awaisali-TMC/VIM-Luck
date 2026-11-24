@@ -5,6 +5,19 @@ Handover from Claude Code sessions on this machine (`D:\VIM\VIM-Luck`). Read
 what is still open. (`HANDOFF.md` is the separate product feature-status doc.)
 Newest session first; §1–§5 below are from session 1 and are still accurate.
 
+## 2026-11-24 (LAN test 3): WHT card, only subject types; estimate base fixed (dev-shahzaib only)
+
+The LAN `/wht` read works: vendor `0053001052` / `1200` is subject to VI, FB, FE, V7, K1; KZ, V1, VG
+and PA are in the BP but not subject. On the user's request ("Check only Subject is true") the card
+shows and offers **only** `WT_SUBJCT = X` types, and the park refuses (422) any other.
+- The estimate of sales-tax WHT (V7, K1...) was on the net amount (V7 showed 254,964 = 100% of net).
+  It is now on the sales tax (`wht_base_kind()`, read from the code's name); C1, K5, PL, V2, V5 and
+  W5 have no clear base in their name, so they get no estimate. Display only, nothing sent to SAP.
+- **Change** starts unticked unless the invoice already has a choice. "Check" was read as a filter,
+  not as "tick them all": VI 4.5% and FB 5.5% would not both apply to one invoice.
+- Tests and build pass. **Not checked** in a browser or on AUP; a WHT park has never run on AUP.
+- Still not back from LAN: the GR card of invoice 56 after `675bb9d`.
+
 ## 2026-11-24 (LAN test 2): two-step GRs (103/105) - fixed (dev-shahzaib only, not verified on AUP)
 
 `7e27e79`'s card showed the cause for PO `1010027884`: 7 GRs, all "received" negative. They are

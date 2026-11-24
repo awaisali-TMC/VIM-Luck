@@ -42,8 +42,10 @@ export default function WithholdingTaxCard({ invoice, editable = false, onChange
   const override = data?.override;
   const rows = override || bpRows;
 
+  // Starts from this invoice's own choice, else empty: a vendor can be subject
+  // to several types that don't all apply to one invoice (4.5% and 5.5% goods).
   const startEdit = () => setDraft(new Set(
-    rows.filter((r) => bpRows.some((b) => b.wht_type === r.wht_type)).map((r) => r.wht_type)));
+    (override || []).filter((r) => bpRows.some((b) => b.wht_type === r.wht_type)).map((r) => r.wht_type)));
   const draftItems = () => bpRows.filter((r) => draft.has(r.wht_type))
     .map((r) => ({ wht_type: r.wht_type, wht_code: r.wht_code || r.wht_type }));
   const save = async (items) => {
@@ -81,7 +83,7 @@ export default function WithholdingTaxCard({ invoice, editable = false, onChange
       {error && <div className="mb-3 bg-danger-bg border border-danger-base rounded-md px-3 py-2 text-2xs text-danger-dark">{error}</div>}
       {data?.message && <div className="text-2xs text-neutral-500">{data.message}</div>}
       {!loading && data && !data.message && rows.length === 0 && (
-        <div className="text-2xs text-neutral-500">No withholding tax maintained for this vendor in SAP.</div>
+        <div className="text-2xs text-neutral-500">The vendor is not subject to any withholding tax type in SAP.</div>
       )}
 
       {rows.length > 0 && !draft && (
@@ -102,11 +104,13 @@ export default function WithholdingTaxCard({ invoice, editable = false, onChange
                 <td className="py-1.5 px-2 font-mono">{r.wht_code || "—"}</td>
                 <td className="py-1.5 px-2">
                   {r.name || "—"}
-                  {r.in_bp === false && <span className="ml-1 text-danger-dark">(not in the vendor's BP — SAP parking is blocked)</span>}
-                  {r.subject === false && <span className="ml-1 text-neutral-400">(not subject)</span>}
+                  {r.in_bp === false && <span className="ml-1 text-danger-dark">(vendor not subject to it — SAP parking is blocked)</span>}
                 </td>
                 <td className="py-1.5 px-2 text-right">{r.rate == null ? "—" : `${fmt(r.rate)}%`}</td>
-                <td className="py-1.5 px-2 text-right font-mono">{fmt(r.estimate)}</td>
+                <td className="py-1.5 px-2 text-right font-mono">
+                  {fmt(r.estimate)}
+                  {r.estimate != null && <div className="text-2xs text-neutral-400 font-sans">on {r.base_kind === "sales_tax" ? "sales tax" : "net"}</div>}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -146,7 +150,8 @@ export default function WithholdingTaxCard({ invoice, editable = false, onChange
           {override
             ? "Changed for this invoice — sent to SAP (WITHTAXDATA) when parking."
             : "Vendor BP — nothing is sent; SAP decides from the vendor's BP when parking."}
-          {" "}Estimate on the net amount {fmt(data.base)}; SAP calculates the actual amount.
+          {" "}Only types the vendor is subject to{data.not_subject?.length ? ` (${data.not_subject.length} others hidden)` : ""}.
+          {" "}Estimates per type on net {fmt(data.base)} or sales tax {fmt(data.sales_tax)}: not all may apply, SAP calculates the actual amount.
           {!editable && <span className="ml-1">(Locked — the invoice is in SAP.)</span>}
         </div>
       )}

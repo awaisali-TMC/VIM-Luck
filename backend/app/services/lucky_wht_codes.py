@@ -200,5 +200,17 @@ def wht_code_info(wht_type: str, wht_code: str) -> dict:
     return {"name": name, "rate": rate}
 
 
-def wht_codes() -> list[dict]:
-    return [{"wht_type": t, "wht_code": c, "name": n, "rate": r} for t, c, n, r in PK_WHT_CODES]
+def wht_base_kind(name: str) -> str | None:
+    """What the display estimate is calculated on, from the code's name:
+    "sales_tax" (STWH/VSTWH "20% of S.Tax", "100%..."), "net" (income-tax WHT,
+    and STWH "of supply"), or None = the name doesn't say, so no estimate.
+    Display only: SAP decides the real base from the WHT type."""
+    import re
+    n = (name or "").upper()
+    if not re.search(r"\bV?STWH\b", n):
+        return "net"
+    if "OF SUPPLY" in n:
+        return "net"
+    if re.search(r"OF\s*(S\.?\s*TAX|SALES TAX|ST\b|GST)|\d%\s*ST\b|S\.TAX WITHHOLDING|100\s*%", n):
+        return "sales_tax"
+    return None

@@ -725,17 +725,18 @@ async def get_invoice_open_grs(invoice_id: int, db: AsyncSession = Depends(get_d
 async def get_invoice_wht(invoice_id: int, db: AsyncSession = Depends(get_db)):
     """Observation G: the vendor's withholding tax from its BP (LFBW, live from
     SAP) for the invoice's matched PO vendor and company code, the invoice's
-    own override (sap_wht), the PK WHT code list for the dropdown, and an
-    estimate of each WHT amount on the invoice's net amount (SAP calculates
-    the real amount when parking)."""
-    from app.services.lucky_wht_codes import wht_codes, wht_code_info
+    own override (sap_wht) and an estimate of each WHT amount on the net or the
+    sales tax (SAP calculates the real amount when parking). Only types the
+    vendor is subject to; the others are listed in not_subject."""
+    from app.services.lucky_wht_codes import wht_base_kind, wht_code_info
     inv = (await db.execute(select(Invoice).where(Invoice.id == invoice_id, Invoice.is_deleted == 0))).scalar_one_or_none()
     if not inv:
         raise HTTPException(status_code=404, detail="Invoice not found")
     override = json.loads(inv.sap_wht) if inv.sap_wht else None
     base = float(inv.subtotal_amount or 0) or max(float(inv.total_amount or 0) - float(inv.tax_amount or 0), 0.0)
+    sales_tax = float(inv.tax_amount or inv.gst_amount or 0)
     resp = {"vendor_number": None, "company_code": None, "vendor_wht": [], "override": override,
-            "codes": wht_codes(), "base": round(base, 2), "message": None}
+            "not_subject": [], "base": round(base, 2), "sales_tax": round(sales_tax, 2), "message": None}
     po = None
     if inv.matched_po_id:
         po = (await db.execute(select(PurchaseOrder).where(PurchaseOrder.id == inv.matched_po_id))).scalar_one_or_none()
@@ -758,16 +759,22 @@ async def get_invoice_wht(invoice_id: int, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=502, detail=f"Could not read the vendor's withholding tax from SAP — {reason}")
     for r in rows:
         portion = r["portion"] if r["portion"] is not None else 100.0
-        r["estimate"] = round(base * portion / 100.0 * (r["rate"] or 0) / 100.0, 2) if r["rate"] is not None else None
+        r["base_kind"] = wht_base_kind(r["name"])
+        amount = {"net": base, "sales_tax": sales_tax}.get(r["base_kind"])
+        r["estimate"] = (round(amount * portion / 100.0 * r["rate"] / 100.0, 2)
+                         if r["rate"] is not None and amount is not None else None)
     if override:
-        bp = {r["wht_type"]: r for r in rows}
+        bp = {r["wht_type"]: r for r in rows if r["subject"]}
         for o in override:
             r = bp.get(o["wht_type"])
             info = r or wht_code_info(o["wht_type"], o["wht_code"])
             o["name"], o["rate"] = info["name"], info["rate"]
             o["estimate"] = r["estimate"] if r else None
+            o["base_kind"] = r["base_kind"] if r else None
             o["in_bp"] = r is not None
-    resp["vendor_wht"] = rows
+    # Only the types the vendor is subject to (LFBW-WT_SUBJCT = X).
+    resp["vendor_wht"] = [r for r in rows if r["subject"]]
+    resp["not_subject"] = [{"wht_type": r["wht_type"], "name": r["name"]} for r in rows if not r["subject"]]
     return resp
 
 
@@ -1444,20 +1451,20 @@ async def post_invoice_to_sap_endpoint(
         goods_items = split_items
 
     # ── Observation G: an invoice may only carry WHT types its vendor has in
-    # its BP — another type has no vendor data in SAP. Re-checked here because
-    # the BP may have changed since the choice was saved.
+    # its BP and is subject to (LFBW-WT_SUBJCT). Re-checked here because the BP
+    # may have changed since the choice was saved.
     chosen_wht = json.loads(invoice.sap_wht) if invoice.sap_wht else []
     if chosen_wht:
         from app.services.sap_po_service import fetch_vendor_wht
         try:
-            bp_types = {w["wht_type"] for w in fetch_vendor_wht(vendor_number, company_code)}
+            bp_types = {w["wht_type"] for w in fetch_vendor_wht(vendor_number, company_code) if w["subject"]}
         except Exception:
             logger.exception("Vendor WHT read failed for %s/%s", vendor_number, company_code)
             raise HTTPException(status_code=502, detail="Could not read the vendor's withholding tax from SAP.")
         foreign = sorted({w["wht_type"] for w in chosen_wht} - bp_types)
         if foreign:
             raise HTTPException(status_code=422, detail=(
-                f"Withholding tax type(s) {', '.join(foreign)} are not maintained in vendor {vendor_number}'s BP "
+                f"Withholding tax type(s) {', '.join(foreign)} are not maintained as subject in vendor {vendor_number}'s BP "
                 f"for company code {company_code}. Choose from the vendor's own types in the Withholding Tax card."))
 
     # Planned delivery costs (freight conditions, e.g. ZFRT) read live from SAP

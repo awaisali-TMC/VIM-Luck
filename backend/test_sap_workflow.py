@@ -535,11 +535,22 @@ def test_wht(client):
     body = r.json()
     got = sorted((w["wht_type"], w["wht_code"], w["rate"], w["subject"]) for w in body.get("vendor_wht", []))
     expect(f"vendor WHT read from SAP (got {r.status_code})",
-           r.status_code == 200 and got == [("VG", "VG", 4.0, True), ("VN", "VN", 8.0, True)], (got, body.get("message")))
+           r.status_code == 200 and got == [("K1", "K1", 80.0, True), ("VG", "VG", 4.0, True), ("VN", "VN", 8.0, True)],
+           (got, body.get("message")))
+    expect("types the vendor is not subject to are left out",
+           [w["wht_type"] for w in body.get("not_subject", [])] == ["PA"], body.get("not_subject"))
+    k1 = next((w for w in body.get("vendor_wht", []) if w["wht_type"] == "K1"), {})
+    expect("a sales-tax WHT is estimated on the sales tax, not the net (tax is 0 here)",
+           k1.get("base_kind") == "sales_tax" and k1.get("estimate") == 0, k1)
+    from app.services.lucky_wht_codes import PK_WHT_CODES, wht_base_kind
+    kinds = {c: wht_base_kind(n) for _t, c, n, _r in PK_WHT_CODES}
+    expect("base read from the name: S.Tax / supply / income tax / unclear",
+           {c: kinds[c] for c in ("V7", "K1", "V1", "W1", "V8", "V3", "VI", "PL", "K5")}
+           == {"V7": "sales_tax", "K1": "sales_tax", "V1": "sales_tax", "W1": "sales_tax", "V8": "sales_tax",
+               "V3": "net", "VI": "net", "PL": None, "K5": None}, kinds)
     vg = next((w for w in body.get("vendor_wht", []) if w["wht_type"] == "VG"), {})
     expect("named from Lucky's WHT list, with an estimate", "goods" in (vg.get("name") or "").lower()
            and vg.get("estimate") == round(3700000 * 0.04, 2), vg)
-    expect("PK code list offered for the dropdown", len(body.get("codes", [])) == 180, len(body.get("codes", [])))
 
     p = _park(client, inv)
     kw = next(k for n, k in _calls if n == "BAPI_INCOMINGINVOICE_PARK")
@@ -557,6 +568,9 @@ def test_wht(client):
     expect(f"a type outside the BP -> park refused, by name (got {p.status_code})",
            p.status_code == 422 and "VH" in p.text, p.text[:200])
     expect("...and nothing parked", "BAPI_INCOMINGINVOICE_PARK" not in _names(), _names())
+    client.put(f"/api/invoices/{inv2}/wht", json={"items": [{"wht_type": "PA", "wht_code": "PA"}]})
+    p = _park(client, inv2)
+    expect(f"in the BP but not subject -> refused too (got {p.status_code})", p.status_code == 422 and "PA" in p.text, p.text[:150])
     client.put(f"/api/invoices/{inv2}/wht", json={"items": [{"wht_type": "VN", "wht_code": "VN"}]})
     p = _park(client, inv2)
     kw = next((k for n, k in _calls if n == "BAPI_INCOMINGINVOICE_PARK"), {"input_tables": {}})
