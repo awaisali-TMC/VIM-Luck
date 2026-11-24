@@ -1,9 +1,51 @@
-# Session handover — 2026-11-05
+# Session handover — last updated 2026-11-24
 
 Handover from Claude Code sessions on this machine (`D:\VIM\VIM-Luck`). Read
 `CLAUDE.md` and `CONTEXT.md` first; this file records only what these sessions did and
 what is still open. (`HANDOFF.md` is the separate product feature-status doc.)
 Newest session first; §1–§5 below are from session 1 and are still accurate.
+
+## 2026-11-24: OPEN ITEMS and corrections (read this first)
+
+Everything up to `263f676` is on both `main` and `dev-shahzaib`. This handover update is the next
+commit, on `dev-shahzaib` only.
+
+**FBR commits the entries below don't describe:**
+- `b1b1967`: `/api/fbr/verify-ntn` uses the live fallback when `FBR_LIVE_LOOKUP_ENABLED`. The card
+  and the review screen call it with `check_live=false`.
+- `8fe582e`: "NTN Details" panel with every profile field; tolerant reply parser (`_fbr_titles`).
+- `1c57dce`: a profile reply that is not valid JSON is read as text, with an outputType 5 retry.
+  **Not confirmed on the LAN box**: the last screenshot (before this commit) still said "FBR profile
+  not available". If it stays empty, look for `FBR 1003` in the backend log.
+
+**Seen working on the LAN box:** park + workflow, "Refresh from SAP" (REJ), the live FBR verify
+(Income Tax and Sales Tax badges). **Never run on AUP or in a browser:** F (GR-wise parking), G
+(WHT), bulk delete, the new tax-code dropdown, the T100 text (it still showed only `FF 724`).
+
+**Known weak points:**
+- **WHT override (G):** choosing another code also changes the WHT *type* (`WithholdingTaxCard.jsx`
+  sets both). A type missing from the vendor's BP may be refused by SAP. `WITHTAXDATA` is sent
+  without base, amount or `SPLIT_KEY`. "SAP applies the BP defaults when nothing is sent" is an
+  **assumption**; CLAUDE.md states it as fact until ABAP/FI confirm.
+- **Sales-tax badge (A):** a live 1005 reply with no status field is shown as **Active**
+  (`from_titles`). The 1005 reply shape was never inspected, and any FBR failure shows as "Not on
+  ATL". Check this against the client's vendor that is income-tax active / sales-tax inactive.
+- **Tax rate (C):** "first n% in the description", so `I5` (17% + 2%) counts as 17. VIM still does
+  not read the PO item's tax code (`EKPO-MWSKZ`) or warn on a mismatch.
+- **GRs (F):** GRs already used by a *parked* invoice still show as open. `LFGJA`/`LFPOS` are not yet
+  checked on AUP (`sap_dd03l.py EKBE`).
+- **No SAP dry run on submit** while `SAP_WF_DRY_RUN_SAFE=false`.
+- `[wf-diag]` / `[park-diag]` still log at WARNING.
+
+**To ask ABAP / FI:** (1) empty `WITHTAXDATA` = BP defaults? (2) are type + code enough, may the
+type differ from the BP, is `SPLIT_KEY` needed? (3) is the `VALIDATE` check live? (4) does a change
+through the BAPI restart the workflow (REJ -> BLK)? (5) how to see GRs already used by parked
+invoices? (6) cancel the second workflow of `5105660678` and the dry-run one of invoice 46.
+**FI:** PO code `I2` is 17% but the invoice is 18% (`2I`): which one, and fix `5105660691`?
+**Basis:** T100 read, `S_RFC` on `ZINI_VERIFY`. **Network:** `ztmc_login` from 192.168.15.10.
+
+**LAN housekeeping:** `fix_invoice_sap_year.py 54 2027 --yes` (and 53 if it shows `/0000`).
+**Parked by the user:** the MIRO-like Simulation / Messages window.
 
 ## 2026-11-24 (later): client observation G — Withholding Tax — committed, pushed, merged to main
 
@@ -82,7 +124,8 @@ Example: income tax Active but sales tax not.
   for the ST ATL. The profile comes from **1003**, the Taxpayer Profile Inquiry, with outputType 4.
   These protocol ids are read from IRIS's own portal bundle.
 - The profile keeps Name, Category, Registered On, Tax Office, Registration Status ("Income Tax:
-  Active, Sales Tax: OPERATIVE") and Registered for Sales Tax. **Email and Cell are dropped.**
+  Active, Sales Tax: OPERATIVE") and Registered for Sales Tax. (Email and Cell were dropped at first; since `8fe582e` every field FBR
+  returns is shown, Email/Cell masked by FBR.)
 - `/api/fbr/verify-ntn` returns `income_tax`, `sales_tax` and `profile`. The Vendor Verification
   card shows two badges plus the profile block.
 - Tested offline with stubs. The live 1003 reply shape was seen once for NTN 1328862.
@@ -184,9 +227,11 @@ row under their NTN. VIM already handles both the 7-digit and 8-digit NTN forms.
 The first live resubmits on AUP (invoices 53/54) showed four things:
 - **`S_RFC` for `BAPI_INCOMINGINVOICE_CHANGE`** was missing (`RFC_NO_AUTHORITY`). Basis has since
   granted it.
-- **`FF 724` "Tax entry not possible in this item"** was the real reason the workflow rejected the
-  invoice, and the resubmit hit it too. The PO item's tax code is `I2`, but VIM sent the
-  AI-suggested `I1`. VIM never reads `EKPO-MWSKZ`; a follow-up is to default to it and warn on a
+- **`FF 724` "Tax entry not possible in this item"** was logged with the rejection, and the resubmit
+  hit it too. VIM sent the AI-suggested `I1` together with an 18% tax amount. The PO item's code is
+  `I2`. Lucky's list (2026-11-23) has `I1` = Zero Rated 0%, so a tax amount on a 0% code is the
+  likely cause; the PO/`I1` mismatch was a first guess. Neither was confirmed by FI. **Caution:**
+  invoice 54 went through with `I2` (17%) and an 18% tax amount of 51,197 - FI must check it. VIM never reads `EKPO-MWSKZ`; a follow-up is to default to it and warn on a
   mismatch (offered to the user). Choosing `I2` by hand made the resubmit go through.
 - **Bug, now fixed:** when the number is unchanged, `BAPI_INCOMINGINVOICE_CHANGE` returns
   `INVOICEDOCNUMBER_NEW` / `FISCALYEAR_NEW` as initial values (`0000000000` / `0000`). VIM stored
@@ -263,12 +308,12 @@ invoices. It returns `{deleted, skipped:[{id, reason}]}`.
 **Tests:** `backend/test_bulk_delete.py` passes; the frontend lint and build are clean.
 **Not checked in a browser.**
 
-**Also uncommitted:** `sap_dd03l.py --fm <FUNCTION>` dumps an FM's interface (FUPARAREF) and its
+**Also in that commit (`f886bfa`):** `sap_dd03l.py --fm <FUNCTION>` dumps an FM's interface (FUPARAREF) and its
 structures (DD03L). It is meant for `BAPI_INCOMINGINVOICE_CHANGE`, which the "Resubmit a rejected
 invoice to SAP" feature needs.
 - The ABAP team confirmed that changing a rejected parked document makes `ZMIR7_PARK` restart the
   workflow itself, and that the `REJ` row turns back to `BLK`.
-- The feature itself is not built yet; it waits for the BAPI interface.
+- The feature was built later, in `d8b05fb` (see the entry above).
 
 ## 2026-11-20 (night): workflow status read from the real ZMIR7_WF_LOG columns — committed `8068114`, pushed
 
