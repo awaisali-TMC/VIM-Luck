@@ -126,6 +126,12 @@ export async function setDeliveryCosts(invoiceId, items) {
   return response.data;
 }
 
+export async function clearSrnList(invoiceId) {
+  // Forget the SRNs read from a GRN summary.
+  const response = await api.delete(`/api/invoices/${invoiceId}/srn-list`);
+  return response.data;
+}
+
 export async function setParkingGRs(invoiceId, grKeys) {
   // GR-wise parking: goods receipts ("YYYY/BELNR/BUZEI") this invoice parks against.
   const response = await api.put(`/api/invoices/${invoiceId}/parking-grs`, { gr_keys: grKeys });

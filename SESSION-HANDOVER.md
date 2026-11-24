@@ -5,6 +5,14 @@ Handover from Claude Code sessions on this machine (`D:\VIM\VIM-Luck`). Read
 what is still open. (`HANDOFF.md` is the separate product feature-status doc.)
 Newest session first; §1–§5 below are from session 1 and are still accurate.
 
+## 2026-11-24 (after `4fc4b84`): the papers need not arrive together; the summary is optional
+
+User: "zarori nahe ek wqt may saari invoice ho" and "mil jaye to theek, nahe millay to asis chlay".
+Built: a GRN summary attached later (Supporting Documents, type "Goods Receipt / GRN summary") is read;
+goods and freight invoices of one PO use each other's GRs or summary when the amounts add up; no
+summary (or one naming no GR of SAP) = as before. Offline tests and build pass, Gemini stubbed, not run
+on AUP or in a browser.
+
 ## 2026-11-24: client can attach goods invoice + freight invoice + GRN summary together (built, offline only)
 
 Client: one PDF of scanned pages. The extraction prompt now reads the SRN rows (`goods_receipts`), the

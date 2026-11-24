@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import Card from "../common/Card";
 import Button from "../common/Button";
 import { getOpenGRs } from "../../services/sapService";
-import { setParkingGRs } from "../../services/invoiceService";
+import { clearSrnList, setParkingGRs } from "../../services/invoiceService";
 
 /**
  * Lucky Cement (observation F) — GR-wise parking.
@@ -40,7 +40,8 @@ export default function GoodsReceiptsCard({ invoice, editable = false, onChanged
     }
   }, [invoice?.id, invoice?.matched_po_id]);
 
-  useEffect(() => { load(); }, [load]);
+  const srnKey = (invoice?.srn_list || []).map((r) => r.number).join(",");
+  useEffect(() => { load(); }, [load, srnKey]);
 
   // Nothing chosen yet and the backend has a suggestion: tick and save it once.
   useEffect(() => {
@@ -76,6 +77,33 @@ export default function GoodsReceiptsCard({ invoice, editable = false, onChanged
       setSelected(selected);                    // roll back
     } finally {
       setSaving(false);
+    }
+  };
+
+  // The suggestion differs from what is ticked (a GRN summary that came later).
+  const useSuggested = async () => {
+    const keys = data.suggested;
+    setSaving(true);
+    setError(null);
+    try {
+      await setParkingGRs(invoice.id, keys);
+      setSelected(new Set(keys));
+      onChanged?.();
+    } catch (err) {
+      const d = err.response?.data?.detail;
+      setError(typeof d === "string" ? d : "Could not save the selection.");
+    } finally {
+      setSaving(false);
+    }
+  };
+  const forgetSrns = async () => {
+    try {
+      await clearSrnList(invoice.id);
+      onChanged?.();
+      load();
+    } catch (err) {
+      const d = err.response?.data?.detail;
+      setError(typeof d === "string" ? d : "Could not remove the SRNs.");
     }
   };
 
@@ -131,7 +159,13 @@ export default function GoodsReceiptsCard({ invoice, editable = false, onChanged
         <div className={`mb-2 text-2xs rounded-md px-3 py-2 border ${data.srn_problems?.length
           ? "bg-warning-bg border-warning-base text-warning-dark" : "bg-success-bg border-success-base text-success-dark"}`}>
           GRN summary attached to the invoice: {data.srn_count} SRN(s){data.srn_problems?.length ? "." : ", all open in SAP."}
+          {editable && (
+            <button type="button" className="ml-2 underline bg-transparent border-none cursor-pointer" onClick={forgetSrns}>Remove the SRNs</button>
+          )}
           {(data.srn_problems || []).map((p) => <div key={p}>{p}</div>)}
+          {editable && data.suggested?.length > 0 && !isSuggested && (
+            <button type="button" className="underline bg-transparent border-none cursor-pointer" disabled={saving} onClick={useSuggested}>Tick the SRNs of the summary</button>
+          )}
         </div>
       )}
       {grs.length > 0 && (

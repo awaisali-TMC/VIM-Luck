@@ -1343,6 +1343,25 @@ async def set_invoice_wht(
     return {"success": True, "sap_wht": items or None}
 
 
+@router.delete("/{invoice_id}/srn-list")
+async def clear_srn_list(
+    invoice_id: int,
+    db: AsyncSession = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+):
+    """Forget the SRNs read from a GRN summary (wrong file or misread)."""
+    result = await db.execute(select(Invoice).where(Invoice.id == invoice_id, Invoice.is_deleted == 0))
+    invoice = result.scalar_one_or_none()
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    _assert_can_access(invoice, principal)
+    if _locked_in_sap(invoice):
+        raise HTTPException(status_code=409, detail="Invoice is in SAP — its SRNs can't be changed.")
+    invoice.srn_list = None
+    await db.commit()
+    return {"success": True}
+
+
 @router.put("/{invoice_id}/delivery-costs")
 async def set_delivery_costs(
     invoice_id: int,

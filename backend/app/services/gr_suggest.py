@@ -105,12 +105,80 @@ def matching_grs(billed: dict[int, float], open_grs: list[dict], taken: set[str]
     return keys
 
 
+def _net(invoice: Invoice) -> float:
+    return float(invoice.subtotal_amount or 0) or max(float(invoice.total_amount or 0) - float(invoice.tax_amount or 0), 0.0)
+
+
+async def sibling_choices(db: AsyncSession, invoice: Invoice) -> list[dict]:
+    """What the PO's other live invoices say about goods receipts, oldest first: the
+    goods invoice, the freight invoice and the GRN summary need not arrive together.
+    [{invoice_number, keys (ticked), receipts (GRN summary)}]"""
+    rows = (await db.execute(
+        select(Invoice).where(
+            Invoice.matched_po_id == invoice.matched_po_id, Invoice.id != invoice.id,
+            Invoice.is_deleted == 0, Invoice.status != "exception").order_by(Invoice.id)
+    )).scalars().all()
+    out = []
+    for inv in rows:
+        if inv.sap_layout == "delivery":
+            keys = {k for c in (json.loads(inv.sap_delivery) if inv.sap_delivery else []) for k in c.get("gr_keys") or []}
+        else:
+            keys = set(json.loads(inv.parking_gr_refs)) if inv.parking_gr_refs else set()
+        receipts = json.loads(inv.srn_list) if inv.srn_list else []
+        if keys or receipts:
+            out.append({"invoice_number": inv.invoice_number or f"#{inv.id}", "keys": keys, "receipts": receipts})
+    return out
+
+
+async def choose_grs(db: AsyncSession, invoice: Invoice, billed: dict[int, float], open_grs: list[dict]) -> list[str]:
+    """The goods receipts of a goods invoice: its own GRN summary; else all open ones;
+    else those another invoice of the PO (its freight invoice, or the one the summary
+    came with) names. Always only when they add up to the bill and are not used."""
+    taken = await grs_on_other_invoices(db, invoice)
+    own = json.loads(invoice.srn_list) if invoice.srn_list else None
+    # The summary is optional help: one that names no open GR at all (misread,
+    # wrong file) is as good as none. One that does, but disagrees, is the user's call.
+    if own and not any(listed_numbers(own, g) for g in open_grs):
+        own = None
+    keys = matching_grs(billed, open_grs, taken, invoice.sap_document_number, own)
+    if keys or own:
+        return keys
+    for sib in await sibling_choices(db, invoice):
+        for subset in ([g for g in open_grs if g["gr_key"] in sib["keys"]],
+                       [g for g in open_grs if listed_numbers(sib["receipts"], g)]):
+            if subset and (keys := matching_grs(billed, subset, taken, invoice.sap_document_number)):
+                return keys
+    return []
+
+
 async def suggest_grs(db: AsyncSession, invoice: Invoice, po: PurchaseOrder, open_grs: list[dict]) -> list[str]:
     """What the card ticks. Nothing once the invoice is in SAP, unless SAP's
     workflow rejected it (then it is corrected and resubmitted)."""
     rejected = (invoice.sap_wf_status or "").upper() == "REJ" and invoice.sap_doc_status != "posted"
     if invoice.sap_document_number and not rejected:
         return []
-    return matching_grs(await billed_by_po_item(db, invoice, po), open_grs,
-                        await grs_on_other_invoices(db, invoice), invoice.sap_document_number,
-                        json.loads(invoice.srn_list) if invoice.srn_list else None)
+    return await choose_grs(db, invoice, await billed_by_po_item(db, invoice, po), open_grs)
+
+
+def suggest_freight(invoice: Invoice, cost_grs: list[dict], siblings: list[dict]) -> tuple[list[str], str | None]:
+    """(gr_keys, where from) for a freight-only invoice. cost_grs: the condition's
+    GRs with {gr_key, amount, listed, taken_by, gr}. Its own GRN summary decides;
+    otherwise the set whose freight equals the invoice (the GRs of the PO's goods
+    invoices, or a summary that came with another invoice); else every free GR."""
+    free = [g for g in cost_grs if not g["taken_by"]]
+    listed = [g["gr_key"] for g in free if g["listed"]]
+    if listed:
+        return listed, "the attached GRN summary"
+    net = _net(invoice)
+
+    def equals(grs):
+        return bool(grs) and net > 0 and abs(sum(g["amount"] for g in grs) - net) <= 1
+
+    for sib in siblings:
+        mine = [g for g in free if g["gr_key"] in sib["keys"]]
+        if equals(mine):
+            return [g["gr_key"] for g in mine], f"invoice {sib['invoice_number']}"
+        mine = [g for g in free if listed_numbers(sib["receipts"], g["gr"])]
+        if equals(mine):
+            return [g["gr_key"] for g in mine], f"the GRN summary of invoice {sib['invoice_number']}"
+    return [g["gr_key"] for g in free], "all open freight"      # as without a summary

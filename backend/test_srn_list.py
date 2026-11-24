@@ -118,13 +118,15 @@ def test_extract():
         gx._get_client = real
 
 
+_po_id = None
+
+
 def _po(client):
-    r = client.post(f"/api/sap/pos/{PO}/sync")
-    if r.status_code == 409:
-        items = client.get("/api/purchase-orders", params={"search": PO}).json()
-        items = items.get("items", items) if isinstance(items, dict) else items
-        return next(p["id"] for p in items if p["po_number"] == PO)
-    return r.json().get("po_id") or r.json().get("id")
+    global _po_id
+    if _po_id is None:
+        r = client.post(f"/api/sap/pos/{PO}/sync")
+        _po_id = r.json().get("po_id") or r.json().get("id")
+    return _po_id
 
 
 def save(client, po_id, qty, receipts, desc="Split AC Unit 1.5 Ton Inverter", price=185000):
@@ -171,10 +173,93 @@ def test_suggestion(client):
     expect("no summary -> as before, all open GRs", sorted(og(inv)["suggested"]) == [A, B])
     client.delete(f"/api/invoices/{inv}")
 
+    inv = save(client, po_id, 20, [{"number": "5009999999"}])
+    b = og(inv)
+    expect("a summary that names no receipt of SAP -> works as without one, but says so",
+           sorted(b["suggested"]) == [A, B] and len(b["srn_problems"]) == 1, (b["suggested"], b["srn_problems"]))
+    client.delete(f"/api/invoices/{inv}")
+
     f = save(client, po_id, 1, [{"number": "5000009006"}], desc="Freight", price=10000)
     client.put(f"/api/invoices/{f}", json={"sap_layout": "delivery"})
     c = client.get(f"/api/sap/invoices/{f}/delivery-costs").json()["costs"][0]
     expect("freight invoice: the listed SRN is marked", [(g["gr_key"], g["listed"]) for g in c["grs"]] == [(A, False), (B, True)], c["grs"])
+    expect("...and suggested", c["suggested"] == [B] and "GRN summary" in c["suggested_from"], (c["suggested"], c["suggested_from"]))
+    client.delete(f"/api/invoices/{f}")
+
+
+def freight_costs(client, i):
+    return client.get(f"/api/sap/invoices/{i}/delivery-costs").json()["costs"][0]
+
+
+def test_different_times(client):
+    print("\nGOODS, FREIGHT AND SUMMARY AT DIFFERENT TIMES")
+    po_id = _po(client)
+    og = lambda i: client.get(f"/api/sap/invoices/{i}/open-grs").json()  # noqa: E731
+
+    def freight(net):
+        i = save(client, po_id, 1, None, desc="Freight", price=net)
+        client.put(f"/api/invoices/{i}", json={"sap_layout": "delivery"})
+        return i
+
+    f = freight(15000)
+    c = freight_costs(client, f)
+    expect("freight first, nothing else known -> every open SRN, as before", c["suggested"] == [A, B], c["suggested"])
+    goods = save(client, po_id, 12, None)
+    expect("goods of 12 out of 20, no summary -> left to the user", og(goods)["suggested"] == [], og(goods)["suggested"])
+    client.put(f"/api/invoices/{f}/delivery-costs", json={"items": [
+        {"po_item": 10, "cond_type": "FRA1", "tax_code": "I0", "gr_keys": [A]}]})
+    expect("the freight invoice's SRNs tell which goods they are", og(goods)["suggested"] == [A], og(goods)["suggested"])
+    client.put(f"/api/invoices/{f}/delivery-costs", json={"items": []})
+    client.put(f"/api/invoices/{goods}/parking-grs", json={"gr_keys": [A]})
+    c = freight_costs(client, f)
+    expect("goods invoice ticked: the freight of the same SRNs equals this invoice",
+           c["suggested"] == [A] and "invoice SRN-" in c["suggested_from"], (c["suggested"], c["suggested_from"]))
+    f2 = freight(10000)
+    c = freight_costs(client, f2)
+    expect("a freight invoice those goods don't explain -> every open SRN, as before", c["suggested"] == [A, B], c["suggested"])
+    client.delete(f"/api/invoices/{f2}")
+    client.delete(f"/api/invoices/{f}")
+    client.put(f"/api/invoices/{goods}/parking-grs", json={"gr_keys": []})
+
+    print("\nA SUMMARY ATTACHED LATER (Gemini stubbed)")
+    real = gx.extract_receipts
+    pdf = b"%PDF-1.4\n%stub\n"
+
+    def attach(i, found, doc_type="goods_receipt"):
+        def fake(*a, **k):
+            if isinstance(found, Exception):
+                raise found
+            return clean_receipts(found)
+        gx.extract_receipts = fake
+        try:
+            return client.post(f"/api/invoices/{i}/attachments", data={"document_type": doc_type},
+                               files={"file": ("srn.pdf", pdf, "application/pdf")})
+        finally:
+            gx.extract_receipts = real
+
+    def srns(i):
+        return [r["number"] for r in client.get(f"/api/invoices/{i}").json()["srn_list"] or []]
+
+    r = attach(goods, [{"number": "5000009001", "quantity": 12}], doc_type="other")
+    expect(f"another document type is not read (got {r.status_code})", r.status_code == 201 and srns(goods) == [])
+    r = attach(goods, RuntimeError("AI down"))
+    expect(f"AI failure: the file is kept, the message says so (got {r.status_code})",
+           r.status_code == 201 and "could not be read" in r.json()["srn_message"] and srns(goods) == [], r.text[:200])
+    r = attach(goods, [])
+    expect("nothing found: kept, said so", r.status_code == 201 and "No SRN" in r.json()["srn_message"], r.text[:200])
+    r = attach(goods, [{"number": "5000009001", "quantity": 12}])
+    expect("SRNs read and stored", "1 SRN(s)" in r.json()["srn_message"] and srns(goods) == ["5000009001"], r.text[:200])
+    b = og(goods)
+    expect("...the user's empty choice stays, the summary's SRNs are offered",
+           b["chosen"] is True and b["selected"] == [] and b["suggested"] == [A], (b["chosen"], b["suggested"]))
+    attach(goods, [{"number": "5000009001", "quantity": 12}, {"number": "5000009006"}])
+    expect("a second file adds, without doubles", sorted(srns(goods)) == ["5000009001", "5000009006"], srns(goods))
+    f = freight(25000)
+    c = freight_costs(client, f)
+    expect("the freight invoice uses the summary that came with the goods invoice",
+           c["suggested"] == [A, B] and "GRN summary of invoice" in c["suggested_from"], (c["suggested"], c["suggested_from"]))
+    r = client.delete(f"/api/invoices/{goods}/srn-list")
+    expect(f"the SRNs can be removed again (got {r.status_code})", r.status_code == 200 and srns(goods) == [])
 
 
 def test_upload(client):
@@ -219,6 +304,7 @@ if __name__ == "__main__":
         id=1, email="admin@tmcltd.com", display_name="Test Admin", password_hash="x", role="admin", is_active=1)
     with TestClient(main.app) as client:
         test_suggestion(client)
+        test_different_times(client)
         test_upload(client)
     print("\n" + "=" * 60)
     if _failures:

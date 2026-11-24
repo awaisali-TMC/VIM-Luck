@@ -1,5 +1,7 @@
 """Invoice attachment endpoints — upload, list, download, delete supporting documents."""
 
+import asyncio
+import json
 import os
 import logging
 from pathlib import Path
@@ -14,6 +16,7 @@ from app.models.attachment import InvoiceAttachment
 from app.models.invoice import Invoice
 from app.security import get_current_principal, Principal
 from app.services.file_storage import save_uploaded_file, content_matches_type
+from app.services.srn_list import clean_receipts
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -94,7 +97,34 @@ async def upload_attachment(
     await db.refresh(attachment)
 
     logger.info("Attachment %d uploaded for invoice %d: %s", attachment.id, invoice_id, file.filename)
-    return _to_dict(attachment)
+    out = _to_dict(attachment)
+    if document_type == "goods_receipt":
+        out["srn_message"] = await _read_srns(db, invoice_id, content, file.content_type)
+    return out
+
+
+async def _read_srns(db: AsyncSession, invoice_id: int, content: bytes, content_type: str) -> str:
+    """A GRN summary attached after the invoice: add its SRNs to the invoice. The
+    upload itself never fails on this; the message says what happened."""
+    if content_type != "application/pdf" and not content_type.startswith("image/"):
+        return "Saved. SRNs are read from PDF and image files only."
+    invoice = await db.get(Invoice, invoice_id)
+    from app.routers.invoices import _locked_in_sap
+    if _locked_in_sap(invoice):
+        return "Saved. The invoice is in SAP, so its SRNs were not changed."
+    from app.services.gemini_extract import extract_receipts
+    try:
+        found = await asyncio.to_thread(extract_receipts, content, content_type)
+    except Exception:
+        logger.exception("Reading SRNs from the attachment of invoice %d failed", invoice_id)
+        return "Saved, but the SRNs could not be read from it."
+    if not found:
+        return "Saved. No SRN numbers were found in it."
+    old = json.loads(invoice.srn_list) if invoice.srn_list else []
+    numbers = {r["number"] for r in found}
+    invoice.srn_list = json.dumps(clean_receipts([r for r in old if r["number"] not in numbers] + found))
+    await db.commit()
+    return f"Saved. {len(found)} SRN(s) read: {', '.join(r['number'] for r in found)}."
 
 
 # ── List ──────────────────────────────────────────────────────────────────────

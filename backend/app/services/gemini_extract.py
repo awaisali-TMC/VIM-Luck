@@ -586,6 +586,30 @@ def segment_invoice_pages(file_content: bytes, mime_type: str, total_pages: int)
         return [[1, total_pages]]
 
 
+RECEIPTS_PROMPT = """This document lists goods receipts (GRN / SRN / GR / "Unprocessed SRNs" /
+material document numbers), often as a scan or a screenshot of a SAP list. Report EVERY row:
+number (the SRN / GRN number exactly as printed, usually 10 digits), po_number, quantity, amount
+(product amount without tax) and freight, each null when the row does not show it.
+Never take a PO number, invoice number, delivery note or supplier number for the SRN number, and
+never invent or complete a digit you cannot read: leave that row out.
+
+Respond ONLY with valid JSON:
+{"goods_receipts": [
+  {"number": "5002029076", "po_number": "1010027885", "quantity": 57.52, "amount": 34512.00, "freight": 287600.00}
+]}"""
+
+
+def extract_receipts(file_content: bytes, mime_type: str) -> list[dict]:
+    """The goods receipts on a GRN summary that comes without an invoice."""
+    response = _get_client().models.generate_content(
+        model=settings.GEMINI_MODEL,
+        contents=[types.Part.from_bytes(data=file_content, mime_type=mime_type), RECEIPTS_PROMPT],
+        config=types.GenerateContentConfig(temperature=0.0, response_mime_type="application/json"),
+    )
+    result = _parse_json_lenient((response.text or "").strip())
+    return clean_receipts(result.get("goods_receipts") if isinstance(result, dict) else result)
+
+
 def extract_invoice(file_content: bytes, mime_type: str) -> dict:
     """
     Single Gemini call to extract all invoice data: fields, line items, and taxes.

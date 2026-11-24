@@ -24,7 +24,7 @@ export default function DeliveryCostsCard({ invoice, layout, taxCodes = [], edit
   const [error, setError] = useState(null);
 
   const alone = layout === "delivery";
-  const grKey = `${(invoice?.parking_gr_refs || []).join(",")}|${invoice?.sap_layout}`;
+  const grKey = `${(invoice?.parking_gr_refs || []).join(",")}|${invoice?.sap_layout}|${(invoice?.srn_list || []).length}`;
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -68,18 +68,13 @@ export default function DeliveryCostsCard({ invoice, layout, taxCodes = [], edit
   const without = (c) => chosen.filter((x) => !(x.po_item === c.po_item && x.cond_type === c.cond_type));
   // SRNs (goods receipts) of a freight-only invoice; none listed = SAP can't split it.
   const bySrn = (c) => alone && (c.grs || []).length > 0;
-  const free = (c) => c.grs.filter((g) => !g.taken_by);
   const change = (c, patch) => save(chosen.map((x) =>
     x.po_item === c.po_item && x.cond_type === c.cond_type ? { ...x, ...patch } : x));
-  // Ticking a condition takes the SRNs of the attached GRN summary, else every SRN
-  // no other invoice bills; the user corrects the rest.
-  const preset = (c) => {
-    const listed = free(c).filter((g) => g.listed);
-    return (listed.length ? listed : free(c)).map((g) => g.gr_key);
-  };
+  // Ticking a condition takes the SRNs the backend found for it (GRN summary, goods
+  // invoice, or all when they equal the bill); the user corrects the rest.
   const toggle = (c) => save(find(c) ? without(c) : [...chosen, {
     po_item: c.po_item, cond_type: c.cond_type, tax_code: DEFAULT_TAX_CODE,
-    ...(bySrn(c) ? { gr_keys: preset(c) } : {}),
+    ...(bySrn(c) ? { gr_keys: c.suggested || [] } : {}),
   }]);
   const setCode = (c, code) => change(c, { tax_code: code });
   const srnTicked = (c, g) => (find(c)?.gr_keys || []).includes(g.gr_key);
@@ -165,7 +160,13 @@ export default function DeliveryCostsCard({ invoice, layout, taxCodes = [], edit
       )}
       {alone && costs.filter((c) => find(c) && bySrn(c) && find(c).gr_keys).map((c) => (
         <div key={`srn-${c.po_item}/${c.cond_type}`} className="mt-3 text-xs">
-          <div className="text-2xs text-neutral-500 mb-1">SRNs whose {c.cond_type} this invoice bills</div>
+          <div className="text-2xs text-neutral-500 mb-1">
+            SRNs whose {c.cond_type} this invoice bills
+            {c.suggested_from && ` · from ${c.suggested_from}`}
+            {editable && c.suggested?.length > 0 && c.suggested.join() !== (find(c).gr_keys || []).join() && (
+              <button type="button" className="ml-2 underline bg-transparent border-none cursor-pointer" onClick={() => change(c, { gr_keys: c.suggested })}>Use these</button>
+            )}
+          </div>
           {c.grs.map((g) => (
             <label key={g.gr_key} className="flex items-center gap-2 py-0.5">
               <input

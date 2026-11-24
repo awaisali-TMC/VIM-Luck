@@ -1480,7 +1480,7 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
 
       {/* Supporting Documents */}
       {!editing && (
-        <AttachmentsCard invoiceId={invoice.id} currentUser={currentUser} />
+        <AttachmentsCard invoiceId={invoice.id} currentUser={currentUser} onSrnsRead={refetch} />
       )}
 
       {/* Audit Trail */}

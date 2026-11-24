@@ -47,7 +47,7 @@ const DOC_TYPES = [
   { value: "work_order", label: "Work Order" },
   { value: "scan", label: "Scanned Document" },
   { value: "payment_proof", label: "Payment Proof" },
-  { value: "goods_receipt", label: "Goods Receipt" },
+  { value: "goods_receipt", label: "Goods Receipt / GRN summary" },
   { value: "contract", label: "Contract" },
   { value: "other", label: "Other" },
 ];
@@ -65,11 +65,12 @@ const DOC_TYPE_VARIANT = {
 
 /* ── Component ─────────────────────────────────────────────────────────────── */
 
-export default function AttachmentsCard({ invoiceId, currentUser }) {
+export default function AttachmentsCard({ invoiceId, currentUser, onSrnsRead }) {
   const [attachments, setAttachments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState(null);
+  const [notice, setNotice] = useState(null);   // what was read from a GRN summary
   const [docType, setDocType] = useState("other");
   const [showUpload, setShowUpload] = useState(false);
   const fileInputRef = useRef(null);
@@ -96,8 +97,9 @@ export default function AttachmentsCard({ invoiceId, currentUser }) {
     if (!file) return;
     setUploading(true);
     setError(null);
+    setNotice(null);
     try {
-      await uploadAttachment(
+      const saved = await uploadAttachment(
         invoiceId,
         file,
         docType,
@@ -106,6 +108,10 @@ export default function AttachmentsCard({ invoiceId, currentUser }) {
         currentUser?.role || "",
       );
       fetchAttachments();
+      if (saved?.srn_message) {
+        setNotice(saved.srn_message);
+        onSrnsRead?.();
+      }
       setShowUpload(false);
       setDocType("other");
     } catch (err) {
@@ -152,6 +158,8 @@ export default function AttachmentsCard({ invoiceId, currentUser }) {
           {showUpload ? "Cancel" : "+ Attach File"}
         </Button>
       </div>
+
+      {notice && <div className="mb-3 bg-info-bg border border-info-base rounded-md px-3 py-2 text-2xs text-info-dark">{notice}</div>}
 
       {/* Upload area */}
       {showUpload && (

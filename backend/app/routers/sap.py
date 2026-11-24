@@ -31,7 +31,7 @@ from app.security import get_current_internal_user, require_admin
 from app.routers.role_permissions import role_labels, humanize_role
 from app.services.duplicate_detection import duplicate_block_message, find_key_duplicates
 from app.services.gr_suggest import (
-    freight_on_other_invoices, grs_on_other_invoices, matching_grs, suggest_grs,
+    choose_grs, freight_on_other_invoices, sibling_choices, suggest_freight, suggest_grs,
 )
 from app.services.sap_credentials import decrypt_sap_password
 from app.services.srn_list import check_receipts, listed_numbers
@@ -774,6 +774,7 @@ async def get_invoice_delivery_costs(invoice_id: int, db: AsyncSession = Depends
     taken = await freight_on_other_invoices(db, inv)
     grs = {g["gr_key"]: g for g in overview["open"] + overview["closed"]}
     receipts = json.loads(inv.srn_list) if inv.srn_list else []
+    siblings = await sibling_choices(db, inv) if alone else []
     lines = {li.item_number: li for li in po.line_items}
     vendor = inv.sap_vendor_number or po.sap_vendor_number
     for c in costs:
@@ -786,6 +787,8 @@ async def get_invoice_delivery_costs(invoice_id: int, db: AsyncSession = Depends
               "taken_by": taken.get((c["po_item"], c["cond_type"], k))}
              for k, v in c["by_gr"].items() if k in grs and v["amount"] > 0),
             key=lambda g: (g["posting_date"], g["srn"], g["gr_key"]))
+        c["suggested"], c["suggested_from"] = suggest_freight(
+            inv, [{**g, "gr": grs[g["gr_key"]]} for g in c["grs"]], siblings) if alone else ([], None)
         try:
             mine = (own.get((c["po_item"], c["cond_type"])) if alone else None) or gr_keys
             c["park_amount"], c["park_quantity"] = delivery_for_grs(c, mine)
@@ -1502,11 +1505,11 @@ async def post_invoice_to_sap_endpoint(
             raise HTTPException(status_code=502, detail="Could not read goods receipts from SAP.")
         if invoice.parking_gr_refs is None:
             # Nobody chose (the card was never opened): what it would have ticked.
-            gr_selection = matching_grs(
+            gr_selection = await choose_grs(
+                db, invoice,
                 {gi["po_item"]: gi["quantity"] for gi in goods_items
                  if gi["po_item"] in grbased_po_items - service_po_items},
-                list(open_grs.values()), await grs_on_other_invoices(db, invoice), invoice.sap_document_number,
-                json.loads(invoice.srn_list) if invoice.srn_list else None)
+                list(open_grs.values()))
             gr_auto = bool(gr_selection)
         # A GR-based item with no ticked GR goes on its latest GR as ONE row. That
         # only holds while the bill fits that GR: 424.94 MT once went on a 74.16 MT
