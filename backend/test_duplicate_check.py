@@ -93,12 +93,12 @@ def _po_id(client, po_number):
     return body.get("po_id") or body.get("id") or (body.get("po") or {}).get("id")
 
 
-def _save(client, invoice_number, ntn=NTN, po_reference=PO):
+def _save(client, invoice_number, ntn=NTN, po_reference=PO, status="validated"):
     payload = {
         "original_filename": "dup.pdf", "stored_filepath": "dup", "mime_type": "application/pdf",
         "invoice_number": invoice_number, "invoice_date": "2026-03-12", "currency": "PKR",
         "supplier_name": "Haier Pakistan (Pvt) Ltd", "supplier_ntn": ntn,
-        "document_type": "invoice", "status": "validated", "source_type": "upload",
+        "document_type": "invoice", "status": status, "source_type": "upload",
         "po_reference": po_reference,
         "subtotal_amount": 3700000, "tax_amount": 0, "total_amount": 3700000,
         "line_items": [dict(LINE)],
@@ -155,6 +155,26 @@ def test_api(client):
     still = client.get(f"/api/invoices/{b}").json()
     expect("the refused invoice is unchanged", still["status"] == "validated" and not still.get("sap_document_number"),
            (still["status"], still.get("sap_document_number")))
+
+    print("\nAPI: the Validate button")
+    v = _save(client, ref, status="pending_processing")     # not matched: printed PO only
+    r = client.patch(f"/api/invoices/{v}/status", json={"status": "validated"})
+    expect(f"duplicate, not matched yet: Validate -> 409 (got {r.status_code})", _is_dup_block(r), r.text[:200])
+    expect("... and it stays unvalidated",
+           client.get(f"/api/invoices/{v}").json()["status"] == "pending_processing")
+    r = client.patch(f"/api/invoices/{v}/status", json={"status": "exception"})
+    expect(f"... it can still be flagged as exception (got {r.status_code})", r.status_code == 200, r.text[:160])
+    r = client.patch(f"/api/invoices/{v}/status", json={"status": "validated"})
+    expect(f"... but not validated from there either (got {r.status_code})", _is_dup_block(r), r.text[:200])
+    n = _save(client, ref, po_reference=None, status="pending_processing")
+    r = client.patch(f"/api/invoices/{n}/status", json={"status": "validated"})
+    expect(f"no PO known: cannot be judged, Validate passes (got {r.status_code})", r.status_code == 200, r.text[:200])
+    _match(client, n, po_id)
+    r = client.post(f"/api/sap/invoices/{n}/post", json={"mode": "park"})
+    expect(f"... and it is caught once matched (got {r.status_code})", _is_dup_block(r), r.text[:200])
+    ok = _save(client, f"{ref}-OK", status="pending_processing")
+    r = client.patch(f"/api/invoices/{ok}/status", json={"status": "validated"})
+    expect(f"not a duplicate: Validate -> 200 (got {r.status_code})", r.status_code == 200, r.text[:200])
 
     print("\nAPI: the original is never blocked by a later copy")
     expect("original is not a duplicate", _dups(client, a).get("is_duplicate") is False)

@@ -118,7 +118,7 @@ VALID_TRANSITIONS = {
 }
 
 # Target statuses a duplicate invoice (services/duplicate_detection.py) is refused.
-DUPLICATE_BLOCKED_STATUSES = ("pending_approval", "approved", "parked", "posted")
+DUPLICATE_BLOCKED_STATUSES = ("validated", "pending_approval", "approved", "parked", "posted")
 
 
 def _clamp(v, n):
@@ -1149,7 +1149,7 @@ async def update_invoice_status(
             detail=f"Cannot transition from '{invoice.status}' to '{target.value}'. Allowed transitions: {allowed}",
         )
 
-    # A duplicate may not move toward approval or SAP.
+    # A duplicate may not be validated or move toward approval or SAP.
     if target.value in DUPLICATE_BLOCKED_STATUSES:
         duplicates = await find_key_duplicates(db, invoice)
         if duplicates:

@@ -5,6 +5,17 @@ Handover from Claude Code sessions on this machine (`D:\VIM\VIM-Luck`). Read
 what is still open. (`HANDOFF.md` is the separate product feature-status doc.)
 Newest session first; §1–§5 below are from session 1 and are still accurate.
 
+## 2026-11-24: duplicates are also refused at Validate
+
+Client: "Invoice 1234 / GRN 12345" twice must not be parked. It already was refused (the key has
+Reference + PO; the GRN is not part of it, but a GRN belongs to one PO). New on the user's yes: the
+**Validate** button refuses it too (`DUPLICATE_BLOCKED_STATUSES`), as soon as the PO is known (matched
+or printed); without a PO it is caught at submit as before.
+**Gaps told to the user, not built:** (1) the same GRN under *another* invoice number while the first
+is only parked; (2) a copy of an invoice deleted from VIM only or set to `exception`; (3) invoices
+entered directly in SAP; (4) `1234` vs `INV-1234`. To ask the client: same number + same PO but
+*another* GRN (blocked today), and whether one GRN may carry partial invoices.
+
 ## 2026-11-24 (LAN test 4): unit of measure = OPU from the PO
 
 Client on invoice 151 (GYPSUM, unit empty): the unit must come from ME23N, **OPU** = MT. The line was
