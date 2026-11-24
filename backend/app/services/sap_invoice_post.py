@@ -164,6 +164,7 @@ def post_invoice_to_sap(
     change_doc_number: str = "",
     change_fiscal_year: str = "",
     withtax_rows: list | None = None,
+    tax_rows: list | None = None,
 ) -> dict:
     """
     Post a vendor invoice to SAP via BAPI_INCOMINGINVOICE_CREATE1.
@@ -282,7 +283,9 @@ def post_invoice_to_sap(
 
         # ── TAXDATA — aggregate tax line (if tax present) ────────
         tax_data_rows = []
-        if tax_amount and tax_amount > 0:
+        if tax_rows is not None:      # one row per tax code (goods + delivery costs)
+            tax_data_rows = [{"TAX_CODE": c, "TAX_AMOUNT": str(a)} for c, a in tax_rows if a and a > 0]
+        elif tax_amount and tax_amount > 0:
             tax_data_rows.append({
                 "TAX_CODE": tax_code,
                 "TAX_AMOUNT": str(tax_amount),

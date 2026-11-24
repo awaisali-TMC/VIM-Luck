@@ -120,6 +120,12 @@ export async function setInvoiceWHT(invoiceId, items) {
   return response.data;
 }
 
+export async function setDeliveryCosts(invoiceId, items) {
+  // Planned delivery costs to park: [{po_item, cond_type, tax_code}].
+  const response = await api.put(`/api/invoices/${invoiceId}/delivery-costs`, { items });
+  return response.data;
+}
+
 export async function setParkingGRs(invoiceId, grKeys) {
   // GR-wise parking: goods receipts ("YYYY/BELNR/BUZEI") this invoice parks against.
   const response = await api.put(`/api/invoices/${invoiceId}/parking-grs`, { gr_keys: grKeys });

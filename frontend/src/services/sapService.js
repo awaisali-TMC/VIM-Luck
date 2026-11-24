@@ -30,6 +30,12 @@ export async function getInvoiceWHT(invoiceId) {
   return response.data;
 }
 
+export async function getDeliveryCosts(invoiceId) {
+  // Open planned delivery costs (freight conditions) of the invoice's matched PO, live from SAP.
+  const response = await api.get(`${BASE}/invoices/${invoiceId}/delivery-costs`);
+  return response.data;
+}
+
 export async function getOpenGRs(invoiceId) {
   // Open (not fully invoiced) goods receipts of the invoice's matched PO, live from SAP.
   const response = await api.get(`${BASE}/invoices/${invoiceId}/open-grs`);

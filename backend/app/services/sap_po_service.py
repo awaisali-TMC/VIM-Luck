@@ -635,7 +635,8 @@ def fetch_gr_overview(po_number: str) -> dict:
         if vgabe == "1":
             g["received"] += qty
             g["amount"] += (_safe_float(r.get("DMBTR") or "") or 0.0) * sign
-            g["moves"].append({"doc": r.get("BELNR", "").strip(), "bwart": r.get("BWART", "").strip(), "qty": round(qty, 3)})
+            g["moves"].append({"key": key(r.get("GJAHR"), r.get("BELNR"), r.get("BUZEI") or "1"),
+                               "doc": r.get("BELNR", "").strip(), "bwart": r.get("BWART", "").strip(), "qty": round(qty, 3)})
         elif vgabe == "2":
             g["invoiced"] += qty
         else:
@@ -740,42 +741,55 @@ def split_by_grs(goods_item: dict, grs: list[dict]) -> list[dict]:
     return rows
 
 
-def fetch_delivery_costs(po_number: str) -> list[dict]:
+def fetch_delivery_costs(po_number: str, overview: dict | None = None) -> list[dict]:
     """Fetch invoiceable PLANNED delivery costs (freight, etc.) for a PO from
     SAP table EKBZ (delivery-cost PO history).
 
-    Each delivery-cost condition (KSCHL, e.g. ZFRT) accrues at goods receipt
-    (VGABE='1') and is consumed when invoiced (VGABE='2'). The open, still-
-    invoiceable amount per (PO item, condition) is GR-accrued − already-invoiced.
+    Each delivery-cost condition (KSCHL, e.g. FRC1) accrues at goods receipt
+    (VGABE='1'; SHKZG H = a reversal, which takes it back) and is consumed when
+    invoiced (VGABE='2'; H = credit memo). Open = accrued - invoiced. VGABE='P'
+    (parked) is only reported, as in fetch_gr_overview().
 
-    Returns a list of:
-        {po_item, cond_type, amount, quantity, currency}
-    (empty when the PO has no GR-accrued delivery costs yet).
+    Pass `overview` (fetch_gr_overview) to also split the accrual by goods
+    receipt: a two-step receipt accrues on its 105 release, which belongs to the
+    103. What can't be tied to a GR is counted in "unassigned".
+
+    Returns a list of {po_item, cond_type, vendor, currency, amount, quantity
+    (both still open), accrued, invoiced, parked, by_gr {gr_key: {amount,
+    quantity}}, unassigned} (empty when no GR accrued any delivery cost).
     """
+    doc_to_gr: dict[str, str] = {}
+    for g in (overview or {}).get("open", []) + (overview or {}).get("closed", []):
+        doc_to_gr[g["gr_key"]] = g["gr_key"]
+        for m in g["moves"]:
+            doc_to_gr[m["key"]] = g["gr_key"]
+    by_doc: dict[str, set] = {}          # year/doc -> GRs, when the item number differs
+    for k, gr in doc_to_gr.items():
+        by_doc.setdefault(k.rsplit("/", 1)[0], set()).add(gr)
+
     sap = _get_connector()
     sap.connect()
     try:
         po_num = po_number.strip().zfill(10)
-        rows = sap.call(
-            "RFC_READ_TABLE",
-            QUERY_TABLE="EKBZ",
-            ROWCOUNT="1000",
-            DELIMITER="|",
-            input_tables={
-                "OPTIONS": [{"TEXT": f"EBELN = '{po_num}'"}],
-                "FIELDS": [
-                    {"FIELDNAME": "EBELP"},   # PO item
-                    {"FIELDNAME": "VGABE"},   # 1=GR, 2=invoice
-                    {"FIELDNAME": "KSCHL"},   # condition type (e.g. ZFRT)
-                    {"FIELDNAME": "MENGE"},   # quantity
-                    {"FIELDNAME": "DMBTR"},   # amount (local currency)
-                    {"FIELDNAME": "WAERS"},   # currency
-                ],
-            },
-            tables=["DATA", "FIELDS"],
-            table_fields={"DATA": ["WA"], "FIELDS": ["FIELDNAME", "OFFSET", "LENGTH"]},
-        )
-        parsed = _parse_delimited_rows(rows.get("DATA", []), rows.get("FIELDS", []))
+        fields = ["EBELP", "VGABE", "SHKZG", "GJAHR", "BELNR", "BUZEI", "KSCHL", "MENGE", "DMBTR", "WAERS"]
+
+        def read(names):
+            rows = sap.call(
+                "RFC_READ_TABLE", QUERY_TABLE="EKBZ", ROWCOUNT="1000", DELIMITER="|",
+                input_tables={"OPTIONS": [{"TEXT": f"EBELN = '{po_num}'"}],
+                              "FIELDS": [{"FIELDNAME": n} for n in names]},
+                tables=["DATA", "FIELDS"],
+                table_fields={"DATA": ["WA"], "FIELDS": ["FIELDNAME", "OFFSET", "LENGTH"]},
+            )
+            return _parse_delimited_rows(rows.get("DATA", []), rows.get("FIELDS", []))
+
+        try:
+            parsed = read(fields + ["LIFNR"])          # LIFNR = the freight vendor
+        except Exception as exc:
+            if "FIELD_NOT_VALID" not in str(exc):
+                raise
+            logger.warning("EKBZ-LIFNR is not readable; freight vendor unknown (%s)", exc)
+            parsed = read(fields)
 
         agg: dict = {}
         for r in parsed:
@@ -786,38 +800,76 @@ def fetch_delivery_costs(po_number: str) -> list[dict]:
                 item = int(r.get("EBELP", "0") or "0")
             except ValueError:
                 item = 0
-            vgabe = r.get("VGABE", "").strip()
-            amt = _safe_float(r.get("DMBTR", "0")) or 0.0
-            qty = _safe_float(r.get("MENGE", "0")) or 0.0
-            key = (item, cond)
-            a = agg.setdefault(key, {
-                "po_item": item, "cond_type": cond,
-                "gr_amount": 0.0, "inv_amount": 0.0, "quantity": 0.0,
+            vendor = r.get("LIFNR", "").strip()
+            sign = -1 if r.get("SHKZG", "").strip() == "H" else 1
+            amt = (_safe_float(r.get("DMBTR", "0")) or 0.0) * sign
+            qty = (_safe_float(r.get("MENGE", "0")) or 0.0) * sign
+            a = agg.setdefault((item, cond), {
+                "po_item": item, "cond_type": cond, "vendor": "",
                 "currency": r.get("WAERS", "").strip() or "PKR",
+                "accrued": 0.0, "invoiced": 0.0, "parked": 0.0, "qty_in": 0.0, "qty_out": 0.0,
+                "by_gr": {}, "unassigned": 0.0,
             })
+            a["vendor"] = a["vendor"] or vendor
+            vgabe = r.get("VGABE", "").strip()
             if vgabe == "1":        # goods receipt accrual
-                a["gr_amount"] += amt
-                a["quantity"] += qty
+                a["accrued"] += amt
+                a["qty_in"] += qty
+                doc = f"{r.get('GJAHR', '').strip()}/{r.get('BELNR', '').strip().zfill(10)}"
+                gr = doc_to_gr.get(f"{doc}/{(r.get('BUZEI', '').strip() or '1').zfill(4)}")
+                if gr is None and len(by_doc.get(doc, ())) == 1:
+                    gr = next(iter(by_doc[doc]))
+                if gr is None:
+                    a["unassigned"] += amt
+                else:
+                    g = a["by_gr"].setdefault(gr, {"amount": 0.0, "quantity": 0.0})
+                    g["amount"] += amt
+                    g["quantity"] += qty
             elif vgabe == "2":      # already invoiced
-                a["inv_amount"] += amt
+                a["invoiced"] += amt
+                a["qty_out"] += qty
+            elif vgabe == "P":
+                a["parked"] += amt
 
         out = []
         for a in sorted(agg.values(), key=lambda x: (x["po_item"], x["cond_type"])):
-            open_amt = round(a["gr_amount"] - a["inv_amount"], 2)
+            open_amt = round(a["accrued"] - a["invoiced"], 2)
             if open_amt <= 0:
                 continue  # nothing left to invoice for this condition
             out.append({
-                "po_item": a["po_item"],
-                "cond_type": a["cond_type"],
-                "amount": open_amt,
-                "quantity": round(a["quantity"], 3),
-                "currency": a["currency"],
+                "po_item": a["po_item"], "cond_type": a["cond_type"], "vendor": a["vendor"],
+                "currency": a["currency"], "amount": open_amt,
+                "quantity": round(a["qty_in"] - a["qty_out"], 3),
+                "accrued": round(a["accrued"], 2), "invoiced": round(a["invoiced"], 2),
+                "parked": round(a["parked"], 2), "unassigned": round(a["unassigned"], 2),
+                "by_gr": {k: {"amount": round(v["amount"], 2), "quantity": round(v["quantity"], 3)}
+                          for k, v in a["by_gr"].items()},
             })
-        logger.info(f"Fetched {len(out)} delivery-cost condition(s) for PO {po_number} from SAP")
+        logger.info("Delivery costs for PO %s: %d EKBZ rows, open %s", po_number, len(parsed),
+                    [(c["po_item"], c["cond_type"], c["amount"], c["vendor"]) for c in out])
         return out
 
     finally:
         sap.disconnect()
+
+
+def delivery_for_grs(cost: dict, gr_keys: list[str]) -> tuple[float, float]:
+    """(amount, quantity) of a delivery cost to invoice: the ticked GRs' share, or
+    everything still open when no GR is ticked. Raises ValueError when that can't
+    be said for certain."""
+    if not gr_keys:
+        return cost["amount"], cost["quantity"]
+    label = f"{cost['cond_type']} on PO item {cost['po_item']}"
+    if abs(cost["unassigned"]) > 0.01:
+        raise ValueError(f"{label}: SAP's delivery-cost history can't be tied to goods receipts "
+                         f"({cost['unassigned']:,.2f} unassigned), so the ticked GRs' share is unknown. "
+                         "Untick all GRs to take the whole open amount.")
+    share = [cost["by_gr"][k] for k in gr_keys if k in cost["by_gr"]]
+    amount = round(sum(x["amount"] for x in share), 2)
+    if amount > cost["amount"] + 0.01:
+        raise ValueError(f"{label}: the ticked GRs carry {amount:,.2f}, but only {cost['amount']:,.2f} is still "
+                         "open (the rest is already invoiced).")
+    return amount, round(sum(x["quantity"] for x in share), 3)
 
 
 def fetch_tax_codes(company_code: str = "1100") -> dict:

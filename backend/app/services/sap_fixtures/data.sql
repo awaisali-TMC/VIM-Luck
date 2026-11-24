@@ -86,8 +86,9 @@ INSERT INTO EKBE (EBELN, EBELP, GJAHR, BELNR, BUZEI, VGABE, BWART, BUDAT, MENGE,
 
 -- Planned delivery cost on the AC order: freight condition FRA1. It is invoiced
 -- through the Goods + planned delivery costs layout, read live from EKBZ.
-INSERT INTO EKBZ (EBELN, EBELP, VGABE, KSCHL, MENGE, DMBTR, WAERS) VALUES
- ('4500009001','00010','1','FRA1','20','25000','PKR');
+INSERT INTO EKBZ (EBELN, EBELP, VGABE, SHKZG, GJAHR, BELNR, BUZEI, LIFNR, KSCHL, MENGE, DMBTR, WAERS) VALUES
+ ('4500009001','00010','1','S','2026','5000009001','0001','0002000101','FRA1','12','15000','PKR'),
+ ('4500009001','00010','1','S','2026','5000009006','0001','0002000101','FRA1','8','10000','PKR');
 
 -- ── Configuration ───────────────────────────────────────────────────────────
 INSERT INTO T001 (BUKRS, LAND1, KTOPL) VALUES ('1100','PK','1100');

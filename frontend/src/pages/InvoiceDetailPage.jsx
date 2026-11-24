@@ -17,6 +17,7 @@ import WorkflowStepper from "../components/detail/WorkflowStepper";
 import InvoiceDetailFields from "../components/detail/InvoiceDetailFields";
 import SAPPostingCard from "../components/detail/SAPPostingCard";
 import SAPWorkflowStatus from "../components/detail/SAPWorkflowStatus";
+import DeliveryCostsCard from "../components/detail/DeliveryCostsCard";
 import WHTComplianceCard from "../components/detail/WHTComplianceCard";
 import LineItemsTable from "../components/upload/LineItemsTable";
 import SalesTaxCard from "../components/upload/SalesTaxCard";
@@ -1385,6 +1386,12 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
       {/* GR-wise parking (observation F): pick the goods receipts to park against */}
       {!editing && invoice.matched_po_id && (
         <GoodsReceiptsCard invoice={invoice} editable={sapFieldsEditable} onChanged={refetch} />
+      )}
+
+      {/* Planned delivery costs (freight): only when "Items to Park" includes them */}
+      {!editing && invoice.matched_po_id
+        && ["delivery", "both"].includes((liveSap ? liveSap.layout : null) || invoice.sap_layout) && (
+        <DeliveryCostsCard invoice={invoice} taxCodes={taxCodes} editable={sapFieldsEditable} onChanged={refetch} />
       )}
 
       {/* SAP Parking parameters — editable during review, locked at approval */}

@@ -547,6 +547,126 @@ def test_gr_selection(client):
     expect("in SAP -> no suggestion any more", og(inv)["suggested"] == [], og(inv)["suggested"])
 
 
+def test_delivery_costs(client):
+    """Planned delivery costs: explicit choice, own tax code, the ticked GRs' share,
+    and never more than the vendor billed."""
+    print("\nPLANNED DELIVERY COSTS (freight)")
+    from app.services.sap_po_service import delivery_for_grs, fetch_delivery_costs, fetch_gr_overview
+    settings.SAP_WORKFLOW_ENABLED = False
+
+    def new(total, tax=0):
+        r = client.post("/api/invoices/save", json={
+            "original_filename": "fr.pdf", "stored_filepath": "demo/fr", "mime_type": "application/pdf",
+            "invoice_number": f"FR-{uuid.uuid4().hex[:8].upper()}", "invoice_date": "2026-03-12",
+            "currency": "PKR", "document_type": "invoice", "status": "validated",
+            "source_type": "upload", "po_reference": PO, "supplier_ntn": "0912345-6",
+            "subtotal_amount": total - tax, "tax_amount": tax, "total_amount": total, "line_items": [dict(LINE)],
+        })
+        i = r.json()["id"]
+        client.post(f"/api/po-matching/invoices/{i}/match", json={"po_id": _po(client)})
+        client.put(f"/api/invoices/{i}", json={"sap_layout": "both"})
+        return i
+
+    def choose(i, code="I0"):
+        return client.put(f"/api/invoices/{i}/delivery-costs",
+                          json={"items": [{"po_item": 10, "cond_type": "FRA1", "tax_code": code}]})
+
+    def park(i):
+        _calls.clear()
+        return client.post(f"/api/sap/invoices/{i}/post", json={"mode": "park", "tax_code": "2I", "layout": "both",
+                                                               "posting_date": "20260312"})
+
+    def sent():
+        kw = next(k for n, k in _calls if n == "BAPI_INCOMINGINVOICE_PARK")
+        rows = kw["input_tables"]["ITEMDATA"]
+        return ([(r["COND_TYPE"], r["QUANTITY"], r["ITEM_AMOUNT"], r["TAX_CODE"]) for r in rows if r.get("COND_TYPE")],
+                kw["input_tables"]["TAXDATA"], kw["input_structures"]["HEADERDATA"]["GROSS_AMOUNT"],
+                {r["TAX_CODE"] for r in rows if not r.get("COND_TYPE")})
+
+    inv = new(4391000, 666000)
+    expect("layout saved", _detail(client, inv).get("sap_layout") == "both", _detail(client, inv).get("sap_layout"))
+    p = park(inv)
+    expect(f"nothing chosen -> refused (got {p.status_code})", p.status_code == 422 and "Choose" in p.text, p.text[:200])
+    b = client.get(f"/api/sap/invoices/{inv}/delivery-costs").json()
+    expect("the PO's freight is listed with vendor and amount",
+           [(c["cond_type"], c["park_amount"], c["park_quantity"], c["other_vendor"]) for c in b["costs"]]
+           == [("FRA1", 25000.0, 20.0, False)], b)
+    r = choose(inv, "")
+    expect(f"no tax code -> refused (got {r.status_code})", r.status_code == 400, r.text[:150])
+    choose(inv)
+    expect("choice saved", _detail(client, inv).get("sap_delivery")
+           == [{"po_item": 10, "cond_type": "FRA1", "tax_code": "I0"}], _detail(client, inv).get("sap_delivery"))
+    p = park(inv)
+    expect(f"goods + 18% + freight 25,000 = billed -> park 200 (got {p.status_code})", p.status_code == 200, p.text[:200])
+    fr, tax, gross, goods_codes = sent()
+    expect("freight row with its own tax code", fr == [("FRA1", "20.0", "25000.0", "I0")] and goods_codes == {"2I"}, (fr, goods_codes))
+
+    expect("18% goods + untaxed freight: one tax row, right total",
+           tax == [{"TAX_CODE": "2I", "TAX_AMOUNT": "666000.0"}] and float(gross) == 4391000, (tax, gross))
+    # Both taxed, different codes -> a TAXDATA row per code.
+    inv = new(3700000 + 666000 + 25000 + 4250, 670250)
+    choose(inv, "I2")
+    p = park(inv)
+    fr, tax, gross, _g = sent() if p.status_code == 200 else (None, None, None, None)
+    expect("freight at 17%: its own TAXDATA row",
+           p.status_code == 200 and tax == [{"TAX_CODE": "2I", "TAX_AMOUNT": "666000.0"},
+                                            {"TAX_CODE": "I2", "TAX_AMOUNT": "4250.0"}], (p.text[:150], tax))
+
+    # The invoice bills goods only (Lucky's invoice 151): never park the freight on top.
+    inv = new(4366000, 666000)
+    choose(inv)
+    p = park(inv)
+    expect(f"freight not on the invoice -> refused with both totals (got {p.status_code})",
+           p.status_code == 422 and "4,391,000.00" in p.text and "4,366,000.00" in p.text
+           and "BAPI_INCOMINGINVOICE_PARK" not in _names(), p.text[:250])
+
+    # Another vendor's freight, per-GR shares, reversals, invoiced and parked rows.
+    conn = fake._store()
+    conn.execute("UPDATE EKBZ SET LIFNR = '0002000102' WHERE EBELN = ?", (PO,))
+    conn.commit()
+    p = park(inv)
+    expect(f"another vendor's freight -> refused (got {p.status_code})", p.status_code == 422 and "2000102" in p.text, p.text[:200])
+    expect("...and flagged in the card",
+           client.get(f"/api/sap/invoices/{inv}/delivery-costs").json()["costs"][0]["other_vendor"] is True)
+    conn.execute("UPDATE EKBZ SET LIFNR = '0002000101' WHERE EBELN = ?", (PO,))
+    conn.commit()
+    client.put(f"/api/invoices/{inv}/parking-grs", json={"gr_keys": ["2026/5000009006/0001"]})
+    c = client.get(f"/api/sap/invoices/{inv}/delivery-costs").json()["costs"][0]
+    expect("only the ticked GR's freight", (c["park_amount"], c["park_quantity"]) == (10000.0, 8.0), c)
+    conn.execute("INSERT INTO EKBZ (EBELN, EBELP, VGABE, SHKZG, GJAHR, BELNR, BUZEI, LIFNR, KSCHL, MENGE, DMBTR, WAERS) VALUES "
+                 "(?,'00010','1','H','2026','5000009099','0001','','FRA1','8','10000','PKR')", (PO,))
+    conn.commit()
+    cost = fetch_delivery_costs(PO, fetch_gr_overview(PO))[0]
+    expect("a reversal takes the freight back", cost["amount"] == 15000.0 and cost["quantity"] == 12.0, cost)
+    try:
+        delivery_for_grs(cost, ["2026/5000009001/0001"])
+        expect("a reversal SAP ties to no known GR -> the ticked share is not guessed", False)
+    except ValueError as exc:
+        expect("a reversal SAP ties to no known GR -> the ticked share is not guessed", "unassigned" in str(exc), exc)
+    conn.execute("DELETE FROM EKBZ WHERE BELNR = '5000009099'")
+    conn.execute("INSERT INTO EKBZ (EBELN, EBELP, VGABE, SHKZG, GJAHR, BELNR, BUZEI, LIFNR, KSCHL, MENGE, DMBTR, WAERS) VALUES "
+                 "(?,'00010','2','S','2026','5105000777','0001','','FRA1','12','15000','PKR')", (PO,))
+    conn.commit()
+    cost = fetch_delivery_costs(PO, fetch_gr_overview(PO))[0]
+    expect("invoiced freight is no longer open", (cost["amount"], cost["quantity"]) == (10000.0, 8.0), cost)
+    try:
+        delivery_for_grs(cost, ["2026/5000009001/0001"])
+        expect("more than still open -> refused", False)
+    except ValueError as exc:
+        expect("more than still open -> refused", "still" in str(exc), exc)
+    conn.execute("DELETE FROM EKBZ WHERE BELNR = '5105000777'")
+    # Two-step receipt: the 105 accrues the freight, it belongs to the 103.
+    for doc, bw, ref in (("5000000200", "103", ""), ("5000000201", "105", "5000000200")):
+        conn.execute("INSERT INTO EKBE (EBELN, EBELP, GJAHR, BELNR, BUZEI, VGABE, BWART, BUDAT, MENGE, DMBTR, SHKZG, LFGJA, LFBNR, LFPOS) "
+                     "VALUES ('4588888888','00010','2026',?,'0001','1',?,'20260301',?,'1000','S',?,?,?)",
+                     (doc, bw, "0" if bw == "103" else "57.52", "2026" if ref else "", ref, "0001" if ref else ""))
+    conn.execute("INSERT INTO EKBZ (EBELN, EBELP, VGABE, SHKZG, GJAHR, BELNR, BUZEI, LIFNR, KSCHL, MENGE, DMBTR, WAERS) VALUES "
+                 "('4588888888','00010','1','S','2026','5000000201','0001','','FRC1','57.52','287600','PKR')")
+    conn.commit()
+    cost = fetch_delivery_costs("4588888888", fetch_gr_overview("4588888888"))[0]
+    expect("a 105's freight belongs to its 103", delivery_for_grs(cost, ["2026/5000000200/0001"]) == (287600.0, 57.52), cost)
+
+
 def test_gr_overview():
     """Why a GR list is empty: closed GRs carry a reason, other EKBE rows are counted."""
     print("\nGR OVERVIEW (why nothing is open)")
@@ -698,6 +818,7 @@ if __name__ == "__main__":
         test_resubmit(client)
         test_unit_from_po(client)
         test_gr_selection(client)
+        test_delivery_costs(client)
         test_gr_overview()
         test_wht(client)
 

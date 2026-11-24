@@ -176,9 +176,10 @@ async def trigger_po_match(
                 and po_line_unit(po_li):
             inv_li.unit = po_line_unit(po_li)
 
-    # GRs chosen on another PO mean nothing on this one.
+    # GRs and delivery costs chosen on another PO mean nothing on this one.
     if invoice.matched_po_id != req.po_id:
         invoice.parking_gr_refs = None
+        invoice.sap_delivery = None
 
     # Update convenience fields on invoice
     invoice.matched_po_id = req.po_id

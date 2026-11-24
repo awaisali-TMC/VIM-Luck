@@ -728,6 +728,51 @@ async def get_invoice_open_grs(invoice_id: int, db: AsyncSession = Depends(get_d
             "suggested": await suggest_grs(db, inv, po, ov["open"])}
 
 
+def _other_vendor(cost_vendor: str, vendor_number: str | None) -> bool:
+    """A delivery cost SAP assigned to another (freight) vendor than the invoice's."""
+    a, b = (cost_vendor or "").strip().lstrip("0"), (vendor_number or "").strip().lstrip("0")
+    return bool(a and b and a != b)
+
+
+@router.get("/invoices/{invoice_id}/delivery-costs")
+async def get_invoice_delivery_costs(invoice_id: int, db: AsyncSession = Depends(get_db)):
+    """The matched PO's open planned delivery costs (freight conditions, EKBZ) with
+    the amount this invoice would park: the ticked GRs' share, or all that is open
+    when none is ticked. `chosen` is what the user ticked (sap_delivery)."""
+    inv = (await db.execute(select(Invoice).where(Invoice.id == invoice_id, Invoice.is_deleted == 0))).scalar_one_or_none()
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    chosen = json.loads(inv.sap_delivery) if inv.sap_delivery else []
+    if not inv.matched_po_id:
+        return {"costs": [], "chosen": chosen, "message": "Match a PO first."}
+    po = (await db.execute(select(PurchaseOrder).options(selectinload(PurchaseOrder.line_items))
+                           .where(PurchaseOrder.id == inv.matched_po_id))).scalar_one_or_none()
+    if not po or not settings.SAP_ENABLED:
+        return {"costs": [], "chosen": chosen, "message": "SAP is not enabled." if po else "PO not found."}
+    _ensure_dll()
+    from app.services.sap_po_service import delivery_for_grs, fetch_delivery_costs, fetch_gr_overview
+    try:
+        overview = await asyncio.to_thread(fetch_gr_overview, po.po_number)
+        costs = await asyncio.to_thread(fetch_delivery_costs, po.po_number, overview)
+    except Exception as exc:
+        logger.exception("Delivery cost read failed for PO %s", po.po_number)
+        reason = " ".join(f"{type(exc).__name__}: {exc}".split())[:300]
+        raise HTTPException(status_code=502, detail=f"Could not read planned delivery costs from SAP — {reason}")
+    gr_keys = json.loads(inv.parking_gr_refs) if inv.parking_gr_refs else []
+    lines = {li.item_number: li for li in po.line_items}
+    vendor = inv.sap_vendor_number or po.sap_vendor_number
+    for c in costs:
+        c["description"] = lines[c["po_item"]].description if c["po_item"] in lines else ""
+        c["unit"] = (lines[c["po_item"]].unit if c["po_item"] in lines else "") or ""
+        c["other_vendor"] = _other_vendor(c["vendor"], vendor)
+        try:
+            c["park_amount"], c["park_quantity"] = delivery_for_grs(c, gr_keys)
+            c["problem"] = None
+        except ValueError as exc:
+            c["park_amount"], c["park_quantity"], c["problem"] = None, None, str(exc)
+    return {"costs": costs, "chosen": chosen, "grs_ticked": len(gr_keys), "message": None}
+
+
 @router.get("/invoices/{invoice_id}/wht")
 async def get_invoice_wht(invoice_id: int, db: AsyncSession = Depends(get_db)):
     """Observation G: the vendor's withholding tax from its BP (LFBW, live from
@@ -1474,35 +1519,50 @@ async def post_invoice_to_sap_endpoint(
                 f"Withholding tax type(s) {', '.join(foreign)} are not maintained as subject in vendor {vendor_number}'s BP "
                 f"for company code {company_code}. Choose from the vendor's own types in the Withholding Tax card."))
 
-    # Planned delivery costs (freight conditions, e.g. ZFRT) read live from SAP
-    # (EKBZ). Only the GR-accrued, still-open amount is invoiceable.
+    # Planned delivery costs (freight conditions, e.g. FRC1) read live from SAP
+    # (EKBZ): only those ticked on the invoice (sap_delivery), each with its own
+    # tax code, for the ticked GRs (or everything still open when none is ticked).
     delivery_items = []
     if eff_layout in ("delivery", "both"):
-        from app.services.sap_po_service import fetch_delivery_costs
+        from app.services.sap_po_service import delivery_for_grs, fetch_delivery_costs, fetch_gr_overview
+        chosen_dc = json.loads(invoice.sap_delivery) if invoice.sap_delivery else []
+        if not chosen_dc:
+            raise HTTPException(status_code=422, detail=(
+                "Choose the planned delivery costs to park in the Planned Delivery Costs card, "
+                "or set Items to Park to Goods/service items."))
         try:
-            dcs = fetch_delivery_costs(po.po_number)
+            overview = await asyncio.to_thread(fetch_gr_overview, po.po_number)
+            dcs = {(c["po_item"], c["cond_type"]): c
+                   for c in await asyncio.to_thread(fetch_delivery_costs, po.po_number, overview)}
         except Exception:
             logger.exception("Failed to read delivery costs for PO %s", po.po_number)
             raise HTTPException(status_code=502, detail="Could not read planned delivery costs from SAP.")
-        if not dcs:
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    "No invoiceable planned delivery costs found on this PO in SAP. "
-                    "A goods receipt for the freight must be posted first."
-                ),
-            )
-        delivery_items = [
-            {
-                "po_item": dc["po_item"],
-                "amount": dc["amount"],
-                "quantity": dc["quantity"],
-                "po_unit": po_item_units.get(dc["po_item"], "ST"),
-                "tax_code": eff_tax_code,
-                "cond_type": dc["cond_type"],   # marks this as a delivery cost
-            }
-            for dc in dcs
-        ]
+        for c in chosen_dc:
+            cost = dcs.get((c["po_item"], c["cond_type"]))
+            name = f"{c['cond_type']} (PO item {c['po_item']})"
+            if cost is None:
+                raise HTTPException(status_code=422, detail=(
+                    f"Delivery cost {name} has nothing left to invoice in SAP: no goods receipt was posted "
+                    "for it, or it is already invoiced."))
+            if _other_vendor(cost["vendor"], vendor_number):
+                raise HTTPException(status_code=422, detail=(
+                    f"Delivery cost {name} belongs to vendor {cost['vendor'].lstrip('0')}, but this invoice is "
+                    f"parked for vendor {vendor_number.lstrip('0')}. Untick it."))
+            try:
+                amount, qty = delivery_for_grs(cost, gr_selection)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc))
+            if amount <= 0:
+                raise HTTPException(status_code=422, detail=(
+                    f"The ticked goods receipts carry no delivery cost {name}. Untick it, or tick its GRs."))
+            delivery_items.append({
+                "po_item": cost["po_item"],
+                "amount": amount,
+                "quantity": qty,
+                "po_unit": po_item_units.get(cost["po_item"], "ST"),
+                "tax_code": c["tax_code"],
+                "cond_type": cost["cond_type"],   # marks this as a delivery cost
+            })
 
     if eff_layout == "goods":
         sap_line_items = goods_items
@@ -1522,11 +1582,18 @@ async def post_invoice_to_sap_endpoint(
             detail="No items to park for this layout. Run/adjust PO matching first.",
         )
 
-    # Gross = sum of the items actually sent + tax (delivery-only carries no goods GST).
+    # Gross = sum of the items actually sent + tax. Goods are taxed with the invoice's
+    # tax code, each delivery cost with its own.
     sent_net = round(sum(float(li["amount"]) for li in sap_line_items), 2)
     full_tax = float(invoice.tax_amount or invoice.gst_amount or 0)
     from app.services.sap_po_service import tax_rate_for_code
     code_rate = tax_rate_for_code(company_code, eff_tax_code)
+    goods_net = round(sum(float(li["amount"]) for li in sap_line_items if not li.get("cond_type")), 2)
+    tax_by_code: dict[str, float] = {}
+    for li in delivery_items:
+        rate = tax_rate_for_code(company_code, li["tax_code"]) or 0
+        tax_by_code[li["tax_code"]] = tax_by_code.get(li["tax_code"], 0.0) + round(li["amount"] * rate / 100.0, 2)
+    delivery_tax = round(sum(tax_by_code.values()), 2)
     # "Partial" = a proper subset of the invoice's lines (selected_ids is also
     # populated when the user keeps ALL lines — that's still a full park).
     all_line_ids = {li.id for li in invoice.line_items}
@@ -1539,23 +1606,35 @@ async def post_invoice_to_sap_endpoint(
         # impossible rates. Compute the selection's tax from the chosen SAP tax
         # code's rate — exactly what SAP itself would assess for these lines.
         if code_rate:
-            tax_amount_used = round(sent_net * (code_rate / 100.0), 2)
+            tax_amount_used = round(goods_net * (code_rate / 100.0), 2)
         elif full_tax > 0:
             # No known rate for the code — fall back to prorating the header tax.
             full_net = round(sum(float(li.amount or 0) for li in invoice.line_items), 2) \
                 or float(invoice.subtotal_amount or 0)
-            tax_amount_used = round(full_tax * (sent_net / full_net), 2) if full_net else full_tax
+            tax_amount_used = round(full_tax * (goods_net / full_net), 2) if full_net else full_tax
         else:
             tax_amount_used = 0
     elif full_tax > 0:
-        # Full park: the invoice carries its own tax — keep the document's value.
-        tax_amount_used = full_tax
+        # Full park: the invoice carries its own tax — keep the document's value
+        # (which includes the delivery costs' tax).
+        tax_amount_used = round(max(full_tax - delivery_tax, 0), 2)
     else:
         # No tax on the invoice — derive it from the chosen SAP tax code's rate
         # (e.g. AY = 19.5%). Exempt/0% codes (I0) yield no tax.
-        tax_amount_used = round(sent_net * (code_rate / 100.0), 2) if code_rate else 0
+        tax_amount_used = round(goods_net * (code_rate / 100.0), 2) if code_rate else 0
 
-    gross_amount = round(sent_net + (tax_amount_used or 0), 2)
+    tax_by_code[eff_tax_code] = round(tax_by_code.get(eff_tax_code, 0.0) + (tax_amount_used or 0), 2)
+    tax_amount_used = round((tax_amount_used or 0) + delivery_tax, 2)
+    gross_amount = round(sent_net + tax_amount_used, 2)
+
+    # Delivery costs come from the PO, not from the paper: never park more than
+    # the vendor billed (a goods-only invoice with the PO's freight on top).
+    billed_total = float(invoice.total_amount or 0)
+    if delivery_items and billed_total and eff_currency == (invoice.currency or "PKR") and gross_amount > billed_total + 1:
+        raise HTTPException(status_code=422, detail=(
+            f"With the delivery costs SAP would get {gross_amount:,.2f}, but the vendor's invoice is "
+            f"{billed_total:,.2f}. If the freight is not on this invoice, untick it or set Items to Park "
+            "to Goods/service items."))
 
     # ── Lucky Cement: approval hierarchy must exist (ZINI_VERIFY) ──
     # For the parking user's SAP employee ID and the gross amount actually sent.
@@ -1619,6 +1698,7 @@ async def post_invoice_to_sap_endpoint(
             # the vendor's BP defaults itself.
             withtax_rows=[{"WI_TAX_TYPE": w["wht_type"], "WI_TAX_CODE": w["wht_code"]}
                           for w in (json.loads(invoice.sap_wht) if invoice.sap_wht else [])],
+            tax_rows=sorted(tax_by_code.items()) if delivery_items else None,
             change_doc_number=(invoice.sap_document_number or "") if req.mode == "change" else "",
             change_fiscal_year=(invoice.sap_fiscal_year or "") if req.mode == "change" else "",
         )

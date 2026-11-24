@@ -70,6 +70,11 @@ CREATE TABLE EKBZ (
     EBELN TEXT,
     EBELP TEXT,
     VGABE TEXT,
+    SHKZG TEXT,   -- S = accrual/invoice, H = reversal/credit
+    GJAHR TEXT,
+    BELNR TEXT,   -- the goods receipt (or invoice) that accrued (consumed) it
+    BUZEI TEXT,
+    LIFNR TEXT,   -- the freight vendor
     KSCHL TEXT,   -- condition type (FRA1 freight, ZOLL customs, ...)
     MENGE TEXT,
     DMBTR TEXT,

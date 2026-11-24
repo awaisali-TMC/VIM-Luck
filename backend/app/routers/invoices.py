@@ -288,6 +288,7 @@ def _build_detail_response(invoice: Invoice) -> InvoiceDetailResponse:
         parking_line_item_ids=(json.loads(invoice.parking_line_item_ids) if invoice.parking_line_item_ids else None),
         parking_gr_refs=(json.loads(invoice.parking_gr_refs) if invoice.parking_gr_refs else None),
         sap_wht=(json.loads(invoice.sap_wht) if invoice.sap_wht else None),
+        sap_delivery=(json.loads(invoice.sap_delivery) if invoice.sap_delivery else None),
         # PO matching
         matched_po_id=invoice.matched_po_id,
         latest_po_match_status=invoice.latest_po_match_status,
@@ -1088,6 +1089,7 @@ async def update_invoice(
             invoice.matched_po_id = None
             invoice.latest_po_match_status = None
             invoice.parking_gr_refs = None
+            invoice.sap_delivery = None
 
         # Remove existing line items
         for existing_li in list(invoice.line_items):
@@ -1273,6 +1275,11 @@ class WhtSelection(BaseModel):
     items: list[dict]
 
 
+class DeliverySelection(BaseModel):
+    # [{po_item, cond_type, tax_code}]; [] = none
+    items: list[dict]
+
+
 class GrSelection(BaseModel):
     gr_keys: list[str]          # "YYYY/BELNR/BUZEI"; [] = latest GR per item (default)
 
@@ -1322,6 +1329,40 @@ async def set_invoice_wht(
     invoice.sap_wht = json.dumps(items) if items else None
     await db.commit()
     return {"success": True, "sap_wht": items or None}
+
+
+@router.put("/{invoice_id}/delivery-costs")
+async def set_delivery_costs(
+    invoice_id: int,
+    data: DeliverySelection,
+    db: AsyncSession = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+):
+    """Planned delivery costs (freight conditions) to park, each with its tax code."""
+    result = await db.execute(select(Invoice).where(Invoice.id == invoice_id, Invoice.is_deleted == 0))
+    invoice = result.scalar_one_or_none()
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    _assert_can_access(invoice, principal)
+    if _locked_in_sap(invoice):
+        raise HTTPException(status_code=409, detail="Invoice is in SAP — its delivery costs can't be changed.")
+    items, seen = [], set()
+    for it in data.items:
+        cond = str(it.get("cond_type") or "").strip().upper()[:4]
+        code = str(it.get("tax_code") or "").strip().upper()[:2]
+        try:
+            po_item = int(it.get("po_item"))
+        except (TypeError, ValueError):
+            po_item = 0
+        if not cond or not po_item or (po_item, cond) in seen:
+            continue
+        if not code:
+            raise HTTPException(status_code=400, detail=f"Choose a tax code for {cond}.")
+        seen.add((po_item, cond))
+        items.append({"po_item": po_item, "cond_type": cond, "tax_code": code})
+    invoice.sap_delivery = json.dumps(items) if items else None
+    await db.commit()
+    return {"success": True, "sap_delivery": items}
 
 
 @router.put("/{invoice_id}/parking-grs")

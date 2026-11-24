@@ -5,6 +5,29 @@ Handover from Claude Code sessions on this machine (`D:\VIM\VIM-Luck`). Read
 what is still open. (`HANDOFF.md` is the separate product feature-status doc.)
 Newest session first; §1–§5 below are from session 1 and are still accurate.
 
+## 2026-11-24: PO 1010027885 in MIR7: several GRNs + conditions (freight park fixed, offline only)
+
+Client's screens for the same vendor invoice (424.94 MT): six GR lines 57.52 / 58.96 / 79.48 / 78.14 /
+76.68 / 74.16 = **424.94** = 254,964 with tax code `2I`, plus **FRC1** freight 5,000/MT = 2,124,700 with
+tax code `I0`, plus a `GSTR` row without amount. ME23N conditions: PBXX 600, FRC1 5,000, GSF1 15%, GSTR 18%;
+OUn = OPU = MT. The paper invoice is 300,857.52 (goods + 18% only, no freight), so it is layout
+**Goods/service items**; the goods side is what VIM builds. **Layout "both"/"delivery" was wrong in
+four ways, fixed on the user's yes:**
+1. EKBZ rows are added without `SHKZG`, so reversed GRs inflate the freight.
+2. The whole open freight of the PO is sent, not that of the ticked GRs.
+3. The goods tax code (`2I`) is sent on the freight; the client uses `I0` there.
+4. Every open condition is sent, with no choice and no check of its own (freight) vendor.
+Now: new *Planned Delivery Costs* card (only with layout delivery/both), `invoices.sap_delivery` (new
+column, migrated), signs, per-GR share, own tax code per condition, freight-vendor check, and a park
+refused when goods + freight + tax exceed the vendor's invoice total. Details in CLAUDE.md.
+- **Never run on AUP.** Unconfirmed: EKBZ `SHKZG`/`GJAHR`/`BELNR`/`BUZEI`/`LIFNR` names (LIFNR falls back),
+  whether `TMC_VIM` may read EKBZ, whether a delivery row needs `REF_DOC` on a GR-based PO item, and
+  whether a freight row accrues on the 105. A separate transporter bill can't be parked (VIM parks
+  under the PO's vendor).
+- A fake SAP file (`SAP_FAKE_DB_PATH`) made before this lacks the new EKBZ columns: delete it once.
+- Asked of the client: freight on the same invoice or a separate transporter bill; freight tax code
+  (`I0` or 15%); are GSTR / GSF1 lines parked.
+
 ## 2026-11-24: SAP status re-read when the invoice page opens (after `ee4842d`)
 
 User: the status must refresh on load, without clicking "Refresh from SAP". `SAPWorkflowStatus.jsx`
