@@ -650,6 +650,8 @@ def fetch_gr_overview(po_number: str) -> dict:
         g["received"], g["invoiced"], g["parked"] = net, round(g["invoiced"], 3), round(g["parked"], 3)
         g["open_qty"] = max(open_qty, 0.0)
         g["open_amount"] = round(g["amount"] * (open_qty / net), 2) if net > 0 and open_qty > 0 else 0.0
+        # The number Lucky calls the SRN: the 105 release of a two-step receipt.
+        g["srn"] = [m["doc"] for m in g["moves"] if m["bwart"] == "105" and m["qty"] > 0] or [g["gr_doc"]]
         g["reason"] = None if open_qty > 0 else (
             "fully invoiced" if net > 0 else "reversed" if g["moves"] else "in blocked stock, not released (105)")
         (out if open_qty > 0 else closed).append(g)

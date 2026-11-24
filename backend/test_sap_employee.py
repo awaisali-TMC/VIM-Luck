@@ -210,6 +210,8 @@ def _new_invoice(client):
     })
     inv_id = r.json()["id"]
     m = client.post(f"/api/po-matching/invoices/{inv_id}/match", json={"po_id": _po_id})
+    client.put(f"/api/invoices/{inv_id}/parking-grs",
+               json={"gr_keys": ["2026/5000009001/0001", "2026/5000009006/0001"]})
     expect(f"match invoice {inv_id} -> 200 (got {m.status_code})", m.status_code == 200, m.text[:160])
     return inv_id
 

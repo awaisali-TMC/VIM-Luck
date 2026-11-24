@@ -292,6 +292,7 @@ export default function SupplierPortal({ user, onLogout }) {
           mime_type: extractionFile?.type || "application/pdf",
           file_size_bytes: extractionFile?.size || 0,
           page_count: extractionResult.page_count,
+          goods_receipts: extractionResult.goods_receipts || null,
           status,
           source_type: "supplier",
           line_items: extractionResult.line_items.map((li, idx) => {

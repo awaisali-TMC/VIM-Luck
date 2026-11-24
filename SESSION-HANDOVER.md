@@ -5,6 +5,39 @@ Handover from Claude Code sessions on this machine (`D:\VIM\VIM-Luck`). Read
 what is still open. (`HANDOFF.md` is the separate product feature-status doc.)
 Newest session first; §1–§5 below are from session 1 and are still accurate.
 
+## 2026-11-24: client can attach goods invoice + freight invoice + GRN summary together (built, offline only)
+
+Client: one PDF of scanned pages. The extraction prompt now reads the SRN rows (`goods_receipts`), the
+file is split into goods and freight drafts as before, both get the SRNs (`invoices.srn_list`, new
+column), and after the PO match exactly those SRNs are ticked, checked against SAP (details in
+CLAUDE.md). `test_srn_list.py` passes with Gemini **stubbed**: how well it reads a real scan is
+**not tested**, and no sample file has been received. Nothing run on AUP or in a browser.
+
+## 2026-11-24: freight comes on its own invoice (answer from the client)
+
+"Freight ki alag invoice milti hai". Their SRN report (PO 1010027885) has one line per SRN with product,
+18% sales tax and freight at 5,000/MT without tax; **SRN No. = the 105 document** (`5002029076`-`81`), while
+VIM's GR key is the 103 (`5002029070`-`75`), so the GR card now prints the SRN too. Built: layout
+"Planned delivery costs" = freight-only invoice with its own SRN ticks, double-billing refused, total
+must equal the invoice (details in CLAUDE.md). Offline tests and build pass; **nothing of it has run on
+AUP**.
+- **Still to ask:** is the freight invoice from Hamza Trading or from a transporter (another SAP
+  vendor)? VIM parks under the PO's vendor only. And the freight tax code (`I0` in the first MIR7
+  screen, `2I` in the second, 15% in the PO's GSF1).
+- MIR7's balance on the second screen is 127,482 above goods + freight; not explained.
+
+## 2026-11-24 (LAN test 5): invoice 58 (151) on PO 1010027885
+
+Full-page screenshot of the parked + REJ invoice. **Confirmed on AUP:** the 103/105 GR list (`675bb9d`):
+six open GRs `5002029070`-`75`, 57.52 / 58.96 / 79.48 / 78.14 / 76.68 / 74.16 MT, the same as the client's
+MIR7; the five subject WHT types, ticked, estimates right; FBR badges and profile; REJ read back.
+**Problem:** no GR is ticked on it. It was parked (10:47) with nothing ticked, so by the code the whole
+424.94 went on the **latest** GR (`5002029075`, 74.16 MT) as one row; check MIR4 `5105660695`. The
+auto-tick skips invoices that are already in SAP, REJ included. Workaround: tick the six, Resubmit.
+**Built on the user's yes:** auto-tick for REJ invoices; the park uses the same suggestion when nobody
+chose; a park with nothing ticked is refused when a GR-based item bills more than its latest GR has
+open. Offline tests and build pass; the Resubmit with six rows has not run on AUP.
+
 ## 2026-11-24: PO 1010027885 in MIR7: several GRNs + conditions (freight park fixed, offline only)
 
 Client's screens for the same vendor invoice (424.94 MT): six GR lines 57.52 / 58.96 / 79.48 / 78.14 /

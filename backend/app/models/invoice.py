@@ -136,6 +136,7 @@ class Invoice(Base):
     # list of "YYYY/BELNR/BUZEI" keys (sap_po_service.fetch_open_grs). Null/empty
     # = let the park pick the latest GR per PO item, as before.
     parking_gr_refs = Column(Text, nullable=True)
+    srn_list = Column(Text, nullable=True)       # JSON: SRNs on the attached GRN summary
     sap_delivery = Column(Text, nullable=True)   # JSON: planned delivery costs to park
     # Observation G: WHT type/code chosen on the invoice, JSON
     # [{wht_type, wht_code}]. Null = the vendor's BP (LFBW) defaults, which SAP

@@ -48,6 +48,7 @@ from app.services.duplicate_detection import (
 )
 from app.services.invoice_classifier import classify_invoice
 from app.services.po_units import missing_line_units
+from app.services.srn_list import clean_receipts, share_receipts
 
 logger = logging.getLogger(__name__)
 
@@ -288,6 +289,7 @@ def _build_detail_response(invoice: Invoice) -> InvoiceDetailResponse:
         parking_line_item_ids=(json.loads(invoice.parking_line_item_ids) if invoice.parking_line_item_ids else None),
         parking_gr_refs=(json.loads(invoice.parking_gr_refs) if invoice.parking_gr_refs else None),
         sap_wht=(json.loads(invoice.sap_wht) if invoice.sap_wht else None),
+        srn_list=(json.loads(invoice.srn_list) if invoice.srn_list else None),
         sap_delivery=(json.loads(invoice.sap_delivery) if invoice.sap_delivery else None),
         # PO matching
         matched_po_id=invoice.matched_po_id,
@@ -366,6 +368,7 @@ def _extraction_to_draft(result: dict, filename: str, stored_path: str,
         warnings=json.dumps(result.get("warnings")) if result.get("warnings") else None,
         detected_taxes=json.dumps(result.get("detected_taxes")) if result.get("detected_taxes") else None,
         processing_time_ms=result.get("processing_time_ms"),
+        srn_list=json.dumps(result.get("goods_receipts")) if result.get("goods_receipts") else None,
         status=InvoiceStatus.DRAFT.value,
         supplier_id=supplier_id,
         source_type=source_type,
@@ -467,6 +470,12 @@ async def _save_multi_invoice_drafts(db: AsyncSession, file_content: bytes,
     stem = (filename or "invoice").rsplit(".", 1)[0]
 
     async def _flush() -> list[Invoice]:
+        # The GRN summary sits in one part but covers the goods AND freight invoice.
+        shared = share_receipts(
+            [(d.po_reference, json.loads(d.srn_list) if d.srn_list else []) for d in drafts],
+            clean_receipts(first_result.get("goods_receipts")))
+        for d, receipts in zip(drafts, shared):
+            d.srn_list = json.dumps(receipts) if receipts else None
         for d in drafts:
             db.add(d)
         await db.commit()
@@ -605,6 +614,7 @@ async def upload_invoice(
         product_match_processing_time_ms=None,
         line_items_source=result.get("line_items_source", "gemini"),
         attention_flags=[AttentionFlag(**f) for f in result.get("attention_flags", [])],
+        goods_receipts=result.get("goods_receipts") or [],
     )
 
 
@@ -768,6 +778,7 @@ async def save_invoice(
         base_total_amount=data.base_total_amount,
         # Non-PO lane marker + resolved vendor (both None for the PO flow)
         sap_vendor_number=_clamp(data.sap_vendor_number, 20),
+        srn_list=json.dumps(receipts) if (receipts := clean_receipts(data.goods_receipts)) else None,
     )
 
     for li_data in data.line_items:
@@ -1276,7 +1287,8 @@ class WhtSelection(BaseModel):
 
 
 class DeliverySelection(BaseModel):
-    # [{po_item, cond_type, tax_code}]; [] = none
+    # [{po_item, cond_type, tax_code, gr_keys?}]; [] = none. gr_keys: the GRs whose
+    # freight a freight-only invoice bills (omitted = all that is open).
     items: list[dict]
 
 
@@ -1359,7 +1371,10 @@ async def set_delivery_costs(
         if not code:
             raise HTTPException(status_code=400, detail=f"Choose a tax code for {cond}.")
         seen.add((po_item, cond))
-        items.append({"po_item": po_item, "cond_type": cond, "tax_code": code})
+        item = {"po_item": po_item, "cond_type": cond, "tax_code": code}
+        if isinstance(it.get("gr_keys"), list):
+            item["gr_keys"] = [str(k).strip() for k in it["gr_keys"] if str(k).strip()]
+        items.append(item)
     invoice.sap_delivery = json.dumps(items) if items else None
     await db.commit()
     return {"success": True, "sap_delivery": items}

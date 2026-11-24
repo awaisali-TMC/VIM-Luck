@@ -30,8 +30,11 @@ from app.models.internal_user import InternalUser
 from app.security import get_current_internal_user, require_admin
 from app.routers.role_permissions import role_labels, humanize_role
 from app.services.duplicate_detection import duplicate_block_message, find_key_duplicates
-from app.services.gr_suggest import suggest_grs
+from app.services.gr_suggest import (
+    freight_on_other_invoices, grs_on_other_invoices, matching_grs, suggest_grs,
+)
 from app.services.sap_credentials import decrypt_sap_password
+from app.services.srn_list import check_receipts, listed_numbers
 from app.services.invoice_line_rules import (
     find_zero_quantity_goods,
     route_invoice_lines,
@@ -721,11 +724,16 @@ async def get_invoice_open_grs(invoice_id: int, db: AsyncSession = Depends(get_d
         li = lines.get(g["po_item"])
         g["description"] = li.description if li else ""
         g["unit"] = (li.unit if li else "") or ""
+    receipts = json.loads(inv.srn_list) if inv.srn_list else []
+    for g in ov["open"]:
+        g["listed"] = bool(listed_numbers(receipts, g))
     return {"po_number": po.po_number, "grs": ov["open"], "closed": ov["closed"],
             "ekbe_rows": ov["rows"], "unused": ov["unused"], "selected": selected,
             # chosen: a selection was saved, even an empty one (the user unticked all).
             "chosen": inv.parking_gr_refs is not None,
-            "suggested": await suggest_grs(db, inv, po, ov["open"])}
+            "suggested": await suggest_grs(db, inv, po, ov["open"]),
+            # The attached GRN summary: how many SRNs it lists, and what SAP disagrees with.
+            "srn_count": len(receipts), "srn_problems": check_receipts(receipts, ov["open"], ov["closed"])}
 
 
 def _other_vendor(cost_vendor: str, vendor_number: str | None) -> bool:
@@ -758,15 +766,29 @@ async def get_invoice_delivery_costs(invoice_id: int, db: AsyncSession = Depends
         logger.exception("Delivery cost read failed for PO %s", po.po_number)
         reason = " ".join(f"{type(exc).__name__}: {exc}".split())[:300]
         raise HTTPException(status_code=502, detail=f"Could not read planned delivery costs from SAP — {reason}")
-    gr_keys = json.loads(inv.parking_gr_refs) if inv.parking_gr_refs else []
+    # Freight on its own invoice (layout "delivery") has its own GR choice; with
+    # goods on the same invoice it follows the ticked goods receipts.
+    alone = inv.sap_layout == "delivery"
+    gr_keys = json.loads(inv.parking_gr_refs) if inv.parking_gr_refs and not alone else []
+    own = {(x["po_item"], x["cond_type"]): x.get("gr_keys") for x in chosen}
+    taken = await freight_on_other_invoices(db, inv)
+    grs = {g["gr_key"]: g for g in overview["open"] + overview["closed"]}
+    receipts = json.loads(inv.srn_list) if inv.srn_list else []
     lines = {li.item_number: li for li in po.line_items}
     vendor = inv.sap_vendor_number or po.sap_vendor_number
     for c in costs:
         c["description"] = lines[c["po_item"]].description if c["po_item"] in lines else ""
         c["unit"] = (lines[c["po_item"]].unit if c["po_item"] in lines else "") or ""
         c["other_vendor"] = _other_vendor(c["vendor"], vendor)
+        c["grs"] = [] if abs(c["unassigned"]) > 0.01 else sorted(
+            ({"gr_key": k, "srn": grs[k]["srn"], "posting_date": grs[k]["posting_date"], **v,
+              "listed": bool(listed_numbers(receipts, grs[k])),
+              "taken_by": taken.get((c["po_item"], c["cond_type"], k))}
+             for k, v in c["by_gr"].items() if k in grs and v["amount"] > 0),
+            key=lambda g: (g["posting_date"], g["srn"], g["gr_key"]))
         try:
-            c["park_amount"], c["park_quantity"] = delivery_for_grs(c, gr_keys)
+            mine = (own.get((c["po_item"], c["cond_type"])) if alone else None) or gr_keys
+            c["park_amount"], c["park_quantity"] = delivery_for_grs(c, mine)
             c["problem"] = None
         except ValueError as exc:
             c["park_amount"], c["park_quantity"], c["problem"] = None, None, str(exc)
@@ -1468,13 +1490,40 @@ async def post_invoice_to_sap_endpoint(
     # replacing the default "latest GR" reference for those PO items. Items
     # with no ticked GR keep the default. Service items are not affected.
     gr_selection = json.loads(invoice.parking_gr_refs) if invoice.parking_gr_refs else []
-    if gr_selection and eff_layout in ("goods", "both"):
-        from app.services.sap_po_service import fetch_open_grs, split_by_grs
+    gr_auto = False
+    open_grs: dict[str, dict] = {}
+    if eff_layout in ("goods", "both") and (
+            gr_selection or any(gi["po_item"] in grbased_po_items - service_po_items for gi in goods_items)):
+        from app.services.sap_po_service import fetch_open_grs
         try:
-            open_grs = {g["gr_key"]: g for g in fetch_open_grs(po.po_number)}
+            open_grs = {g["gr_key"]: g for g in await asyncio.to_thread(fetch_open_grs, po.po_number)}
         except Exception:
             logger.exception("Open-GR read failed for PO %s", po.po_number)
             raise HTTPException(status_code=502, detail="Could not read goods receipts from SAP.")
+        if invoice.parking_gr_refs is None:
+            # Nobody chose (the card was never opened): what it would have ticked.
+            gr_selection = matching_grs(
+                {gi["po_item"]: gi["quantity"] for gi in goods_items
+                 if gi["po_item"] in grbased_po_items - service_po_items},
+                list(open_grs.values()), await grs_on_other_invoices(db, invoice), invoice.sap_document_number,
+                json.loads(invoice.srn_list) if invoice.srn_list else None)
+            gr_auto = bool(gr_selection)
+        # A GR-based item with no ticked GR goes on its latest GR as ONE row. That
+        # only holds while the bill fits that GR: 424.94 MT once went on a 74.16 MT
+        # receipt (invoice 58, PO 1010027885, 2026-11-24).
+        ticked_items = {open_grs[k]["po_item"] for k in gr_selection if k in open_grs}
+        for gi in goods_items:
+            if gi["po_item"] not in grbased_po_items - service_po_items or gi["po_item"] in ticked_items:
+                continue
+            latest = open_grs.get(f"{gi['ref_doc_year']}/{str(gi['ref_doc']).zfill(10)}/{str(gi['ref_doc_item']).zfill(4)}")
+            open_qty = latest["open_qty"] if latest else 0.0
+            if round(float(gi["quantity"]) - open_qty, 3) > 0.001:
+                raise HTTPException(status_code=422, detail=(
+                    f"PO item {gi['po_item']}: the invoice bills {gi['quantity']:g}, but the latest goods receipt "
+                    f"({gi['ref_doc']}) has only {open_qty:g} open. Tick the goods receipts this invoice covers in "
+                    "the Goods Receipts card."))
+    if gr_selection and eff_layout in ("goods", "both"):
+        from app.services.sap_po_service import split_by_grs
         gone = [k for k in gr_selection if k not in open_grs]
         if gone:
             raise HTTPException(status_code=422, detail=(
@@ -1526,6 +1575,7 @@ async def post_invoice_to_sap_endpoint(
     if eff_layout in ("delivery", "both"):
         from app.services.sap_po_service import delivery_for_grs, fetch_delivery_costs, fetch_gr_overview
         chosen_dc = json.loads(invoice.sap_delivery) if invoice.sap_delivery else []
+        freight_taken = await freight_on_other_invoices(db, invoice)
         if not chosen_dc:
             raise HTTPException(status_code=422, detail=(
                 "Choose the planned delivery costs to park in the Planned Delivery Costs card, "
@@ -1548,8 +1598,19 @@ async def post_invoice_to_sap_endpoint(
                 raise HTTPException(status_code=422, detail=(
                     f"Delivery cost {name} belongs to vendor {cost['vendor'].lstrip('0')}, but this invoice is "
                     f"parked for vendor {vendor_number.lstrip('0')}. Untick it."))
+            share_of = gr_selection
+            if eff_layout == "delivery":      # freight on its own invoice: its own GRs
+                share_of = c.get("gr_keys") or []
+                if c.get("gr_keys") == []:
+                    raise HTTPException(status_code=422, detail=f"Tick the SRNs whose freight {name} this invoice bills.")
+            for k in share_of:
+                other = freight_taken.get((c["po_item"], c["cond_type"], k))
+                if other:
+                    raise HTTPException(status_code=422, detail=(
+                        f"The freight {name} of goods receipt {k.split('/')[1]} is already on invoice "
+                        f"{other['invoice_number']} (#{other['id']})."))
             try:
-                amount, qty = delivery_for_grs(cost, gr_selection)
+                amount, qty = delivery_for_grs(cost, share_of)
             except ValueError as exc:
                 raise HTTPException(status_code=422, detail=str(exc))
             if amount <= 0:
@@ -1629,7 +1690,13 @@ async def post_invoice_to_sap_endpoint(
 
     # Delivery costs come from the PO, not from the paper: never park more than
     # the vendor billed (a goods-only invoice with the PO's freight on top).
+    # A freight-only invoice must come out at exactly what the vendor billed.
     billed_total = float(invoice.total_amount or 0)
+    if (eff_layout == "delivery" and billed_total and eff_currency == (invoice.currency or "PKR")
+            and abs(gross_amount - billed_total) > 1):
+        raise HTTPException(status_code=422, detail=(
+            f"The ticked freight with its tax comes to {gross_amount:,.2f}, but the vendor's invoice is "
+            f"{billed_total:,.2f}. Check the ticked SRNs and the freight's tax code."))
     if delivery_items and billed_total and eff_currency == (invoice.currency or "PKR") and gross_amount > billed_total + 1:
         raise HTTPException(status_code=422, detail=(
             f"With the delivery costs SAP would get {gross_amount:,.2f}, but the vendor's invoice is "
@@ -1740,6 +1807,8 @@ async def post_invoice_to_sap_endpoint(
     invoice.sap_document_number = sap_result["invoice_doc_number"]
     invoice.sap_fiscal_year = sap_result["fiscal_year"]
     invoice.sap_company_code = company_code
+    if gr_auto:
+        invoice.parking_gr_refs = json.dumps(gr_selection)   # what was really parked
     invoice.sap_vendor_number = invoice.sap_vendor_number or vendor_number
     po.company_code = po.company_code or company_code  # backfill POs synced before the column
     invoice.sap_posted_at = datetime.now(timezone.utc)

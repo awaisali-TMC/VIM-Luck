@@ -326,6 +326,14 @@ export default function ExtractionResultsPage({
       {/* Invoice Information — full width */}
       <InvoiceInfoCard fields={getNonSupplierFields(extractionResult.fields)} />
 
+      {/* SRNs read from an attached GRN summary; checked against SAP after the PO match */}
+      {extractionResult.goods_receipts?.length > 0 && (
+        <div className="bg-info-bg border border-info-base rounded-base px-4 py-2.5 text-2xs text-info-dark">
+          GRN summary: {extractionResult.goods_receipts.length} SRN(s) read
+          {" "}({extractionResult.goods_receipts.map((r) => r.number).join(", ")}). They are checked against SAP once the PO is matched.
+        </div>
+      )}
+
       {/* Line Items — full width */}
       <LineItemsTable
         lineItems={extractionResult.line_items}

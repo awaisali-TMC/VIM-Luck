@@ -364,6 +364,11 @@ def _park_via_api(client, po_number, lines, expect_ok=True, label=""):
     r = client.post(f"/api/po-matching/invoices/{inv_id}/match", json={"po_id": po_id})
     expect(f"{label}match invoice to PO -> 200 (got {r.status_code})", r.status_code == 200, r.text[:200])
 
+    if po_number == PO_GOODS:
+        # Its items came in several GRs. Ticked explicitly: the app database of an
+        # earlier run still holds invoices on the same GRs (the fake SAP does not).
+        client.put(f"/api/invoices/{inv_id}/parking-grs", json={"gr_keys": [
+            "2026/5000009001/0001", "2026/5000009001/0002", "2026/5000009006/0001"]})
     r = client.post(f"/api/sap/invoices/{inv_id}/post",
                     json={"mode": "park", "tax_code": "2I", "layout": "goods",
                           "posting_date": "20260312"})

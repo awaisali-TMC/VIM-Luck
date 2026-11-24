@@ -74,6 +74,8 @@ class ExtractionResult(BaseModel):
     line_items_source: str = "document_ai"
     # Items needing human attention (anomalies / inconsistencies)
     attention_flags: list[AttentionFlag] = []
+    # Goods receipts (SRNs) listed on an attached GRN summary page
+    goods_receipts: list[dict] = []
 
 
 # --- Save invoice (POST /save) ---
@@ -145,6 +147,7 @@ class InvoiceSaveRequest(BaseModel):
     exchange_rate: Optional[float] = None
     base_total_amount: Optional[float] = None
     sap_vendor_number: Optional[str] = None
+    goods_receipts: Optional[list[dict]] = None
 
 
 # --- Update invoice (PUT /{id}) ---
@@ -334,6 +337,7 @@ class InvoiceDetailResponse(BaseModel):
     sap_wf_message: Optional[str] = None
     sap_wf_checked_at: Optional[datetime] = None
     parking_gr_refs: Optional[list[str]] = None  # GRs chosen for parking (observation F)
+    srn_list: Optional[list[dict]] = None      # SRNs on the attached GRN summary
     sap_delivery: Optional[list[dict]] = None  # planned delivery costs to park
     sap_wht: Optional[list[dict]] = None  # WHT type/code override (observation G)
     parking_line_item_ids: Optional[list[int]] = None  # lines selected for parking (locked at submit)

@@ -78,6 +78,7 @@ export default function useInvoiceUpload() {
           mime_type: file?.type || "application/pdf",
           file_size_bytes: file?.size || null,
           page_count: extractionResult.page_count,
+          goods_receipts: extractionResult.goods_receipts || null,
           status,
           line_items: extractionResult.line_items.map((li) => ({
             description: li.description,

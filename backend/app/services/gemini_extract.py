@@ -15,6 +15,7 @@ from google import genai
 from google.genai import types
 
 from app.config import settings
+from app.services.srn_list import clean_receipts
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +112,15 @@ For each issue add one object to "attention_flags" with:
   message: one clear sentence explaining what to check, quoting the values you saw.
 If nothing is wrong, return an empty list.
 
+## GOODS RECEIPT SUMMARY
+The file may hold a page (often a scan or a screenshot of a SAP list) that lists goods receipts:
+GRN / SRN / GR / "Unprocessed SRNs" / material document numbers. Report EVERY row of it in
+"goods_receipts": number (the SRN / GRN number exactly as printed, usually 10 digits), po_number,
+quantity, amount (product amount without tax) and freight, each null when the row does not show it.
+Never take a PO number, invoice number, delivery note or supplier number for the SRN number, and
+never invent or complete a digit you cannot read: leave that row out. [] when there is no such list.
+Such a page is NOT an invoice, and its rows are never line items.
+
 ## MULTIPLE-INVOICE CHECK
 This system processes ONE invoice per upload. Decide whether this file contains more than one
 DISTINCT invoice — i.e. separate invoices with different invoice numbers / separate invoice
@@ -166,6 +176,9 @@ Respond ONLY with valid JSON:
   "invoice_count": 1,
   "multiple_invoices": false,
   "invoice_page_ranges": [],
+  "goods_receipts": [
+    {"number": "5002029076", "po_number": "1010027885", "quantity": 57.52, "amount": 34512.00, "freight": 287600.00}
+  ],
   "attention_flags": [
     {
       "severity": "high",
@@ -481,15 +494,52 @@ Rules:
 - An invoice may span 1, 2, 3, 5 or more pages — a continuation page shows running line items,
   carried-forward totals, or no new header. Do NOT mark continuations as new invoices.
 - If a page shows the SAME invoice number as the previous page, it is a continuation.
+- A goods-receipt list (GRN / SRN summary, SAP list, weighbridge or delivery slips) is never an
+  invoice: set "page_type" to "receipt_list" and starts_new_invoice to false for it. Every other
+  page has "page_type": "invoice".
 - When unsure whether a page starts a new invoice, prefer false (continuation).
 
 Respond ONLY with valid JSON:
-{"page_count": 4, "pages": [
-  {"page": 1, "invoice_number": "INV-001", "starts_new_invoice": true},
+{"page_count": 5, "pages": [
+  {"page": 1, "invoice_number": "INV-001", "starts_new_invoice": true, "page_type": "invoice"},
   {"page": 2, "invoice_number": "INV-001", "starts_new_invoice": false},
   {"page": 3, "invoice_number": "INV-002", "starts_new_invoice": true},
-  {"page": 4, "invoice_number": "INV-003", "starts_new_invoice": true}
+  {"page": 4, "invoice_number": "INV-003", "starts_new_invoice": true, "page_type": "invoice"},
+  {"page": 5, "invoice_number": null, "starts_new_invoice": false, "page_type": "receipt_list"}
 ]}"""
+
+
+def ranges_from_pages(pages: list[dict], total_pages: int) -> list[list[int]]:
+    """Page ranges per invoice from the segmentation's page list (sorted)."""
+    # Assemble ranges: new range on starts_new_invoice, else continuation.
+    # Also treat a page repeating the previous invoice_number as continuation
+    # even if the model flagged it as a start (number wins over the flag).
+    # A goods-receipt list never starts one; before the first invoice it joins it.
+    ranges: list[list[int]] = []
+    prev_num = None
+    only_lists = True
+    for p in pages:
+        page_no = min(max(1, p["page"]), total_pages)
+        is_list = p.get("page_type") == "receipt_list"
+        num = (str(p.get("invoice_number")).strip() or None) if p.get("invoice_number") and not is_list else None
+        starts = bool(p.get("starts_new_invoice")) and not is_list and not only_lists
+        if num and prev_num and num == prev_num:
+            starts = False
+        if not ranges or (starts and page_no > ranges[-1][1]):
+            ranges.append([page_no, page_no])
+        else:
+            ranges[-1][1] = max(ranges[-1][1], page_no)
+        prev_num = num or prev_num
+        only_lists = only_lists and is_list
+
+    # Repair: full coverage 1..total_pages, contiguous, no overlaps.
+    ranges[0][0] = 1
+    for i in range(1, len(ranges)):
+        ranges[i][0] = ranges[i - 1][1] + 1   # close any gap to previous
+        if ranges[i][1] < ranges[i][0]:
+            ranges[i][1] = ranges[i][0]
+    ranges[-1][1] = total_pages
+    return [r for r in ranges if r[0] <= r[1] and r[0] <= total_pages]
 
 
 def segment_invoice_pages(file_content: bytes, mime_type: str, total_pages: int) -> list[list[int]]:
@@ -528,31 +578,7 @@ def segment_invoice_pages(file_content: bytes, mime_type: str, total_pages: int)
         if not pages:
             return [[1, total_pages]]
 
-        # Assemble ranges: new range on starts_new_invoice, else continuation.
-        # Also treat a page repeating the previous invoice_number as continuation
-        # even if the model flagged it as a start (number wins over the flag).
-        ranges: list[list[int]] = []
-        prev_num = None
-        for p in pages:
-            page_no = min(max(1, p["page"]), total_pages)
-            num = (str(p.get("invoice_number")).strip() or None) if p.get("invoice_number") else None
-            starts = bool(p.get("starts_new_invoice"))
-            if num and prev_num and num == prev_num:
-                starts = False
-            if not ranges or (starts and page_no > ranges[-1][1]):
-                ranges.append([page_no, page_no])
-            else:
-                ranges[-1][1] = max(ranges[-1][1], page_no)
-            prev_num = num or prev_num
-
-        # Repair: full coverage 1..total_pages, contiguous, no overlaps.
-        ranges[0][0] = 1
-        for i in range(1, len(ranges)):
-            ranges[i][0] = ranges[i - 1][1] + 1   # close any gap to previous
-            if ranges[i][1] < ranges[i][0]:
-                ranges[i][1] = ranges[i][0]
-        ranges[-1][1] = total_pages
-        ranges = [r for r in ranges if r[0] <= r[1] and r[0] <= total_pages]
+        ranges = ranges_from_pages(pages, total_pages)
         logger.info(f"Segmentation: {total_pages} pages -> ranges {ranges}")
         return ranges if ranges else [[1, total_pages]]
     except Exception:
@@ -707,6 +733,7 @@ def extract_invoice(file_content: bytes, mime_type: str) -> dict:
             "multiple_invoices": bool(result.get("multiple_invoices")),
             "invoice_count": int(result.get("invoice_count") or 1),
             "invoice_page_ranges": result.get("invoice_page_ranges") or [],
+            "goods_receipts": clean_receipts(result.get("goods_receipts")),
         }
 
     except Exception as e:

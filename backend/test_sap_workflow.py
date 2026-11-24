@@ -98,7 +98,7 @@ def _po(client):
     return _po_id
 
 
-def _new_invoice(client):
+def _new_invoice(client, tick_grs=True):
     r = client.post("/api/invoices/save", json={
         "original_filename": "wf.pdf", "stored_filepath": "demo/wf", "mime_type": "application/pdf",
         "invoice_number": f"WF-{uuid.uuid4().hex[:8].upper()}", "invoice_date": "2026-03-12",
@@ -110,6 +110,9 @@ def _new_invoice(client):
     inv_id = r.json()["id"]
     m = client.post(f"/api/po-matching/invoices/{inv_id}/match", json={"po_id": _po(client)})
     expect(f"match invoice {inv_id} -> 200 (got {m.status_code})", m.status_code == 200, m.text[:160])
+    if tick_grs:        # the 20 units came in two GRs; every test invoice bills both
+        client.put(f"/api/invoices/{inv_id}/parking-grs",
+                   json={"gr_keys": ["2026/5000009001/0001", "2026/5000009006/0001"]})
     return inv_id
 
 
@@ -484,7 +487,15 @@ def test_gr_selection(client):
     per ticked GR (REF_DOC = that GR); a selection that doesn't add up refuses."""
     print("\nGR-WISE PARKING (select goods receipts)")
     settings.SAP_WORKFLOW_ENABLED = False
-    inv = _new_invoice(client)              # PO 4500009001 item 10, 20 units
+    inv = _new_invoice(client, tick_grs=False)   # PO 4500009001 item 10, 20 units
+    import sqlite3
+    db_path = settings.DATABASE_URL.split("///", 1)[-1]
+
+    def sql(q, *a):
+        with sqlite3.connect(db_path) as c:
+            c.execute(q, a)
+
+    sql("UPDATE invoices SET parking_gr_refs = NULL")      # the earlier tests' ticks
     r = client.get(f"/api/sap/invoices/{inv}/open-grs")
     grs = r.json().get("grs", [])
     item10 = [g for g in grs if g["po_item"] == 10]
@@ -494,13 +505,6 @@ def test_gr_selection(client):
 
     def og(i):
         return client.get(f"/api/sap/invoices/{i}/open-grs").json()
-
-    import sqlite3
-    db_path = settings.DATABASE_URL.split("///", 1)[-1]
-
-    def sql(q, *a):
-        with sqlite3.connect(db_path) as c:
-            c.execute(q, a)
 
     both = sorted(g["gr_key"] for g in item10)
     body = r.json()
@@ -513,7 +517,7 @@ def test_gr_selection(client):
     expect("all unticked by the user -> remembered, not ticked again",
            og(inv)["chosen"] is True and og(inv)["selected"] == [], og(inv))
     expect("...stored as an empty selection", _detail(client, inv).get("parking_gr_refs") == [])
-    inv2 = _new_invoice(client)
+    inv2 = _new_invoice(client, tick_grs=False)
     client.put(f"/api/invoices/{inv2}/parking-grs", json={"gr_keys": both[:1]})
     expect("a GR ticked on another open invoice -> not suggested", og(inv)["suggested"] == [], og(inv)["suggested"])
     client.delete(f"/api/invoices/{inv2}")
@@ -525,6 +529,36 @@ def test_gr_selection(client):
     expect("a GR with a parked SAP invoice -> not suggested", og(inv)["suggested"] == [], og(inv)["suggested"])
     conn.execute("DELETE FROM EKBE WHERE BELNR = '5100099999'")
     conn.commit()
+
+    # Nothing ticked: 20 billed do not fit the latest GR (8 open).
+    p = _park(client, inv)
+    expect(f"user unticked all, bill is more than the latest GR -> refused (got {p.status_code})",
+           p.status_code == 422 and "8 open" in p.text and "BAPI_INCOMINGINVOICE_PARK" not in _names(), p.text[:220])
+    # Never opened in the browser (NULL): the park uses what the card would tick.
+    auto = _new_invoice(client, tick_grs=False)
+    p = _park(client, auto)
+    expect(f"nobody chose -> parked on both GRs (got {p.status_code})", p.status_code == 200, p.text[:200])
+    kw = next(k for n, k in _calls if n == "BAPI_INCOMINGINVOICE_PARK")
+    expect("...one row per GR", sorted(x["REF_DOC"] for x in kw["input_tables"]["ITEMDATA"]) == ["5000009001", "5000009006"],
+           kw["input_tables"]["ITEMDATA"])
+    expect("...and remembered on the invoice", sorted(_detail(client, auto)["parking_gr_refs"]) == both,
+           _detail(client, auto).get("parking_gr_refs"))
+    late = _new_invoice(client, tick_grs=False)
+    p = _park(client, late)
+    expect(f"the same GRs for another invoice -> not taken silently, refused (got {p.status_code})",
+           p.status_code == 422 and "Tick the goods receipts" in p.text, p.text[:200])
+    # Rejected in SAP: the card may tick again, and the invoice's own parked rows don't block it.
+    own = _detail(client, auto)["sap_document_number"]
+    expect("in SAP and not rejected -> no suggestion", og(auto)["suggested"] == [], og(auto)["suggested"])
+    sql("UPDATE invoices SET sap_wf_status = 'REJ', parking_gr_refs = NULL WHERE id = ?", auto)
+    conn.execute("INSERT INTO EKBE (EBELN, EBELP, GJAHR, BELNR, BUZEI, VGABE, BWART, BUDAT, MENGE, DMBTR, SHKZG, LFGJA, LFBNR, LFPOS) "
+                 "VALUES (?,'00010','2026',?,'0001','P','','20260301','20','1','S','2026','5000009006','0001')", (PO, own))
+    conn.commit()
+    expect("rejected -> suggested again, its own parked row ignored", sorted(og(auto)["suggested"]) == both, og(auto)["suggested"])
+    expect("...but for another invoice that parked row blocks", og(late)["suggested"] == [], og(late)["suggested"])
+    conn.execute("DELETE FROM EKBE WHERE BELNR = ? AND VGABE = 'P'", (own,))
+    conn.commit()
+    client.delete(f"/api/invoices/{late}")
 
     one = [item10[0]["gr_key"]]
     s = client.put(f"/api/invoices/{inv}/parking-grs", json={"gr_keys": one})
@@ -565,6 +599,8 @@ def test_delivery_costs(client):
         i = r.json()["id"]
         client.post(f"/api/po-matching/invoices/{i}/match", json={"po_id": _po(client)})
         client.put(f"/api/invoices/{i}", json={"sap_layout": "both"})
+        client.put(f"/api/invoices/{i}/parking-grs",
+                   json={"gr_keys": ["2026/5000009001/0001", "2026/5000009006/0001"]})
         return i
 
     def choose(i, code="I0"):
@@ -603,6 +639,20 @@ def test_delivery_costs(client):
 
     expect("18% goods + untaxed freight: one tax row, right total",
            tax == [{"TAX_CODE": "2I", "TAX_AMOUNT": "666000.0"}] and float(gross) == 4391000, (tax, gross))
+    again = new(4391000, 666000)
+    choose(again)
+    p = park(again)
+    expect(f"the same GRs' freight on a second invoice -> refused by name (got {p.status_code})",
+           p.status_code == 422 and "already on invoice" in p.text, p.text[:200])
+    client.delete(f"/api/invoices/{again}")
+
+    import sqlite3
+    db_path = settings.DATABASE_URL.split("///", 1)[-1]
+
+    def forget():        # the earlier invoices' freight and GR choices
+        with sqlite3.connect(db_path) as c:
+            c.execute("UPDATE invoices SET sap_delivery = NULL, parking_gr_refs = NULL")
+    forget()
     # Both taxed, different codes -> a TAXDATA row per code.
     inv = new(3700000 + 666000 + 25000 + 4250, 670250)
     choose(inv, "I2")
@@ -612,6 +662,7 @@ def test_delivery_costs(client):
            p.status_code == 200 and tax == [{"TAX_CODE": "2I", "TAX_AMOUNT": "666000.0"},
                                             {"TAX_CODE": "I2", "TAX_AMOUNT": "4250.0"}], (p.text[:150], tax))
 
+    forget()
     # The invoice bills goods only (Lucky's invoice 151): never park the freight on top.
     inv = new(4366000, 666000)
     choose(inv)
@@ -665,6 +716,78 @@ def test_delivery_costs(client):
     conn.commit()
     cost = fetch_delivery_costs("4588888888", fetch_gr_overview("4588888888"))[0]
     expect("a 105's freight belongs to its 103", delivery_for_grs(cost, ["2026/5000000200/0001"]) == (287600.0, 57.52), cost)
+    expect("...and its SRN is the 105, as in Lucky's SRN report",
+           [g["srn"] for g in fetch_gr_overview("4588888888")["open"]] == [["5000000201"]])
+
+    print("\nFREIGHT ON ITS OWN INVOICE (layout delivery)")
+    forget()
+
+    def freight(total, tax=0):
+        r = client.post("/api/invoices/save", json={
+            "original_filename": "fi.pdf", "stored_filepath": "demo/fi", "mime_type": "application/pdf",
+            "invoice_number": f"FI-{uuid.uuid4().hex[:8].upper()}", "invoice_date": "2026-03-12",
+            "currency": "PKR", "document_type": "invoice", "status": "validated",
+            "source_type": "upload", "po_reference": PO, "supplier_ntn": "0912345-6",
+            "subtotal_amount": total - tax, "tax_amount": tax, "total_amount": total,
+            "line_items": [{"description": "Freight", "quantity": 1, "unit_price": total - tax, "amount": total - tax}],
+        })
+        i = r.json()["id"]
+        client.post(f"/api/po-matching/invoices/{i}/match", json={"po_id": _po(client)})
+        client.put(f"/api/invoices/{i}", json={"sap_layout": "delivery"})
+        return i
+
+    def pick(i, keys, code="I0"):
+        return client.put(f"/api/invoices/{i}/delivery-costs", json={"items": [
+            {"po_item": 10, "cond_type": "FRA1", "tax_code": code, "gr_keys": keys}]})
+
+    def parkd(i):
+        _calls.clear()
+        return client.post(f"/api/sap/invoices/{i}/post", json={"mode": "park", "tax_code": "2I", "layout": "delivery",
+                                                               "posting_date": "20260312"})
+
+    A, B = "2026/5000009001/0001", "2026/5000009006/0001"
+    f1 = freight(15000)
+    # Goods of both GRs are on a goods invoice; that says nothing about their freight.
+    goods = _new_invoice(client)
+    c = client.get(f"/api/sap/invoices/{f1}/delivery-costs").json()["costs"][0]
+    expect("each SRN with its own freight, free although its goods are billed",
+           [(g["gr_key"], g["amount"], g["srn"], g["taken_by"]) for g in c["grs"]]
+           == [(A, 15000.0, ["5000009001"], None), (B, 10000.0, ["5000009006"], None)], c["grs"])
+    pick(f1, [])
+    p = parkd(f1)
+    expect(f"no SRN ticked -> refused (got {p.status_code})", p.status_code == 422 and "Tick the SRNs" in p.text, p.text[:200])
+    pick(f1, [A, B])
+    p = parkd(f1)
+    expect(f"25,000 ticked, 15,000 billed -> refused (got {p.status_code})",
+           p.status_code == 422 and "25,000.00" in p.text and "15,000.00" in p.text, p.text[:200])
+    pick(f1, [A], "I2")
+    p = parkd(f1)
+    expect(f"a tax the invoice does not carry -> refused (got {p.status_code})", p.status_code == 422 and "17,550.00" in p.text, p.text[:200])
+    pick(f1, [A])
+    p = parkd(f1)
+    fr, tax, gross, goods_codes = sent() if p.status_code == 200 else (None,) * 4
+    expect(f"only that SRN's freight, no goods rows, no tax row (got {p.status_code})",
+           p.status_code == 200 and fr == [("FRA1", "12.0", "15000.0", "I0")] and goods_codes == set()
+           and tax == [] and float(gross) == 15000, (p.text[:200], fr, tax, gross))
+    f2 = freight(11700, 1700)
+    c = client.get(f"/api/sap/invoices/{f2}/delivery-costs").json()["costs"][0]
+    expect("the next freight invoice sees that SRN as taken",
+           [(g["gr_key"], (g["taken_by"] or {}).get("id")) for g in c["grs"]] == [(A, f1), (B, None)], c["grs"])
+    pick(f2, [A, B], "I2")
+    p = parkd(f2)
+    expect(f"...and cannot bill it again (got {p.status_code})", p.status_code == 422 and f"#{f1}" in p.text, p.text[:200])
+    pick(f2, [B], "I2")
+    p = parkd(f2)
+    fr, tax, gross, _g = sent() if p.status_code == 200 else (None,) * 4
+    expect(f"the other SRN's freight at 17% (got {p.status_code})",
+           p.status_code == 200 and tax == [{"TAX_CODE": "I2", "TAX_AMOUNT": "1700.0"}] and float(gross) == 11700,
+           (p.text[:200], tax, gross))
+    f3 = freight(5000)
+    client.put(f"/api/invoices/{f3}/parking-grs", json={"gr_keys": [A, B]})
+    client.delete(f"/api/invoices/{goods}")
+    g2 = _new_invoice(client, tick_grs=False)
+    expect("a freight-only invoice does not use up the goods of its GRs",
+           sorted(client.get(f"/api/sap/invoices/{g2}/open-grs").json()["suggested"]) == [A, B])
 
 
 def test_gr_overview():

@@ -10,19 +10,21 @@ const DEFAULT_TAX_CODE = "I0";
 /**
  * Planned delivery costs (freight conditions) of the matched PO, live from SAP
  * (EKBZ). Nothing is parked unless it is ticked here; each has its own tax code.
- * The amount is the share of the GRs ticked in the Goods Receipts card, or all
- * that is open when none is ticked.
+ * With goods on the same invoice (layout "both") the amount is the share of the
+ * GRs ticked in the Goods Receipts card, or all that is open when none is ticked.
+ * Freight on its own invoice (layout "delivery") has its own SRN choice here.
  *
  * Shown only when "Items to Park" includes planned delivery costs.
- * Props: invoice, taxCodes, editable, onChanged().
+ * Props: invoice, layout, taxCodes, editable, onChanged().
  */
-export default function DeliveryCostsCard({ invoice, taxCodes = [], editable = false, onChanged }) {
+export default function DeliveryCostsCard({ invoice, layout, taxCodes = [], editable = false, onChanged }) {
   const [data, setData] = useState(null);       // { costs, chosen, grs_ticked, message }
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
 
-  const grKey = (invoice?.parking_gr_refs || []).join(",");
+  const alone = layout === "delivery";
+  const grKey = `${(invoice?.parking_gr_refs || []).join(",")}|${invoice?.sap_layout}`;
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -64,10 +66,34 @@ export default function DeliveryCostsCard({ invoice, taxCodes = [], editable = f
     }
   };
   const without = (c) => chosen.filter((x) => !(x.po_item === c.po_item && x.cond_type === c.cond_type));
-  const toggle = (c) => save(find(c) ? without(c)
-    : [...chosen, { po_item: c.po_item, cond_type: c.cond_type, tax_code: DEFAULT_TAX_CODE }]);
-  const setCode = (c, code) => save(chosen.map((x) =>
-    x.po_item === c.po_item && x.cond_type === c.cond_type ? { ...x, tax_code: code } : x));
+  // SRNs (goods receipts) of a freight-only invoice; none listed = SAP can't split it.
+  const bySrn = (c) => alone && (c.grs || []).length > 0;
+  const free = (c) => c.grs.filter((g) => !g.taken_by);
+  const change = (c, patch) => save(chosen.map((x) =>
+    x.po_item === c.po_item && x.cond_type === c.cond_type ? { ...x, ...patch } : x));
+  // Ticking a condition takes the SRNs of the attached GRN summary, else every SRN
+  // no other invoice bills; the user corrects the rest.
+  const preset = (c) => {
+    const listed = free(c).filter((g) => g.listed);
+    return (listed.length ? listed : free(c)).map((g) => g.gr_key);
+  };
+  const toggle = (c) => save(find(c) ? without(c) : [...chosen, {
+    po_item: c.po_item, cond_type: c.cond_type, tax_code: DEFAULT_TAX_CODE,
+    ...(bySrn(c) ? { gr_keys: preset(c) } : {}),
+  }]);
+  const setCode = (c, code) => change(c, { tax_code: code });
+  const srnTicked = (c, g) => (find(c)?.gr_keys || []).includes(g.gr_key);
+  const toggleSrn = (c, g) => {
+    const keys = find(c)?.gr_keys || [];
+    change(c, { gr_keys: srnTicked(c, g) ? keys.filter((k) => k !== g.gr_key) : [...keys, g.gr_key] });
+  };
+  const sum = (c, field) => c.grs.filter((g) => srnTicked(c, g)).reduce((t, g) => t + g[field], 0);
+  const amountOf = (c) => (bySrn(c) && find(c)?.gr_keys ? sum(c, "amount") : c.park_amount);
+  const qtyOf = (c) => (bySrn(c) && find(c)?.gr_keys ? sum(c, "quantity") : c.park_quantity);
+  const fmtDate = (d) => (d && d.length === 8 ? `${d.slice(6, 8)}.${d.slice(4, 6)}.${d.slice(0, 4)}` : d || "—");
+  const rateOf = (code) => Number(taxCodes.find((t) => t.code === code)?.rate || 0);
+  const total = costs.filter(find).reduce((t, c) => t + (amountOf(c) || 0) * (1 + rateOf(find(c).tax_code) / 100), 0);
+  const billed = Number(invoice?.total_amount || 0);
 
   return (
     <Card
@@ -115,8 +141,8 @@ export default function DeliveryCostsCard({ invoice, taxCodes = [], editable = f
                   </td>
                   <td className="py-1.5 px-2">{c.po_item}{c.description ? <span className="text-neutral-500"> · {c.description}</span> : null}</td>
                   <td className="py-1.5 px-2 font-mono">{(c.vendor || "").replace(/^0+/, "") || "—"}</td>
-                  <td className="py-1.5 px-2 text-right">{fmt(c.park_quantity)} {c.unit}</td>
-                  <td className="py-1.5 px-2 text-right font-mono">{fmt(c.park_amount)}</td>
+                  <td className="py-1.5 px-2 text-right">{fmt(qtyOf(c))} {c.unit}</td>
+                  <td className="py-1.5 px-2 text-right font-mono">{fmt(amountOf(c))}</td>
                   <td className="py-1.5 px-2">
                     {sel ? (
                       <select
@@ -137,6 +163,32 @@ export default function DeliveryCostsCard({ invoice, taxCodes = [], editable = f
           </tbody>
         </table>
       )}
+      {alone && costs.filter((c) => find(c) && bySrn(c) && find(c).gr_keys).map((c) => (
+        <div key={`srn-${c.po_item}/${c.cond_type}`} className="mt-3 text-xs">
+          <div className="text-2xs text-neutral-500 mb-1">SRNs whose {c.cond_type} this invoice bills</div>
+          {c.grs.map((g) => (
+            <label key={g.gr_key} className="flex items-center gap-2 py-0.5">
+              <input
+                type="checkbox"
+                checked={srnTicked(c, g)}
+                disabled={!editable || saving || (!!g.taken_by && !srnTicked(c, g))}
+                onChange={() => toggleSrn(c, g)}
+                aria-label={`Freight of SRN ${g.srn.join(", ")}`}
+              />
+              <span className="font-mono">{g.srn.join(", ")}</span>
+              <span className="text-neutral-500">{fmtDate(g.posting_date)} · {fmt(g.quantity)} {c.unit}</span>
+              <span className="font-mono ml-auto">{fmt(g.amount)}</span>
+              {g.taken_by && <span className="text-2xs text-danger-dark">on invoice {g.taken_by.invoice_number} (#{g.taken_by.id})</span>}
+            </label>
+          ))}
+        </div>
+      ))}
+      {alone && total > 0 && billed > 0 && (
+        <div className={`mt-2 text-xs ${Math.abs(total - billed) > 1 ? "text-danger-dark" : "text-success-dark"}`}>
+          Ticked freight with tax {fmt(total)} · vendor&apos;s invoice {fmt(billed)}
+          {Math.abs(total - billed) > 1 ? ": they must be equal to park." : "."}
+        </div>
+      )}
       {gone.map((c) => (
         <div key={`gone-${c.po_item}/${c.cond_type}`} className="mt-2 text-2xs text-danger-dark">
           {c.cond_type} (PO item {c.po_item}) is ticked but has nothing left to invoice in SAP.
@@ -145,10 +197,12 @@ export default function DeliveryCostsCard({ invoice, taxCodes = [], editable = f
       ))}
       {costs.length > 0 && (
         <div className="mt-2 text-2xs text-neutral-500">
-          {data.grs_ticked > 0
+          {alone
+            ? "Freight on its own invoice: no goods are parked with it."
+            : data.grs_ticked > 0
             ? `Amounts are for the ${data.grs_ticked} ticked goods receipt(s).`
             : "No goods receipt is ticked: amounts are everything still open on the PO."}
-          {" "}Parking is refused if goods, freight and tax exceed the vendor&apos;s invoice total.
+          {!alone && " Parking is refused if goods, freight and tax exceed the vendor's invoice total."}
           {!editable && <span className="ml-1">(Locked — the invoice is in SAP.)</span>}
         </div>
       )}

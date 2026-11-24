@@ -260,6 +260,7 @@ async def process_email_attachment(attachment_id: int, db: AsyncSession = Depend
         gemini_processing_time_ms=result.get("gemini_processing_time_ms"),
         product_matches=[],
         line_items_source=result.get("line_items_source", "gemini"),
+        goods_receipts=result.get("goods_receipts") or [],
     )
 
 

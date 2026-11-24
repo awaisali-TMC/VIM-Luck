@@ -191,6 +191,7 @@ export function ExtractionProvider({ children }) {
           mime_type: extractionFile?.type || "application/pdf",
           file_size_bytes: extractionFile?.size || null,
           page_count: extractionResult.page_count,
+          goods_receipts: extractionResult.goods_receipts || null,
           status,
           source_type: pendingEmailAttachmentId ? "email" : "web_upload",
           source_email_id: pendingEmailAttachmentId || null,

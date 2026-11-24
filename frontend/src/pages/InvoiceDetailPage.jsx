@@ -686,6 +686,9 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
     canEditInvoice && !!invoice &&
     (["draft", "pending_processing", "validated", "rejected", "exception"].includes(invoice.status) || rejectedInSap);
 
+  // "Items to Park" as chosen on screen (saved or not yet).
+  const activeLayout = (liveSap ? liveSap.layout : null) || invoice?.sap_layout || "goods";
+
   // Chosen document currency drives whether an exchange rate is required.
   const currencyVal = (liveSap ? liveSap.currency : (invoice?.sap_currency || invoice?.currency)) || "PKR";
   const foreignCurrency = !!invoice && currencyVal !== (invoice.base_currency || "PKR");
@@ -1384,14 +1387,14 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
       )}
 
       {/* GR-wise parking (observation F): pick the goods receipts to park against */}
-      {!editing && invoice.matched_po_id && (
+      {!editing && invoice.matched_po_id && activeLayout !== "delivery" && (
         <GoodsReceiptsCard invoice={invoice} editable={sapFieldsEditable} onChanged={refetch} />
       )}
 
       {/* Planned delivery costs (freight): only when "Items to Park" includes them */}
       {!editing && invoice.matched_po_id
-        && ["delivery", "both"].includes((liveSap ? liveSap.layout : null) || invoice.sap_layout) && (
-        <DeliveryCostsCard invoice={invoice} taxCodes={taxCodes} editable={sapFieldsEditable} onChanged={refetch} />
+        && ["delivery", "both"].includes(activeLayout) && (
+        <DeliveryCostsCard invoice={invoice} layout={activeLayout} taxCodes={taxCodes} editable={sapFieldsEditable} onChanged={refetch} />
       )}
 
       {/* SAP Parking parameters — editable during review, locked at approval */}

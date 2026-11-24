@@ -10,7 +10,8 @@ import { setParkingGRs } from "../../services/invoiceService";
  * Lists the matched PO's goods receipts that are not yet fully invoiced (live
  * from SAP EKBE) with a checkbox each. The ticked GRs are saved on the invoice
  * (parking_gr_refs); parking then sends one item per ticked GR, referencing it.
- * With nothing ticked, parking picks the latest GR per PO item as before.
+ * With nothing ticked, parking picks the latest GR per PO item, and refuses when
+ * the invoice bills more than that GR.
  * When all open GRs of a PO item add up to the billed quantity (data.suggested)
  * and nothing was chosen yet, they are ticked and saved automatically.
  *
@@ -126,6 +127,13 @@ export default function GoodsReceiptsCard({ invoice, editable = false, onChanged
           ))}
         </details>
       )}
+      {data?.srn_count > 0 && (
+        <div className={`mb-2 text-2xs rounded-md px-3 py-2 border ${data.srn_problems?.length
+          ? "bg-warning-bg border-warning-base text-warning-dark" : "bg-success-bg border-success-base text-success-dark"}`}>
+          GRN summary attached to the invoice: {data.srn_count} SRN(s){data.srn_problems?.length ? "." : ", all open in SAP."}
+          {(data.srn_problems || []).map((p) => <div key={p}>{p}</div>)}
+        </div>
+      )}
       {grs.length > 0 && (
         <>
           <table className="w-full border-collapse text-xs">
@@ -153,7 +161,10 @@ export default function GoodsReceiptsCard({ invoice, editable = false, onChanged
                       onChange={() => toggle(g.gr_key)}
                     />
                   </td>
-                  <td className="py-1.5 px-2 font-mono">{g.gr_doc}/{String(g.gr_item).replace(/^0+/, "")} <span className="text-neutral-400">{g.gr_year}</span></td>
+                  <td className="py-1.5 px-2 font-mono">
+                    {g.gr_doc}/{String(g.gr_item).replace(/^0+/, "")} <span className="text-neutral-400">{g.gr_year}</span>
+                    {(g.srn || []).some((d) => d !== g.gr_doc) && <div className="text-2xs text-neutral-500">SRN {g.srn.join(", ")}</div>}
+                  </td>
                   <td className="py-1.5 px-2">{fmtDate(g.posting_date)}</td>
                   <td className="py-1.5 px-2">{g.po_item}{g.description ? <span className="text-neutral-500"> · {g.description}</span> : null}</td>
                   <td className="py-1.5 px-2 text-right">{fmtNum(g.received)} {g.unit}</td>
@@ -173,10 +184,10 @@ export default function GoodsReceiptsCard({ invoice, editable = false, onChanged
           </table>
           <div className="mt-2 text-2xs text-neutral-500">
             {selected.size === 0
-              ? "No GR ticked — parking uses the latest goods receipt for each PO item."
+              ? "No GR ticked — parking uses the latest goods receipt for each PO item, and is refused if the invoice bills more than that receipt."
               : <>Selected: {Object.entries(selectedByItem).map(([item, q]) => `item ${item}: ${fmtNum(q)}`).join(" · ")}.
                   {" "}The ticked GRs must add up to the quantity the invoice bills for each item.</>}
-            {isSuggested && <span className="ml-1">Ticked automatically: all open GRs add up to the billed quantity.</span>}
+            {isSuggested && <span className="ml-1">Ticked automatically: {data.srn_count > 0 ? "the SRNs of the attached GRN summary" : "all open GRs"} add up to the billed quantity.</span>}
             {!editable && <span className="ml-1">(Locked — the invoice is in SAP.)</span>}
           </div>
         </>
