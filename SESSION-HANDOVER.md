@@ -7,13 +7,14 @@ Newest session first; §1–§5 below are from session 1 and are still accurate.
 
 ## START HERE — state at the end of 2026-11-24, to pick up on 2026-11-25
 
-**Git:** `dev-shahzaib` = `66098dc` plus this handover; `main` = `b9546c9` (15 commits behind). LAN runs
-`ef28709` or `66098dc` (`66098dc` is frontend only). Everything built is pushed to `dev-shahzaib`.
+**Git:** `main` = `dev-shahzaib` = `6e32ca0` plus this note (the user asked for the merge at the end of 2026-11-24, fast-forward).
+LAN runs `ef28709` or `66098dc` (`66098dc` is frontend only). Everything built is on both branches.
 
 **How the user works (keep to it):**
 - Reply in simple **Roman Urdu**. Ask before every commit; commit and push together, as `ai.engineers1`
   with the Co-Authored-By line.
-- **`dev-shahzaib` only.** The user holds merges to `main` until LAN testing is finished.
+- Work on `dev-shahzaib`; merge to `main` only when the user asks (the earlier hold until LAN testing was
+  lifted by that request; several parts below have still never run on AUP).
 - This Windows machine cannot reach SAP or SSH to the LAN box (192.168.15.10, AUP client 100). The user
   relays results; a second Claude session on the LAN box pulls, restarts and reads its database.
 - Simulation (MIR7 Simulate / Messages before the park) is parked by the user, see the questions.
