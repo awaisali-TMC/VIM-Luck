@@ -5,6 +5,15 @@ Handover from Claude Code sessions on this machine (`D:\VIM\VIM-Luck`). Read
 what is still open. (`HANDOFF.md` is the separate product feature-status doc.)
 Newest session first; §1–§5 below are from session 1 and are still accurate.
 
+## 2026-11-24 (after `dca3e79`): client's answers: KT, one document per invoice
+
+- Freight tax code: **`KT`** (SRB 15%, claimable), now the card's default. 2,124,700 + 15% = 2,443,405.
+- **One SAP document per invoice**, holding that invoice's GRs (5 GRs, 2 invoices: 3 + 2 -> two documents).
+  The GR choice now leaves out GRs used by other invoices and ticks the only combination of the rest
+  that equals the bill (also for freight amounts).
+- One GR billed by two invoices: **not confirmed**. Unchanged: a ticked GR is billed with all it has open.
+Offline tests and build pass; not run on AUP or in a browser.
+
 ## 2026-11-24 (LAN test 6): invoice 58, GRs still not ticked
 
 Second screenshot after the pull: SRN numbers show, WHT right, unit MT, but none of the six GRs is ticked.

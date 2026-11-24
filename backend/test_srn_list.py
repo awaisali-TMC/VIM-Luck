@@ -89,6 +89,21 @@ def test_units():
            clean_receipts([rec("5002029080", quantity=12), rec("5002029080", quantity=5)])[0]["quantity"] is None)
     expect("the 103 number is accepted too", check_receipts([rec("5002029070")], [gr], []) == [])
 
+    print("\nUNIT: which receipts add up")
+    from app.services.gr_suggest import matching_grs, only_combination
+    lucky = [57.52, 58.96, 79.48, 78.14, 76.68, 74.16]
+    expect("three of Lucky's six GRs", only_combination(lucky, 57.52 + 79.48 + 74.16) == [0, 2, 5])
+    expect("two combinations -> none", only_combination([10, 20, 30], 30) is None)
+    expect("no combination -> none", only_combination(lucky, 100) is None)
+    expect("too many to combine -> none", only_combination([1.0] * 19, 1.0) is None)
+    expect("18 is fine", only_combination([2 ** i for i in range(18)], 2 ** 17 + 5) == [0, 2, 17])
+    gr = lambda i, q: {"gr_key": f"G{i}", "gr_doc": f"{i}", "srn": [f"{i}"], "po_item": 10, "open_qty": q, "parked": 0, "parked_docs": []}  # noqa: E731
+    grs = [gr(i, q) for i, q in enumerate([11.1, 22.3, 33.7, 44.9, 55.2], start=1)]
+    first = matching_grs({10: 67.1}, grs, {}, None)
+    expect("5 GRs, first invoice bills three", first == ["G1", "G2", "G3"], first)
+    second = matching_grs({10: 100.1}, grs, dict.fromkeys(first, "x"), None)
+    expect("second invoice: the other two, the first one's are left out", second == ["G4", "G5"], second)
+
     print("\nUNIT: page ranges")
     pg = lambda n, num, starts, t="invoice": {"page": n, "invoice_number": num, "starts_new_invoice": starts, "page_type": t}  # noqa: E731
     expect("goods, freight, summary -> two invoices, the summary with the last",
@@ -203,9 +218,25 @@ def test_different_times(client):
 
     f = freight(15000)
     c = freight_costs(client, f)
-    expect("freight first, nothing else known -> every open SRN, as before", c["suggested"] == [A, B], c["suggested"])
-    goods = save(client, po_id, 12, None)
-    expect("goods of 12 out of 20, no summary -> left to the user", og(goods)["suggested"] == [], og(goods)["suggested"])
+    expect("freight first: the only SRNs whose freight equals the bill",
+           c["suggested"] == [A] and "only combination" in c["suggested_from"], (c["suggested"], c["suggested_from"]))
+    client.delete(f"/api/invoices/{f}")
+    f = freight(9000)
+    expect("freight nothing adds up to -> every open SRN, as before", freight_costs(client, f)["suggested"] == [A, B])
+    client.delete(f"/api/invoices/{f}")
+    # Two receipts alike: amounts and quantities can't tell which is billed.
+    import app.services.sap_connector_fake as fake
+    conn = fake._store()
+    conn.execute("UPDATE EKBE SET MENGE = '10' WHERE BELNR IN ('5000009001','5000009006') AND EBELP = '00010'")
+    conn.execute("UPDATE EKBZ SET MENGE = '10', DMBTR = '12500' WHERE EBELN = ?", (PO,))
+    conn.commit()
+    f = freight(12500)
+    c = freight_costs(client, f)
+    expect("freight first, two SRNs alike -> every open SRN, as before", c["suggested"] == [A, B], c["suggested"])
+    goods = save(client, po_id, 10, None)
+    b = og(goods)
+    expect("goods of one of two alike, no summary -> left to the user, and why",
+           b["suggested"] == [] and "no single combination" in (b["why_not"] or ""), (b["suggested"], b["why_not"]))
     client.put(f"/api/invoices/{f}/delivery-costs", json={"items": [
         {"po_item": 10, "cond_type": "FRA1", "tax_code": "I0", "gr_keys": [A]}]})
     expect("the freight invoice's SRNs tell which goods they are", og(goods)["suggested"] == [A], og(goods)["suggested"])
@@ -214,7 +245,7 @@ def test_different_times(client):
     c = freight_costs(client, f)
     expect("goods invoice ticked: the freight of the same SRNs equals this invoice",
            c["suggested"] == [A] and "invoice SRN-" in c["suggested_from"], (c["suggested"], c["suggested_from"]))
-    f2 = freight(10000)
+    f2 = freight(9999)
     c = freight_costs(client, f2)
     expect("a freight invoice those goods don't explain -> every open SRN, as before", c["suggested"] == [A, B], c["suggested"])
     client.delete(f"/api/invoices/{f2}")
@@ -247,12 +278,12 @@ def test_different_times(client):
            r.status_code == 201 and "could not be read" in r.json()["srn_message"] and srns(goods) == [], r.text[:200])
     r = attach(goods, [])
     expect("nothing found: kept, said so", r.status_code == 201 and "No SRN" in r.json()["srn_message"], r.text[:200])
-    r = attach(goods, [{"number": "5000009001", "quantity": 12}])
+    r = attach(goods, [{"number": "5000009001", "quantity": 10}])
     expect("SRNs read and stored", "1 SRN(s)" in r.json()["srn_message"] and srns(goods) == ["5000009001"], r.text[:200])
     b = og(goods)
     expect("...the user's empty choice stays, the summary's SRNs are offered",
            b["chosen"] is True and b["selected"] == [] and b["suggested"] == [A], (b["chosen"], b["suggested"]))
-    attach(goods, [{"number": "5000009001", "quantity": 12}, {"number": "5000009006"}])
+    attach(goods, [{"number": "5000009001", "quantity": 10}, {"number": "5000009006"}])
     expect("a second file adds, without doubles", sorted(srns(goods)) == ["5000009001", "5000009006"], srns(goods))
     f = freight(25000)
     c = freight_costs(client, f)
@@ -260,6 +291,26 @@ def test_different_times(client):
            c["suggested"] == [A, B] and "GRN summary of invoice" in c["suggested_from"], (c["suggested"], c["suggested_from"]))
     r = client.delete(f"/api/invoices/{goods}/srn-list")
     expect(f"the SRNs can be removed again (got {r.status_code})", r.status_code == 200 and srns(goods) == [])
+    client.delete(f"/api/invoices/{f}")
+    client.delete(f"/api/invoices/{goods}")
+    conn.execute("UPDATE EKBE SET MENGE = '12' WHERE BELNR = '5000009001' AND EBELP = '00010'")
+    conn.execute("UPDATE EKBE SET MENGE = '8' WHERE BELNR = '5000009006' AND EBELP = '00010'")
+    conn.commit()
+
+    print("\nSEVERAL INVOICES ON ONE PO: one SAP document per invoice")
+    one = save(client, po_id, 12, None)
+    expect("first invoice: the receipt it bills", og(one)["suggested"] == [A], og(one)["suggested"])
+    r = client.post(f"/api/sap/invoices/{one}/post", json={"mode": "park", "tax_code": "I1", "layout": "goods", "posting_date": "20260312"})
+    two = save(client, po_id, 8, None)
+    expect(f"second invoice: the rest, although the first is only parked (got {r.status_code})",
+           r.status_code == 200 and og(two)["suggested"] == [B], (r.text[:150], og(two)["suggested"], og(two)["why_not"]))
+    r = client.post(f"/api/sap/invoices/{two}/post", json={"mode": "park", "tax_code": "I1", "layout": "goods", "posting_date": "20260312"})
+    docs = [client.get(f"/api/invoices/{i}").json()["sap_document_number"] for i in (one, two)]
+    expect(f"two invoices, two SAP documents (got {r.status_code})", r.status_code == 200 and all(docs) and docs[0] != docs[1], docs)
+    three = save(client, po_id, 8, None)
+    b = og(three)
+    expect("a third has nothing left: the invoices using the receipts are named",
+           b["suggested"] == [] and f"(#{one})" in b["why_not"] and f"(#{two})" in b["why_not"], b["why_not"])
 
 
 def test_upload(client):

@@ -4,8 +4,8 @@ import Button from "../common/Button";
 import { getDeliveryCosts } from "../../services/sapService";
 import { setDeliveryCosts } from "../../services/invoiceService";
 
-// What Lucky's own MIR7 uses on freight; the user can change it per condition.
-const DEFAULT_TAX_CODE = "I0";
+// Lucky's code for freight (SRB 15%, claimable; confirmed 2026-11-24); changeable per condition.
+const DEFAULT_TAX_CODE = "KT";
 
 /**
  * Planned delivery costs (freight conditions) of the matched PO, live from SAP

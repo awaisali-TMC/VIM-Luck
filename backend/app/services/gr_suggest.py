@@ -2,10 +2,12 @@
 
 A supplier's invoice names its PO and a total quantity, not its GRs. When ALL the
 open GRs of a PO item add up to exactly what the invoice bills for that item, there
-is nothing to choose, so the card ticks them. When the upload carries a GRN
+is nothing to choose, so the card ticks them; likewise when exactly one combination
+of them does (several invoices on one PO). When the upload carries a GRN
 summary, its SRNs are the choice instead, under the same condition. Anything else is
 left to the user.
 """
+import bisect
 import json
 
 from sqlalchemy import select
@@ -80,30 +82,59 @@ def _doc(number) -> str:
     return str(number or "").strip().lstrip("0")
 
 
+MAX_COMBINE = 18        # 2^18 combinations; above that the user chooses
+
+
+def only_combination(values: list[float], target: float, tolerance: float = 0.001) -> list[int] | None:
+    """Indexes of the ONE combination of `values` that adds up to `target`; None when
+    there is none, or more than one (then nobody can tell which the vendor billed)."""
+    n = len(values)
+    if not n or n > MAX_COMBINE or target <= 0:
+        return None
+    cents = [round(v * 1000) for v in values]
+    want, tol = round(target * 1000), round(tolerance * 1000)
+    found = None
+    # Meet in the middle: sums of the first half, looked up from the second.
+    half = n // 2
+    left: list[tuple[int, int]] = [(0, 0)]
+    for i in range(half):
+        left += [(t + cents[i], m | 1 << i) for t, m in left]
+    left.sort()
+    sums = [t for t, _m in left]
+    right: list[tuple[int, int]] = [(0, 0)]
+    for i in range(half, n):
+        right += [(t + cents[i], m | 1 << i) for t, m in right]
+    for t, m in right:
+        for k in range(bisect.bisect_left(sums, want - tol - t), bisect.bisect_right(sums, want + tol - t)):
+            mask = m | left[k][1]
+            if found is not None:
+                return None
+            found = mask
+    return [i for i in range(n) if found >> i & 1] if found else None
+
+
+def _used(g: dict, taken: dict[str, str], own_doc: str | None) -> bool:
+    return g["gr_key"] in taken or (
+        g["parked"] > 0 and any(_doc(d) != _doc(own_doc) for d in g["parked_docs"]))
+
+
 def matching_grs(billed: dict[int, float], open_grs: list[dict], taken: dict[str, str], own_doc: str | None,
                  receipts: list[dict] | None = None) -> list[str]:
-    """gr_keys of every open GR of each billed PO item whose open quantities add up
-    to the billed quantity, unless one of them is already used by another invoice
-    (`taken` in VIM, or parked in SAP under a document other than `own_doc`).
-    With `receipts` (the GRN summary) only the listed ones are candidates."""
-    by_item: dict[int, list[dict]] = {}
-    for g in open_grs:
-        if receipts and not listed_numbers(receipts, g):
-            continue
-        by_item.setdefault(g["po_item"], []).append(g)
-
-    def used(g):
-        if g["gr_key"] in taken:
-            return True
-        return g["parked"] > 0 and any(_doc(d) != _doc(own_doc) for d in g["parked_docs"])
-
+    """gr_keys of each billed PO item's open GRs that no other invoice uses (`taken`
+    in VIM, or parked in SAP under a document other than `own_doc`): all of them when
+    they add up to the billed quantity, else the only combination that does. A PO's
+    GRs are often billed by several invoices (5 GRs: 3 on one, 2 on the next).
+    With `receipts` (the GRN summary) only the listed ones count, and all of them."""
     keys: list[str] = []
     for item, qty in billed.items():
-        grs = by_item.get(item, [])
-        if not grs or qty <= 0 or any(used(g) for g in grs):
+        grs = [g for g in open_grs if g["po_item"] == item and not (receipts and not listed_numbers(receipts, g))]
+        free = [g for g in grs if not _used(g, taken, own_doc)]
+        if not free or qty <= 0 or (receipts and len(free) < len(grs)):
             continue
-        if abs(round(sum(g["open_qty"] for g in grs), 3) - round(qty, 3)) <= 0.001:
-            keys.extend(g["gr_key"] for g in grs)
+        if abs(round(sum(g["open_qty"] for g in free), 3) - round(qty, 3)) <= 0.001:
+            keys.extend(g["gr_key"] for g in free)
+        elif not receipts:
+            keys.extend(free[i]["gr_key"] for i in only_combination([g["open_qty"] for g in free], qty) or [])
     return keys
 
 
@@ -173,13 +204,13 @@ async def why_not_suggested(db: AsyncSession, invoice: Invoice, po: PurchaseOrde
         others = sorted({taken[g["gr_key"]] for g in grs if g["gr_key"] in taken})
         docs = sorted({d for g in grs if g["parked"] > 0 for d in g["parked_docs"]
                        if _doc(d) != _doc(invoice.sap_document_number)})
-        total = round(sum(g["open_qty"] for g in grs), 3)
-        if others:
-            why.append(f"PO item {item}: receipts are ticked on invoice {', '.join(others)}.")
-        elif docs:
-            why.append(f"PO item {item}: receipts are on parked SAP document {', '.join(docs)}.")
-        elif abs(total - round(qty, 3)) > 0.001:
-            why.append(f"PO item {item}: {what} add up to {total:g}, the invoice bills {qty:g}.")
+        free = [g for g in grs if not _used(g, taken, invoice.sap_document_number)]
+        total = round(sum(g["open_qty"] for g in free), 3)
+        used = [f"ticked on invoice {', '.join(others)}"] if others else []
+        used += [f"on parked SAP document {', '.join(docs)}"] if docs else []
+        note = f" ({len(grs) - len(free)} receipt(s) left out: {' and '.join(used)})" if used else ""
+        why.append(f"PO item {item}: {what} add up to {total:g}, the invoice bills {qty:g}, "
+                   f"and no single combination matches it{note}.")
     return " ".join(why) or None
 
 
@@ -213,4 +244,8 @@ def suggest_freight(invoice: Invoice, cost_grs: list[dict], siblings: list[dict]
         mine = [g for g in free if listed_numbers(sib["receipts"], g["gr"])]
         if equals(mine):
             return [g["gr_key"] for g in mine], f"the GRN summary of invoice {sib['invoice_number']}"
+    if not equals(free):
+        pick = only_combination([g["amount"] for g in free], net, 1)
+        if pick:
+            return [free[i]["gr_key"] for i in pick], "the only combination that equals the bill"
     return [g["gr_key"] for g in free], "all open freight"      # as without a summary

@@ -227,7 +227,8 @@ export default function GoodsReceiptsCard({ invoice, editable = false, onChanged
               ? "No GR ticked — parking uses the latest goods receipt for each PO item, and is refused if the invoice bills more than that receipt."
               : <>Selected: {Object.entries(selectedByItem).map(([item, q]) => `item ${item}: ${fmtNum(q)}`).join(" · ")}.
                   {" "}The ticked GRs must add up to the quantity the invoice bills for each item.</>}
-            {isSuggested && <span className="ml-1">Ticked automatically: {data.srn_count > 0 ? "the SRNs of the attached GRN summary" : "all open GRs"} add up to the billed quantity.</span>}
+            {isSuggested && <span className="ml-1">Ticked automatically: {data.srn_count > 0 ? "the SRNs of the attached GRN summary"
+              : data.suggested.length === grs.length ? "all open GRs" : "the only GRs that"} add up to the billed quantity.</span>}
             {!editable && <span className="ml-1">(Locked — the invoice is in SAP.)</span>}
           </div>
         </>
