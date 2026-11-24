@@ -19,6 +19,23 @@ LAN runs `ef28709` or `66098dc` (`66098dc` is frontend only). Everything built i
   relays results; a second Claude session on the LAN box pulls, restarts and reads its database.
 - Simulation (MIR7 Simulate / Messages before the park) is parked by the user, see the questions.
 
+**New account or session — how to work here (nothing else is needed from the old one):**
+- Everything is in the repo: `git clone` / `git pull` of `awaisali-TMC/VIM-Luck`, branch `dev-shahzaib`, then this file
+  and `CLAUDE.md`. On this Windows machine the folder is `D:\TMC\VIM-Luck`.
+- Commit: `git -c user.name="ai.engineers1" -c user.email="ai.engineers1@tmcltd.com" commit ...`, message ending with
+  the Co-Authored-By line; then `git pull --rebase origin dev-shahzaib` and `git push origin dev-shahzaib`. A merge to main, only
+  when asked, is a fast-forward: `git push origin HEAD:main`. `gh` is not installed.
+- Tests: `backend/.venv/Scripts/python.exe backend/test_<name>.py` (standalone, offline). After a change near SAP run
+  at least `test_sap_workflow`, `test_srn_list`, `test_sap_fake`, `test_sap_employee`, `test_duplicate_check`.
+- Frontend (PowerShell): `$env:Path = "$env:LOCALAPPDATA\Programs\nodejs;" + $env:Path`, then in `frontend/`
+  `npx.cmd eslint <file>` and `npm.cmd run build`.
+- Write patch scripts to files; Bash heredocs with quotes or backslash-n broke code several times.
+- Do not query FBR live from this machine (it was refused as unauthorized) and do not try SSH/SAP from it.
+- Emails drafted for Basis: plain text, short, with the purpose; no customer name and no ABAP items in them.
+- The user continues with **another Claude account** from 2026-11-25: that account does not have this chat, so
+  this file is the hand-over. Keep it current after every step.
+- Only on this machine, not in git: `git stash@{0}` ("soft_delete_invoices script (on hold)"), `backend/.env`, `.venv`.
+
 **Confirmed on AUP / LAN:** GR-wise park (invoice 60 -> `5105660701/2027`, six GRs, EKBE `P` rows per GR),
 the 103/105 GR list with Lucky's SRN numbers, WHT types from the BP (VI, FB, FE, V7, K1), unit MT, FBR
 badges and profile, duplicate refused at Validate, SAP status re-read on page open, `DIFF_INV` in both
