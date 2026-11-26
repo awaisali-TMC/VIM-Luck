@@ -124,6 +124,8 @@ async def run_migrations():
         "ALTER TABLE purchase_orders ADD COLUMN company_code VARCHAR(10)",
         # Buyer (receiver) NTN as printed on the invoice; empty when not shown.
         "ALTER TABLE invoices ADD COLUMN receiver_ntn VARCHAR(50)",
+        # SAP transaction chosen at upload: MIR7 (PO-based) or FV60 (no PO). NULL = MIR7.
+        "ALTER TABLE invoices ADD COLUMN sap_transaction VARCHAR(10)",
         # Repair POs synced while the header total read EKKO RLWRT (0 for POs
         # without a release strategy): recompute from line values. Idempotent —
         # only touches rows whose stored total is still 0.

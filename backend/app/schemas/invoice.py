@@ -76,6 +76,9 @@ class ExtractionResult(BaseModel):
     attention_flags: list[AttentionFlag] = []
     # Goods receipts (SRNs) listed on an attached GRN summary page
     goods_receipts: list[dict] = []
+    # MIR7 | FV60, as chosen on the upload screen (echoed back so the review
+    # screen saves it with the invoice).
+    sap_transaction: Optional[str] = None
 
 
 # --- Save invoice (POST /save) ---
@@ -148,6 +151,7 @@ class InvoiceSaveRequest(BaseModel):
     base_total_amount: Optional[float] = None
     sap_vendor_number: Optional[str] = None
     goods_receipts: Optional[list[dict]] = None
+    sap_transaction: Optional[str] = None  # MIR7 | FV60; anything else = MIR7
 
 
 # --- Update invoice (PUT /{id}) ---
@@ -249,6 +253,7 @@ class InvoiceResponse(BaseModel):
     fbr_verification_status: Optional[str] = "not_verified"
     sap_doc_status: Optional[str] = None  # "parked" | "posted" — used to label the status
     sap_wf_status: Optional[str] = None   # SAP approval workflow: INIT | BLK | APP | REJ
+    sap_transaction: Optional[str] = None  # MIR7 | FV60 (NULL = MIR7)
 
     model_config = {"from_attributes": True}
 
@@ -333,6 +338,7 @@ class InvoiceDetailResponse(BaseModel):
     # SAP approval workflow (services/sap_workflow.py)
     sap_wf_objkey: Optional[str] = None
     sap_wf_status: Optional[str] = None       # INIT | BLK | APP | REJ
+    sap_transaction: str = "MIR7"             # MIR7 | FV60
     sap_wf_posted_doc: Optional[str] = None
     sap_wf_message: Optional[str] = None
     sap_wf_checked_at: Optional[datetime] = None

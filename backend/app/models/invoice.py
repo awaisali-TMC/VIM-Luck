@@ -50,6 +50,13 @@ class Invoice(Base):
     # Buyer's (receiver's) NTN as printed on the invoice; empty when not shown.
     receiver_ntn = Column(String(50))
 
+    # Which SAP transaction this invoice is for, chosen at upload:
+    #   MIR7 - PO-based invoice (PO match, GRs, parked with BAPI_INCOMINGINVOICE_PARK)
+    #   FV60 - invoice without a PO (FI vendor invoice). Recorded only for now:
+    #          PO matching and the MIR7 park are refused for it.
+    # NULL (invoices saved before this field) means MIR7.
+    sap_transaction = Column(String(10), default="MIR7")
+
     # Amounts
     subtotal_amount = Column(Float)
     tax_amount = Column(Float)

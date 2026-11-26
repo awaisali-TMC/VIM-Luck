@@ -40,6 +40,8 @@ import WithholdingTaxCard from "../components/detail/WithholdingTaxCard";
 import { postInvoiceToSAP, fetchSAPTaxCodes, fetchSAPCurrencies, unparkInvoiceFromSAP, validateInvoiceForSAP, lookupSAPVendor } from "../services/sapService";
 import { tokens } from "../styles/tokens";
 import { todayIso } from "../utils/dateRange";
+import { sapTransactionOf } from "../utils/sapTransaction";
+import SapTransactionBadge from "../components/common/SapTransactionBadge";
 
 /**
  * Status-based action configurations.
@@ -671,6 +673,9 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
   const { canEdit: canEditByPermission, role: currentRole } = usePermissions();
   // Only purchasers (ap_operator) and admins may park to SAP (mirrors the backend guard).
   const canParkToSAP = currentRole === "admin" || currentRole === "ap_operator";
+  // FV60 (invoice without a PO), chosen at upload: recorded only for now, so
+  // no PO match, no SAP parking fields and no park / submit-and-park.
+  const isFV60 = sapTransactionOf(invoice) === "FV60";
   const canEditInvoice = canEditByPermission("/invoices");
   // Suppliers viewing their own invoice: no edit rights, but a DRAFT (e.g.
   // just created from a PO) needs their explicit "Submit for Processing"
@@ -813,7 +818,9 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
 
   if (!invoice) return null;
 
-  const actions = STATUS_ACTIONS[invoice.status] || [];
+  const actions = (STATUS_ACTIONS[invoice.status] || []).filter(
+    (a) => !(isFV60 && a.targetStatus === "pending_approval")
+  );
   // Inline-editable while pre-approval, the user has edit rights, and it's not
   // in SAP. Locks automatically once approved/parked/posted.
   const editable =
@@ -867,6 +874,7 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
             </span>
           </div>
           <Badge status={invoice.status} />
+          <SapTransactionBadge value={invoice.sap_transaction} />
           {invoice.supplier_ntn && (
             // Header shows just the compact pill (single line, so it aligns with
             // the status Badge); the full FBR detail lives in the Vendor
@@ -936,7 +944,7 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
           {/* Park to SAP — shown for validated/approved invoices not yet in SAP.
               Disabled (with a reason) until a PO is matched, so it stays visible
               rather than silently disappearing. */}
-          {!editing && canEditInvoice && sapEligible && canParkToSAP && (
+          {!editing && canEditInvoice && sapEligible && canParkToSAP && !isFV60 && (
             <span title={!canPostToSAP ? "Match this invoice to a purchase order first (PO Match section below) to enable parking." : undefined}>
               <Button
                 variant="success"
@@ -1062,6 +1070,13 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
 
       {/* ── Workflow Stepper ── */}
       <WorkflowStepper currentStatus={invoice.status} />
+
+      {isFV60 && (
+        <div className="bg-warning-bg border border-warning-base rounded-base px-4 py-2.5 text-2xs text-warning-dark">
+          This invoice is marked <strong>FV60</strong> (invoice without a PO). It is not matched to a
+          purchase order, and parking FV60 invoices to SAP is not available yet.
+        </div>
+      )}
 
       {/* ── Review warnings (e.g. supplier vendor-name mismatch) — informational,
              they never change the invoice status ── */}
@@ -1388,23 +1403,23 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
       />
 
       {/* Withholding tax (observation G): vendor BP WHT, changeable per invoice */}
-      {!editing && invoice.matched_po_id && (
+      {!editing && !isFV60 && invoice.matched_po_id && (
         <WithholdingTaxCard invoice={invoice} editable={sapFieldsEditable} onChanged={refetch} />
       )}
 
       {/* GR-wise parking (observation F): pick the goods receipts to park against */}
-      {!editing && invoice.matched_po_id && activeLayout !== "delivery" && (
+      {!editing && !isFV60 && invoice.matched_po_id && activeLayout !== "delivery" && (
         <GoodsReceiptsCard invoice={invoice} editable={sapFieldsEditable} onChanged={refetch} />
       )}
 
       {/* Planned delivery costs (freight): only when "Items to Park" includes them */}
-      {!editing && invoice.matched_po_id
+      {!editing && !isFV60 && invoice.matched_po_id
         && ["delivery", "both"].includes(activeLayout) && (
         <DeliveryCostsCard invoice={invoice} layout={activeLayout} taxCodes={taxCodes} editable={sapFieldsEditable} onChanged={refetch} />
       )}
 
       {/* SAP Parking parameters — editable during review, locked at approval */}
-      {!editing && (
+      {!editing && !isFV60 && (
         <div ref={sapCardRef}>
           <SAPPostingCard
             key={invoice.id}
@@ -1455,8 +1470,9 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
         </div>
       )}
 
-      {/* PO Matching Section — reviewers see results read-only (no run/match). */}
-      {!editing && (
+      {/* PO Matching Section — reviewers see results read-only (no run/match).
+          Not for FV60 (invoice without a PO). */}
+      {!editing && !isFV60 && (
         <POMatchSection
           invoiceId={invoice.id}
           poReference={invoice.po_reference}

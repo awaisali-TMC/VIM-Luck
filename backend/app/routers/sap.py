@@ -1272,6 +1272,15 @@ async def post_invoice_to_sap_endpoint(
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
 
+    # FV60 (invoice without a PO) is recorded only for now: this route parks
+    # PO-based invoices (MIR7, BAPI_INCOMINGINVOICE_PARK) and must not send it.
+    if (invoice.sap_transaction or "MIR7").upper() == "FV60":
+        raise HTTPException(
+            status_code=422,
+            detail="This invoice is marked FV60 (invoice without a PO). Parking FV60 "
+                   "invoices to SAP is not available yet; only MIR7 (PO-based) invoices are parked.",
+        )
+
     if req.mode not in ("park", "post", "validate", "change"):
         raise HTTPException(status_code=400, detail=f"Unknown mode '{req.mode}'.")
 

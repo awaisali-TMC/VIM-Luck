@@ -236,6 +236,7 @@ def _build_detail_response(invoice: Invoice) -> InvoiceDetailResponse:
         receiver_name=invoice.receiver_name,
         receiver_address=invoice.receiver_address,
         receiver_ntn=invoice.receiver_ntn,
+        sap_transaction=norm_sap_transaction(invoice.sap_transaction),
         subtotal_amount=invoice.subtotal_amount,
         tax_amount=invoice.tax_amount,
         total_amount=invoice.total_amount,
@@ -319,6 +320,15 @@ def _validate_upload(file_content: bytes, content_type: str) -> None:
         )
 
 
+SAP_TRANSACTIONS = ("MIR7", "FV60")
+
+
+def norm_sap_transaction(v) -> str:
+    """MIR7 (PO-based, the default) or FV60 (no PO). Anything else is MIR7."""
+    v = (v or "").strip().upper()
+    return v if v in SAP_TRANSACTIONS else "MIR7"
+
+
 def _pnum(v):
     """Parse a possibly comma-formatted number string to float (None-safe)."""
     try:
@@ -330,7 +340,8 @@ def _pnum(v):
 def _extraction_to_draft(result: dict, filename: str, stored_path: str,
                          mime_type: str, size: int,
                          supplier_id: int | None = None,
-                         source_type: str = "upload") -> Invoice:
+                         source_type: str = "upload",
+                         sap_transaction: str = "MIR7") -> Invoice:
     """Build a DRAFT Invoice (with line items) from an extraction result —
     the server-side equivalent of the extraction-review screen's save.
 
@@ -371,6 +382,7 @@ def _extraction_to_draft(result: dict, filename: str, stored_path: str,
         detected_taxes=json.dumps(result.get("detected_taxes")) if result.get("detected_taxes") else None,
         processing_time_ms=result.get("processing_time_ms"),
         srn_list=json.dumps(result.get("goods_receipts")) if result.get("goods_receipts") else None,
+        sap_transaction=norm_sap_transaction(sap_transaction),
         status=InvoiceStatus.DRAFT.value,
         supplier_id=supplier_id,
         source_type=source_type,
@@ -452,7 +464,8 @@ async def _save_multi_invoice_drafts(db: AsyncSession, file_content: bytes,
                                      first_result: dict,
                                      supplier_id: int | None = None,
                                      source_type: str = "upload",
-                                     uploader: tuple[str, str] = ("internal", "unknown")) -> list[Invoice]:
+                                     uploader: tuple[str, str] = ("internal", "unknown"),
+                                     sap_transaction: str = "MIR7") -> list[Invoice]:
     """A file contains several distinct invoices: run a DEDICATED segmentation
     pass (per-page invoice mapping — reliable even for 20-page files with 1/2/
     3/5-page invoices), split the PDF per invoice, extract each part, and save
@@ -465,7 +478,8 @@ async def _save_multi_invoice_drafts(db: AsyncSession, file_content: bytes,
 
     def _draft(result, name, stored, mime_t, size):
         return _extraction_to_draft(result, name, stored, mime_t, size,
-                                    supplier_id=supplier_id, source_type=source_type)
+                                    supplier_id=supplier_id, source_type=source_type,
+                                    sap_transaction=sap_transaction)
 
     drafts: list[Invoice] = []
     mime = MIME_MAP[content_type]
@@ -556,6 +570,7 @@ def _draft_summary(inv: Invoice, source_file: str) -> dict:
 @router.post("/upload")
 async def upload_invoice(
     file: UploadFile = File(...),
+    sap_transaction: str = Form("MIR7"),
     db: AsyncSession = Depends(get_db),
     principal: Principal = Depends(get_current_principal),
 ):
@@ -586,10 +601,14 @@ async def upload_invoice(
             status_code=500, detail="Invoice extraction failed — see server logs."
         )
 
+    # Suppliers are never asked: their invoices are PO-based (MIR7).
+    txn = "MIR7" if principal.kind == "supplier" else norm_sap_transaction(sap_transaction)
+
     if result.get("multiple_invoices"):
         drafts = await _save_multi_invoice_drafts(
             db, file_content, content_type, file.filename, result,
             supplier_id=owner_supplier_id, source_type=src_type, uploader=uploader,
+            sap_transaction=txn,
         )
         return {
             "batch": True,
@@ -617,12 +636,14 @@ async def upload_invoice(
         line_items_source=result.get("line_items_source", "gemini"),
         attention_flags=[AttentionFlag(**f) for f in result.get("attention_flags", [])],
         goods_receipts=result.get("goods_receipts") or [],
+        sap_transaction=txn,
     )
 
 
 @router.post("/upload-batch")
 async def upload_invoices_batch(
     files: list[UploadFile] = File(...),
+    sap_transaction: str = Form("MIR7"),
     db: AsyncSession = Depends(get_db),
     principal: Principal = Depends(get_current_principal),
 ):
@@ -642,6 +663,7 @@ async def upload_invoices_batch(
     owner_supplier_id = principal.id if principal.kind == "supplier" else None
     src_type = "supplier" if principal.kind == "supplier" else "upload"
     uploader = await _invoice_uploader(principal, db)
+    txn = "MIR7" if principal.kind == "supplier" else norm_sap_transaction(sap_transaction)
 
     async def _process_document(file_content: bytes, content_type: str, fname: str):
         result = extract_invoice(file_content, MIME_MAP[content_type])
@@ -649,10 +671,12 @@ async def upload_invoices_batch(
             return await _save_multi_invoice_drafts(
                 db, file_content, content_type, fname, result,
                 supplier_id=owner_supplier_id, source_type=src_type, uploader=uploader,
+                sap_transaction=txn,
             )
         stored = save_invoice_file(file_content, fname, uploader[0], uploader[1])
         draft = _extraction_to_draft(result, fname, stored, MIME_MAP[content_type], len(file_content),
-                                     supplier_id=owner_supplier_id, source_type=src_type)
+                                     supplier_id=owner_supplier_id, source_type=src_type,
+                                     sap_transaction=txn)
         db.add(draft)
         await db.commit()
         await db.refresh(draft)
@@ -781,6 +805,9 @@ async def save_invoice(
         # Non-PO lane marker + resolved vendor (both None for the PO flow)
         sap_vendor_number=_clamp(data.sap_vendor_number, 20),
         srn_list=json.dumps(receipts) if (receipts := clean_receipts(data.goods_receipts)) else None,
+        # Suppliers are never asked: their invoices are PO-based (MIR7).
+        sap_transaction="MIR7" if owner_supplier_id is not None
+        else norm_sap_transaction(data.sap_transaction),
     )
 
     for li_data in data.line_items:

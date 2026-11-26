@@ -1,4 +1,4 @@
-# Session handover — last updated 2026-11-24
+# Session handover — last updated 2026-11-26 (MIR7 / FV60 choice, see the 2026-11-26 section below START HERE)
 
 Handover from Claude Code sessions on this machine (`D:\VIM\VIM-Luck`). Read
 `CLAUDE.md` and `CONTEXT.md` first; this file records only what these sessions did and
@@ -77,6 +77,30 @@ invoices entered directly in SAP are unknown to VIM; `1234` and `INV-1234` are d
 freight invoices with the same number, vendor and PO are duplicates; a quantity is not converted where
 order unit and OPU differ; the big ATL badge still says "NTN Not Found" when FBR does not answer; match
 reasoning shows `424.94000000000005`.
+
+## 2026-11-26: MIR7 / FV60 choice on upload (client request) — dev-shahzaib, not yet on LAN
+
+**Ask:** when a user uploads an invoice, ask whether it is MIR7 or "FE60". The user confirmed FE60 = **FV60**
+(invoice without a PO) and chose the small scope: **the choice and a label only**; parking FV60 to SAP later.
+
+**Built:** Upload screen (internal portal only) shows two choices, MIR7 — Invoice with PO / FV60 — Invoice
+without PO; the file picker appears once one is picked. Saved as `invoices.sap_transaction` (new column, migration;
+old rows NULL = MIR7). Split/batch drafts carry it. Suppliers and email-inbox invoices are always MIR7. Badge
+(MIR7 grey / FV60 amber) in the Inbox reference column, the review screen and the invoice header. FV60: PO match and
+`/api/sap/invoices/{id}/post` (all modes) refuse with 422; the invoice page hides PO Matching, SAP Parking, GRs,
+freight, WHT, Submit & Park and Park to SAP, and shows a banner. Not editable after upload (delete and re-upload).
+
+**Checked offline:** new `backend/test_sap_transaction.py` passes; `test_sap_workflow`, `test_srn_list`,
+`test_sap_fake`, `test_sap_employee`, `test_duplicate_check`, `test_receiver_ntn`, `test_invoice_document` pass;
+`npm run build` OK; eslint on the changed files has no new errors (two old `set-state-in-effect` errors in
+`ExtractionResultsPage.jsx` lines 171/180 predate this).
+
+**LAN test:** pull, restart (`start-lan.sh`; the column is added at startup), upload once with each choice; an FV60
+invoice shows the amber badge, no PO Matching / SAP cards, and only Validate.
+
+**Open:** what an FV60 invoice does after Validate (today nothing: no approval, no SAP). Parking FV60 needs GL
+account + cost center per line and an FI BAPI (e.g. `BAPI_ACC_DOCUMENT_POST` posts, it does not park; FI parking
+is `PRELIMINARY_POSTING_FB01` or similar) — to agree with Lucky's FI/ABAP team.
 
 ## 2026-11-24 (LAN, reported by the LAN session at `ef28709`)
 

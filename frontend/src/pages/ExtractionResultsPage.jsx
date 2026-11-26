@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import Card from "../components/common/Card";
 import Badge from "../components/common/Badge";
+import SapTransactionBadge from "../components/common/SapTransactionBadge";
 import Button from "../components/common/Button";
 import ExtractionKPIs from "../components/upload/ExtractionKPIs";
 import AttentionFlagsPanel from "../components/upload/AttentionFlagsPanel";
@@ -259,6 +260,7 @@ export default function ExtractionResultsPage({
             </span>
           </div>
           <Badge status="info" label="Extraction Complete" size="xs" />
+          <SapTransactionBadge value={extractionResult.sap_transaction} />
         </div>
         <div className="flex items-center gap-2">
           {/* The uploaded file is still in browser memory, so show it from

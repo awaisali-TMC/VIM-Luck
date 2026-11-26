@@ -192,6 +192,8 @@ export function ExtractionProvider({ children }) {
           file_size_bytes: extractionFile?.size || null,
           page_count: extractionResult.page_count,
           goods_receipts: extractionResult.goods_receipts || null,
+          // MIR7 | FV60 from the upload screen (none from the email inbox = MIR7).
+          sap_transaction: extractionResult.sap_transaction || null,
           status,
           source_type: pendingEmailAttachmentId ? "email" : "web_upload",
           source_email_id: pendingEmailAttachmentId || null,

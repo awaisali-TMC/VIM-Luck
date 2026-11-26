@@ -5,6 +5,59 @@ import Badge from "../components/common/Badge";
 import Button from "../components/common/Button";
 import UploadZone from "../components/upload/UploadZone";
 
+// Client request: the user says which SAP transaction the invoice is for.
+const SAP_TRANSACTION_OPTIONS = [
+  {
+    value: "MIR7",
+    title: "MIR7 — Invoice with PO",
+    text: "Matched to a purchase order and its goods receipts, then parked in SAP (MIR7).",
+  },
+  {
+    value: "FV60",
+    title: "FV60 — Invoice without PO",
+    text: "Vendor invoice with no purchase order. Recorded only for now: not matched to a PO or parked.",
+  },
+];
+
+function SapTransactionChoice({ value, onChange }) {
+  return (
+    <div className="mb-4">
+      <div className="text-xs font-semibold text-neutral-700 mb-2">
+        Which SAP transaction is this invoice for?
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3" role="radiogroup" aria-label="SAP transaction">
+        {SAP_TRANSACTION_OPTIONS.map((o) => {
+          const on = value === o.value;
+          return (
+            <button
+              key={o.value}
+              type="button"
+              role="radio"
+              aria-checked={on}
+              onClick={() => onChange(o.value)}
+              className={`text-left rounded-md border px-4 py-3 cursor-pointer transition-colors ${
+                on
+                  ? "border-brand-500 bg-brand-50 ring-1 ring-brand-500"
+                  : "border-neutral-200 bg-neutral-0 hover:border-brand-300"
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <span
+                  className={`w-3.5 h-3.5 rounded-full border-2 flex-shrink-0 ${
+                    on ? "border-brand-500 bg-brand-500" : "border-neutral-300"
+                  }`}
+                />
+                <span className="text-sm font-semibold text-neutral-900">{o.title}</span>
+              </div>
+              <div className="text-2xs text-neutral-500 mt-1 ml-5.5">{o.text}</div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function ProcessingView({ file, fileCount = 1 }) {
   const name = fileCount > 1 ? `${fileCount} files` : (file?.name || "document");
   const size = fileCount > 1 ? "" : file ? `${(file.size / 1024).toFixed(0)} KB` : "";
@@ -83,8 +136,12 @@ export default function UploadInvoicePage({
   onExtractionComplete,
   onBatchComplete,
   title = "Upload Invoice",
+  // Internal portal only: ask MIR7 (with PO) or FV60 (without PO) before the
+  // upload. Suppliers are not asked; their invoices are always MIR7.
+  askSapTransaction = false,
 }) {
   const [state, setState] = useState("idle"); // idle | extracting | error
+  const [sapTransaction, setSapTransaction] = useState(null);
   const [file, setFile] = useState(null);
   const [fileCount, setFileCount] = useState(1);
   const [error, setError] = useState(null);
@@ -107,9 +164,10 @@ export default function UploadInvoicePage({
       setState("extracting");
       setError(null);
 
+      const extra = askSapTransaction ? { sap_transaction: sapTransaction || "MIR7" } : {};
       try {
         if (files.length === 1) {
-          const result = await uploadInvoice(files[0]);
+          const result = await uploadInvoice(files[0], extra);
           if (result?.batch) {
             // One file, several invoices — split & saved as drafts server-side.
             goToInbox(result);
@@ -117,7 +175,7 @@ export default function UploadInvoicePage({
             onExtractionComplete?.(files[0], result);
           }
         } else {
-          const result = await uploadInvoiceBatch(files);
+          const result = await uploadInvoiceBatch(files, extra);
           if ((result.invoices || []).length === 0) {
             const msgs = (result.errors || []).map((e) => `${e.file}: ${e.error}`).join("; ");
             throw new Error(msgs || "No invoices could be processed.");
@@ -131,7 +189,7 @@ export default function UploadInvoicePage({
         setState("error");
       }
     },
-    [onExtractionComplete, goToInbox]
+    [onExtractionComplete, goToInbox, askSapTransaction, sapTransaction]
   );
 
   const handleReset = useCallback(() => {
@@ -152,7 +210,12 @@ export default function UploadInvoicePage({
           ) : null
         }
       >
-        {state === "idle" && (
+        {state === "idle" && askSapTransaction && (
+          <SapTransactionChoice value={sapTransaction} onChange={setSapTransaction} />
+        )}
+
+        {/* The file picker appears once the transaction is chosen. */}
+        {state === "idle" && (!askSapTransaction || sapTransaction) && (
           <UploadZone onFilesSelected={handleFilesSelected} />
         )}
 

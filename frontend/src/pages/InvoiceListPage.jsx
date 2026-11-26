@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
+import SapTransactionBadge from "../components/common/SapTransactionBadge";
 import { useLocation } from "react-router-dom";
 import { getInvoices, bulkDeleteInvoices } from "../services/invoiceService";
 import { getInvoiceApproval } from "../services/workflowService";
@@ -297,11 +298,14 @@ export default function InvoiceListPage({ onViewInvoice, onUpload, isAdmin = fal
       // Plain, selectable text (not a link) so the reference can be copied;
       // open the invoice via the # link or the eye button instead.
       render: (v, row) => (
-        <span
-          className="font-medium text-neutral-800 whitespace-nowrap"
-          title={row.original_filename || undefined}
-        >
-          {v || <span className="text-neutral-400 italic font-normal">—</span>}
+        <span className="inline-flex items-center gap-2">
+          <span
+            className="font-medium text-neutral-800 whitespace-nowrap"
+            title={row.original_filename || undefined}
+          >
+            {v || <span className="text-neutral-400 italic font-normal">—</span>}
+          </span>
+          <SapTransactionBadge value={row.sap_transaction} />
         </span>
       ),
     },

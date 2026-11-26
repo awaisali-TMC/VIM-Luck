@@ -41,6 +41,11 @@ async def trigger_po_match(
     invoice = inv_result.scalars().first()
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
+    if (invoice.sap_transaction or "MIR7").upper() == "FV60":
+        raise HTTPException(
+            status_code=422,
+            detail="This invoice is marked FV60 (invoice without a PO), so it is not matched to a PO.",
+        )
 
     # Load PO with line items, GRNs, SESes
     po_result = await db.execute(

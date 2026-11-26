@@ -87,6 +87,7 @@ function UploadRoute() {
       <UploadInvoicePage
         onExtractionComplete={handleExtractionComplete}
         onBatchComplete={handleBatchComplete}
+        askSapTransaction
       />
     </SapEmployeeLogin>
   );
