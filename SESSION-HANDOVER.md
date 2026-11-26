@@ -78,7 +78,12 @@ freight invoices with the same number, vendor and PO are duplicates; a quantity 
 order unit and OPU differ; the big ATL badge still says "NTN Not Found" when FBR does not answer; match
 reasoning shows `424.94000000000005`.
 
-## 2026-11-26 (last): invoice page Line Items card — totals on top, height fits the lines
+## 2026-11-26 (last): invoice page Line Items card — REVERTED (`ead4074`), the user wants it as it was
+
+The change below (`58c23d5`) and its restyle fix (`be38724`) were reverted at the user's request: totals are at
+the bottom again and the card fills the Invoice Fields card's height, scrolling inside. Do not redo it unasked.
+
+### (reverted) totals on top, height fits the lines
 
 User: with one line the card stretched to the Invoice Fields card's height (empty space, totals at the bottom).
 Now (`LineItemsTable.jsx`, controlled view): Subtotal / Tax / Total are a strip of tiles at the top (Total in
