@@ -51,7 +51,10 @@ Extract these header fields. Use null if not found:
 - due_date: Payment due date (return as-is from document)
 - supplier_name: Vendor / supplier name
 - supplier_address: Vendor address
-- supplier_tax_id: Vendor NTN / tax registration number
+- supplier_tax_id: The vendor's NTN, or its CNIC when the vendor is an individual. An NTN is 7 digits
+  plus an optional check digit (e.g. "1234567-8"); a CNIC is 13 digits (e.g. "42201-1234567-1").
+  When both are printed, take the NTN. Never the STRN (sales-tax registration number). Copy it
+  as printed.
 - receiver_name: Buyer / receiver name
 - receiver_address: Buyer address
 - receiver_tax_id: Buyer / receiver NTN — the tax registration number of the company the
@@ -206,7 +209,7 @@ FIELD_LABELS = {
     "purchase_order": "PO Reference",
     "remit_to_address": "Bank / IBAN",
     "invoice_type": "Document Type",
-    "supplier_tax_id": "Vendor NTN",
+    "supplier_tax_id": "Vendor NTN / CNIC",
 }
 
 CONFIDENCE_THRESHOLD_HIGH = 95.0
@@ -384,8 +387,8 @@ def _detect_attention_flags(
     if not field_map.get("supplier_tax_id"):
         flags.append({
             "severity": "low", "category": "tax",
-            "title": "No vendor NTN",
-            "message": "No vendor NTN/STRN found — verify FBR registration and filer status.",
+            "title": "No vendor NTN / CNIC",
+            "message": "No vendor NTN or CNIC found — verify FBR registration and filer status.",
         })
 
     # --- Foreign currency ---

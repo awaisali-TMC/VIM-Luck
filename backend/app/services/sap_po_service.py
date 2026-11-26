@@ -1007,6 +1007,8 @@ def vendors_by_ntn(ntn: str, company_code: str = "") -> list[dict]:
     variants = [(ntn or "").strip(), digits]
     if len(digits) == 8:
         variants += [digits[:7], f"{digits[:7]}-{digits[7]}"]
+    if len(digits) == 13:          # an individual's CNIC, stored with or without dashes
+        variants.append(f"{digits[:5]}-{digits[5:12]}-{digits[12]}")
     variants = [v.replace("'", "") for v in dict.fromkeys(variants)]
     sap = _get_connector()
     sap.connect()

@@ -78,7 +78,17 @@ freight invoices with the same number, vendor and PO are duplicates; a quantity 
 order unit and OPU differ; the big ATL badge still says "NTN Not Found" when FBR does not answer; match
 reasoning shows `424.94000000000005`.
 
-## 2026-11-26: MIR7 / FV60 choice on upload (client request) — dev-shahzaib, not yet on LAN
+## 2026-11-26 (later): Vendor NTN can be a CNIC — dev-shahzaib, not yet on LAN
+
+The user: the vendor's tax ID can be an NTN or a CNIC (individuals), and extraction already picks a CNIC up.
+Changed: label "Vendor NTN / CNIC" (review screen and invoice page); the prompt now says NTN, or CNIC (13 digits)
+for an individual, NTN when both are printed, never the STRN; the missing-ID flag says NTN / CNIC; the FBR detail
+says "CNIC" for a CNIC; SAP vendor lookup by tax number (`vendors_by_ntn`, used for the freight vendor) also tries
+the dashed CNIC form. Already fine before: FBR detection (13 digits = CNIC), duplicate check (CNIC compared in
+full). Column name `supplier_ntn` unchanged. New offline `backend/test_vendor_tax_id.py`. **LAN check:** an invoice
+from an individual with only a CNIC: the field shows the CNIC, FBR badge, ERP registration badge.
+
+## 2026-11-26: MIR7 / FV60 choice on upload (client request) — `f4665a0`, not yet on LAN
 
 **Ask:** when a user uploads an invoice, ask whether it is MIR7 or "FE60". The user confirmed FE60 = **FV60**
 (invoice without a PO) and chose the small scope: **the choice and a label only**; parking FV60 to SAP later.

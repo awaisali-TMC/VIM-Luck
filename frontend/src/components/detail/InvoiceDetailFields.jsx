@@ -17,7 +17,7 @@ const FIELD_GROUPS = [
     fields: [
       { key: "supplier_name", label: "Vendor Name" },
       { key: "supplier_address", label: "Vendor Address" },
-      { key: "supplier_ntn", label: "Vendor NTN" },
+      { key: "supplier_ntn", label: "Vendor NTN / CNIC" },
     ],
   },
   {

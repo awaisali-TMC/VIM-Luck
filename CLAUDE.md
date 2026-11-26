@@ -71,6 +71,7 @@ py -3 backend/test_fbr_status.py           # Income Tax / Sales Tax badges: unkn
 py -3 backend/test_srn_list.py              # GRN summary in the upload ticks exactly its SRNs; offline, Gemini stubbed; own DB
 py -3 backend/test_receiver_ntn.py          # receiver NTN: extracted when printed, stored, shown, editable; own DB
 py -3 backend/test_sap_transaction.py       # MIR7 / FV60 chosen at upload: stored, supplier = MIR7, FV60 not matched or parked; own DB
+py -3 backend/test_vendor_tax_id.py         # vendor NTN or CNIC: prompt/label, FBR CNIC detection, SAP lookup tries dashed CNIC; offline
 py -3 backend/test_po_regression.py         # PO-lane BASELINE: live SAP validate dry-run (needs SAP env)
 ```
 
@@ -158,6 +159,9 @@ Lucky Cement's rule: an invoice is a **duplicate** of an *earlier* live invoice 
 
 ### Receiver NTN (buyer NTN on the invoice)
 Gemini extracts it as field `receiver_tax_id` (label "Receiver NTN") **only when the invoice prints it**; otherwise it stays empty, and it is never the vendor's own NTN. It is stored as `invoices.receiver_ntn` and shown and editable on the review screen and the invoice page. It is captured only: not compared with Lucky Cement's NTN, flagged or warned on.
+
+### Vendor NTN or CNIC
+The vendor's tax ID (`supplier_tax_id` → `invoices.supplier_ntn`, label **"Vendor NTN / CNIC"**) is the NTN, or the **CNIC** (13 digits) when the vendor is an individual; the prompt takes the NTN when both are printed and never the STRN. The column keeps its name. FBR verification already tells them apart (`detect_identifier_type`: 13 digits = CNIC), the duplicate check compares a CNIC in full, and `vendors_by_ntn` (SAP LFA1 `STCD1..3`) also tries the dashed `12345-1234567-1` form. The FBR detail on the invoice page says "CNIC" for a CNIC.
 
 ### MIR7 / FV60 (SAP transaction chosen at upload)
 Client request (2026-11-26): the internal Upload screen asks first whether the invoice is **MIR7** (with a PO, the existing flow) or **FV60** (without a PO); the file picker appears once one is chosen. Stored as `invoices.sap_transaction` (`NULL` on older rows = MIR7; `norm_sap_transaction()` in `routers/invoices.py` turns anything but `FV60` into `MIR7`). It travels as form field `sap_transaction` on `/api/invoices/upload` and `/upload-batch` (split and batch drafts get it too) and back in the extraction result, which `/save` stores. Suppliers are never asked and always get MIR7; email-inbox invoices are MIR7. **FV60 is recorded only for now:** PO match (`po_matching.py`) and every mode of `POST /api/sap/invoices/{id}/post` refuse it with 422, and the invoice page hides PO Matching, SAP Parking, GRs, freight, WHT and Submit/Park to SAP, with a banner. Parking FV60 to SAP (GL account / cost center coding, an FI BAPI) is not built. Badge: `components/common/SapTransactionBadge.jsx` (Inbox, review screen, invoice page).

@@ -166,6 +166,12 @@ function buildSelectedTaxSummary(invoice, selectedIds, derivedRate) {
   ];
 }
 
+// The vendor's tax ID is an NTN, or a CNIC (13 digits) for an individual.
+function taxIdKind(fbrInfo, raw) {
+  if (fbrInfo?.identifier_type === "CNIC") return "CNIC";
+  return String(raw || "").replace(/\D/g, "").length === 13 ? "CNIC" : "NTN";
+}
+
 export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
   const roleLabel = useRoleLabel();
   const {
@@ -1242,7 +1248,7 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
                 </div>
                 {fbrInfo && fbrInfo.status !== "not_found" && fbrExpanded && (
                   <div className="text-2xs text-neutral-600 flex flex-col gap-0.5">
-                    <div><span className="text-neutral-400">NTN:</span> <span className="font-mono">{fbrInfo.ntn || invoice.supplier_ntn}</span></div>
+                    <div><span className="text-neutral-400">{taxIdKind(fbrInfo, invoice.supplier_ntn)}:</span> <span className="font-mono">{fbrInfo.ntn || invoice.supplier_ntn}</span></div>
                     {fbrInfo.taxpayer_name && <div><span className="text-neutral-400">Name:</span> {fbrInfo.taxpayer_name}</div>}
                     {fbrInfo.business_name && fbrInfo.business_name !== fbrInfo.taxpayer_name && (
                       <div><span className="text-neutral-400">Business:</span> {fbrInfo.business_name}</div>
@@ -1288,7 +1294,7 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
                         in FBR's order (as on the IRIS portal); then the ATL details. */}
                     {(fbrInfo.profile || fbrInfo.income_tax?.name || fbrInfo.sales_tax?.name) && (
                       <div className="mt-2 border border-neutral-100 rounded-md bg-neutral-25 px-3 py-2 min-w-[320px] max-w-[520px]">
-                        <div className="text-neutral-700 font-semibold mb-1">NTN Details · {fbrInfo.ntn || invoice.supplier_ntn}</div>
+                        <div className="text-neutral-700 font-semibold mb-1">{taxIdKind(fbrInfo, invoice.supplier_ntn)} Details · {fbrInfo.ntn || invoice.supplier_ntn}</div>
                         <table className="w-full border-collapse">
                           <tbody>
                             {(fbrInfo.profile?.fields || []).map((f) => (
