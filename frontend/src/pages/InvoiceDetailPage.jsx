@@ -1371,9 +1371,9 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
 
       {/* ── Two-Column: Fields + Line Items ── */}
       {/* The Fields card drives the row height. The Line Items card is absolutely
-          positioned so its (possibly long) list never stretches the row: it is
-          as tall as its lines, at most the Fields card's height, and scrolls
-          inside beyond that. Totals sit at its top. */}
+          positioned so its (possibly long) list never stretches the row; it fills
+          the Fields card's height and scrolls inside — so neither side shows a
+          band of white space, however many lines there are. */}
       <div className="grid grid-cols-2 gap-5 items-stretch">
         <InvoiceDetailFields
           invoice={invoice}

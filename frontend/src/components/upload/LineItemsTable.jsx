@@ -415,34 +415,17 @@ function ControlledLineItems({
         ) : null
       }
       noPad
-      // As tall as its rows, never taller than its container (the Invoice
-      // Fields card's height on the invoice page): few lines leave no empty
-      // space, many lines scroll inside the list.
-      className="max-h-full flex flex-col"
-      bodyClassName="min-h-0 flex flex-col"
+      className="h-full flex flex-col"
+      bodyClassName="flex-1 min-h-0 flex flex-col"
     >
       {blockedMessage && (
         <div role="alert" className="mx-3.5 mt-3 mb-1 bg-danger-bg border border-danger-base rounded-base px-3 py-2 text-2xs text-danger-dark">
           {blockedMessage}
         </div>
       )}
-
-      {/* Totals first (client request): the same white list as before, moved
-          above the lines. */}
-      {taxSummary && taxSummary.length > 0 && (
-        <div className="flex-shrink-0 px-3.5 py-3 border-b-2 border-neutral-100 flex flex-col gap-1.5 text-xs">
-          {taxSummary.map(({ label, value, isTotal, isTax }) => (
-            <div key={label} className={`flex justify-between ${isTotal ? "font-bold text-neutral-900 border-t border-neutral-200 pt-1.5" : isTax ? "font-medium text-brand-700" : "font-normal text-neutral-600"}`}>
-              <span>{isTax ? `  ${label}` : label}</span>
-              <span className="font-mono">{value}</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* The lines scroll inside the card once it reaches its container's
-          height; the header row stays pinned (sticky) while scrolling. */}
-      <div className="min-h-0 overflow-auto">
+      {/* Fill the remaining card height and scroll inside it, so the list never
+          stretches the row; the header row stays pinned (sticky) while scrolling. */}
+      <div className="flex-1 min-h-0 overflow-auto">
         <table className="w-full table-fixed border-collapse text-xs">
           <thead>
             <tr>
@@ -535,6 +518,17 @@ function ControlledLineItems({
           </tbody>
         </table>
       </div>
+
+      {taxSummary && taxSummary.length > 0 && (
+        <div className="px-3.5 py-3 border-t-2 border-neutral-100 flex flex-col gap-1.5 text-xs">
+          {taxSummary.map(({ label, value, isTotal, isTax }) => (
+            <div key={label} className={`flex justify-between ${isTotal ? "font-bold text-neutral-900 border-t border-neutral-200 pt-1.5" : isTax ? "font-medium text-brand-700" : "font-normal text-neutral-600"}`}>
+              <span>{isTax ? `  ${label}` : label}</span>
+              <span className="font-mono">{value}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </Card>
   );
 }
