@@ -78,7 +78,27 @@ freight invoices with the same number, vendor and PO are duplicates; a quantity 
 order unit and OPU differ; the big ATL badge still says "NTN Not Found" when FBR does not answer; match
 reasoning shows `424.94000000000005`.
 
-## 2026-11-26 (newest): invoice vendor NTN checked against the SAP PO vendor — dev-shahzaib, not yet on LAN
+## 2026-11-26 (last): invoice page Line Items card — totals on top, height fits the lines
+
+User: with one line the card stretched to the Invoice Fields card's height (empty space, totals at the bottom).
+Now (`LineItemsTable.jsx`, controlled view): Subtotal / Tax / Total are a strip of tiles at the top (Total in
+brand blue); the card is as tall as its lines, at most the Fields card's height (`max-h-full` inside the absolute
+wrapper), and the list scrolls inside beyond that. Checked locally (fake SAP, 1600px): 1 line = 218px card,
+40 lines = 972px (Fields height) with the list scrolling. Build OK, eslint no errors.
+
+## 2026-11-26 (end of day): OPEN — where Lucky keeps the vendor NTN in SAP (on hold by the user)
+
+NTN check (`180a09c`, short-NTN fix `07d374b`) is on the LAN. Invoice 65 showed no banner because it was not
+matched to a PO. Invoice 151 (PO 1010027885, HAMZA TRADING, vendor 0053001052, BUKRS 1200) shows the grey "no
+NTN / CNIC maintained in SAP" note: read on AUP, **LFA1 STCD1-5, STKZN, STENR, STCEG and LFBW WT_WTSTCD (9 WHT
+rows: KZ, VI, FB, V1, VG, PA, FE, V7, K1) are all empty**; the real NTN 1328862-8 is in none of them.
+`DFKKBPTAXNUM` read failed with `SAIS 099` (not yet known: table missing on this ECC-like system, or no access).
+**Next, when the user picks it up:** DD02L for DFKKBPTAXNUM; DD03L for Z/ZZ/Y fields of LFA1/LFB1 and read them for
+0053001052; or ask Lucky FI which XK03 field holds the NTN (F1 → Technical Information). Then point
+`_fetch_vendor_master` / `ntn_check.py` at that field (or ask Basis for read access). Until then the check only
+works for vendors with STCD1-3 filled.
+
+## 2026-11-26 (newest): invoice vendor NTN checked against the SAP PO vendor — `180a09c` + `07d374b`, on LAN
 
 Client asked to match the NTN with the SAP PO. The user chose: **an error message only, never blocking**.
 Built: PO sync reads the vendor's LFA1 STCD1, STCD2, STCD3 (STCD1 was the only one before) and stores them as
