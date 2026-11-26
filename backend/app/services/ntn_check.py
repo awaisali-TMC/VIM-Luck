@@ -49,10 +49,13 @@ def tax_numbers_json(numbers) -> str | None:
 
 
 def compare(invoice_ntn: str | None, sap_numbers: list[str]) -> str:
-    """'match' | 'mismatch' | 'unknown' (one side has no tax number)."""
+    """'match' | 'mismatch' | 'unknown' (one side has no tax number).
+
+    Any invoice value that is not one of SAP's numbers is a mismatch, also a
+    short or mistyped one ("13288" for "1328862-8")."""
     inv = tax_id_key(invoice_tax_id(invoice_ntn))
     keys = {tax_id_key(n) for n in sap_numbers if tax_id_key(n)}
-    if len(inv) < 7 or not keys:
+    if not inv or not keys:
         return "unknown"
     return "match" if inv in keys else "mismatch"
 

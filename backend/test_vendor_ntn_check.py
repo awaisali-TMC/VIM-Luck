@@ -69,6 +69,8 @@ def test_compare():
     expect("labelled NTN in a bundled field",
            compare("STRN # 3277876177886, NTN # 5433744-3", ["5433744-3", "3277876177886"]) == "match")
     expect("different NTN", compare("7654321-0", ["1234567-8"]) == "mismatch")
+    expect("short / mistyped NTN is a mismatch", compare("13288", ["1328862-8"]) == "mismatch")
+    expect("the right NTN for that vendor matches", compare("1328862-8", ["1328862-8"]) == "match")
     expect("CNIC vs other CNIC", compare("4220112345671", ["4220112345672"]) == "mismatch")
     expect("no invoice NTN -> unknown", compare("", ["1234567-8"]) == "unknown")
     expect("no SAP tax number -> unknown", compare("1234567-8", []) == "unknown")
