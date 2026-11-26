@@ -423,9 +423,10 @@ function ControlledLineItems({
           {blockedMessage}
         </div>
       )}
-      {/* Fill the remaining card height and scroll inside it, so the list never
-          stretches the row; the header row stays pinned (sticky) while scrolling. */}
-      <div className="flex-1 min-h-0 overflow-auto">
+      {/* The lines take only the room they need, so the totals sit right under
+          them; any spare height of the card stays below the totals. With many
+          lines the list shrinks to fit and scrolls inside (sticky header). */}
+      <div className="min-h-0 overflow-auto">
         <table className="w-full table-fixed border-collapse text-xs">
           <thead>
             <tr>
@@ -520,7 +521,7 @@ function ControlledLineItems({
       </div>
 
       {taxSummary && taxSummary.length > 0 && (
-        <div className="px-3.5 py-3 border-t-2 border-neutral-100 flex flex-col gap-1.5 text-xs">
+        <div className="flex-shrink-0 px-3.5 py-3 border-t-2 border-neutral-100 flex flex-col gap-1.5 text-xs">
           {taxSummary.map(({ label, value, isTotal, isTax }) => (
             <div key={label} className={`flex justify-between ${isTotal ? "font-bold text-neutral-900 border-t border-neutral-200 pt-1.5" : isTax ? "font-medium text-brand-700" : "font-normal text-neutral-600"}`}>
               <span>{isTax ? `  ${label}` : label}</span>
