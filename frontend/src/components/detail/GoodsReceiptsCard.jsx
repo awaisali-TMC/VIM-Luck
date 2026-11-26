@@ -114,6 +114,11 @@ export default function GoodsReceiptsCard({ invoice, editable = false, onChanged
   for (const g of grs) {
     if (selected.has(g.gr_key)) selectedByItem[g.po_item] = (selectedByItem[g.po_item] || 0) + g.open_qty;
   }
+  // Totals of the ticked rows (client request), shown under the table.
+  const pickedRows = grs.filter((g) => selected.has(g.gr_key));
+  const sumOf = (field) => pickedRows.reduce((s, g) => s + (Number(g[field]) || 0), 0);
+  const pickedUnits = [...new Set(pickedRows.map((g) => g.unit).filter(Boolean))];
+  const pickedUnit = pickedUnits.length === 1 ? pickedUnits[0] : "";
   const isSuggested = data?.suggested?.length > 0 && data.suggested.length === selected.size
     && data.suggested.every((k) => selected.has(k));
   const fmtDate = (d) => (d && d.length === 8 ? `${d.slice(6, 8)}.${d.slice(4, 6)}.${d.slice(0, 4)}` : d || "—");
@@ -212,6 +217,20 @@ export default function GoodsReceiptsCard({ invoice, editable = false, onChanged
                 </tr>
               ))}
             </tbody>
+            {pickedRows.length > 0 && (
+              <tfoot>
+                <tr className="border-t-2 border-neutral-200 bg-neutral-25 font-semibold text-neutral-900">
+                  <td className="py-2 px-2"></td>
+                  <td className="py-2 px-2" colSpan={3}>
+                    Selected total <span className="font-normal text-neutral-500">({pickedRows.length} GR{pickedRows.length !== 1 ? "s" : ""})</span>
+                  </td>
+                  <td className="py-2 px-2 text-right">{fmtNum(sumOf("received"))} {pickedUnit}</td>
+                  <td className="py-2 px-2"></td>
+                  <td className="py-2 px-2 text-right">{fmtNum(sumOf("open_qty"))} {pickedUnit}</td>
+                  <td className="py-2 px-2 text-right font-mono">{fmtNum(sumOf("open_amount"))}</td>
+                </tr>
+              </tfoot>
+            )}
           </table>
           {editable && data.suggested?.length > 0 && !isSuggested && (
             <div className="mt-2 text-2xs text-warning-dark">

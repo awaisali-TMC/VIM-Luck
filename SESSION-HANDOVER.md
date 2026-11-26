@@ -78,6 +78,20 @@ freight invoices with the same number, vendor and PO are duplicates; a quantity 
 order unit and OPU differ; the big ATL badge still says "NTN Not Found" when FBR does not answer; match
 reasoning shows `424.94000000000005`.
 
+## 2026-11-26: Goods Receipts card — total of the ticked GRs
+
+User request: under the GR table, a "Selected total (N GRs)" row (`tfoot` in `GoodsReceiptsCard.jsx`) sums
+Received, Open qty and Open amount of the ticked rows; it shows only when something is ticked and updates on every
+tick. The unit is shown when all ticked rows share one. Checked locally (fake SAP, PO 4500009001): auto-ticked
+12 + 8 = 20 ST, 3,700,000; ticking the third GR gave 25 ST, 4,900,000. Build OK, eslint clean.
+
+## 2026-11-26 (after the revert): Line Items — totals right under the lines, both cards the same height
+
+The user's real complaint was the gap between the lines and the totals. Chosen: **both cards the same height**.
+Now the list takes only the room it needs (no `flex-1`), the totals (original white style) follow it directly and
+the card's spare height stays below them; many lines still scroll inside with the totals visible. Checked
+locally at 1600px: 1 line = no gap, cards 985/985 px; 40 lines = list scrolls (819 of 2061 px), totals at bottom.
+
 ## 2026-11-26 (last): invoice page Line Items card — REVERTED (`ead4074`), the user wants it as it was
 
 The change below (`58c23d5`) and its restyle fix (`be38724`) were reverted at the user's request: totals are at
