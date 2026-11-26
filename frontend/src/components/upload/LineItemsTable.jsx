@@ -427,26 +427,14 @@ function ControlledLineItems({
         </div>
       )}
 
-      {/* Totals first (client request), as one strip above the lines. */}
+      {/* Totals first (client request): the same white list as before, moved
+          above the lines. */}
       {taxSummary && taxSummary.length > 0 && (
-        <div className="flex-shrink-0 flex flex-wrap items-stretch gap-2 px-3.5 py-3 border-b border-neutral-100 bg-neutral-25">
+        <div className="flex-shrink-0 px-3.5 py-3 border-b-2 border-neutral-100 flex flex-col gap-1.5 text-xs">
           {taxSummary.map(({ label, value, isTotal, isTax }) => (
-            <div
-              key={label}
-              className={`flex-1 min-w-[140px] rounded-md border px-3 py-2 ${
-                isTotal
-                  ? "bg-brand-50 border-brand-200"
-                  : "bg-neutral-0 border-neutral-100"
-              }`}
-            >
-              <div className={`text-2xs uppercase tracking-wider font-semibold ${
-                isTotal ? "text-brand-700" : isTax ? "text-brand-600" : "text-neutral-500"
-              }`}>
-                {label}
-              </div>
-              <div className={`font-mono mt-0.5 ${isTotal ? "text-sm font-bold text-neutral-900" : "text-xs font-semibold text-neutral-800"}`}>
-                {value}
-              </div>
+            <div key={label} className={`flex justify-between ${isTotal ? "font-bold text-neutral-900 border-t border-neutral-200 pt-1.5" : isTax ? "font-medium text-brand-700" : "font-normal text-neutral-600"}`}>
+              <span>{isTax ? `  ${label}` : label}</span>
+              <span className="font-mono">{value}</span>
             </div>
           ))}
         </div>
