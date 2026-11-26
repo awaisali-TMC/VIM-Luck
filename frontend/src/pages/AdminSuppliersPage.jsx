@@ -577,7 +577,7 @@ export default function AdminSuppliersPage() {
                 >
                   {f.label}
                   {f.key !== "all" && (
-                    <span className={`ml-1.5 text-[10px] font-bold px-1.5 py-px rounded-full ${f.key === "pending" ? "bg-warning-bg text-warning-dark" : f.key === "verified" ? "bg-success-bg text-success-dark" : "bg-danger-bg text-danger-dark"}`}>
+                    <span className={`ml-1.5 text-[11px] font-bold px-1.5 py-px rounded-full ${f.key === "pending" ? "bg-warning-bg text-warning-dark" : f.key === "verified" ? "bg-success-bg text-success-dark" : "bg-danger-bg text-danger-dark"}`}>
                       {counts[f.key] || 0}
                     </span>
                   )}
@@ -644,7 +644,7 @@ export default function AdminSuppliersPage() {
                       ) : (
                         <button
                           onClick={() => setLinkTarget(s)}
-                          className="text-[11px] font-semibold text-brand-600 bg-brand-50 hover:bg-brand-100 px-2.5 py-1 rounded cursor-pointer border-none transition-colors"
+                          className="text-[12px] font-semibold text-brand-600 bg-brand-50 hover:bg-brand-100 px-2.5 py-1 rounded cursor-pointer border-none transition-colors"
                           title="Attach the SAP vendor this account represents"
                         >
                           ⛓ Link SAP
@@ -656,7 +656,7 @@ export default function AdminSuppliersPage() {
                     <td className="px-4 py-3">
                       <SupplierStatusChip status={s.status} />
                       {s.status === "rejected" && s.rejection_reason && (
-                        <div className="text-[10px] text-neutral-400 mt-0.5 max-w-[120px] truncate" title={s.rejection_reason}>
+                        <div className="text-[11px] text-neutral-400 mt-0.5 max-w-[120px] truncate" title={s.rejection_reason}>
                           {s.rejection_reason}
                         </div>
                       )}
@@ -669,14 +669,14 @@ export default function AdminSuppliersPage() {
                             <button
                               onClick={() => handleApprove(s)}
                               disabled={actionLoading === s.id}
-                              className="text-[11px] font-semibold text-success-dark bg-success-bg hover:bg-success-light px-2.5 py-1 rounded cursor-pointer border-none transition-colors disabled:opacity-50"
+                              className="text-[12px] font-semibold text-success-dark bg-success-bg hover:bg-success-light px-2.5 py-1 rounded cursor-pointer border-none transition-colors disabled:opacity-50"
                             >
                               {actionLoading === s.id ? "..." : "✓ Approve"}
                             </button>
                             <button
                               onClick={() => setRejectTarget(s)}
                               disabled={actionLoading === s.id}
-                              className="text-[11px] font-semibold text-danger-dark bg-danger-bg hover:bg-danger-light px-2.5 py-1 rounded cursor-pointer border-none transition-colors disabled:opacity-50"
+                              className="text-[12px] font-semibold text-danger-dark bg-danger-bg hover:bg-danger-light px-2.5 py-1 rounded cursor-pointer border-none transition-colors disabled:opacity-50"
                             >
                               ✗ Reject
                             </button>
@@ -686,7 +686,7 @@ export default function AdminSuppliersPage() {
                           <button
                             onClick={() => handleApprove(s)}
                             disabled={actionLoading === s.id}
-                            className="text-[11px] font-semibold text-success-dark bg-success-bg hover:bg-success-light px-2.5 py-1 rounded cursor-pointer border-none transition-colors"
+                            className="text-[12px] font-semibold text-success-dark bg-success-bg hover:bg-success-light px-2.5 py-1 rounded cursor-pointer border-none transition-colors"
                           >
                             Approve
                           </button>
@@ -694,7 +694,7 @@ export default function AdminSuppliersPage() {
                         {s.status === "verified" && (
                           <button
                             onClick={() => setRejectTarget(s)}
-                            className="opacity-0 group-hover:opacity-100 text-[11px] font-semibold text-danger-dark bg-danger-bg hover:bg-danger-light px-2.5 py-1 rounded cursor-pointer border-none transition-all"
+                            className="opacity-0 group-hover:opacity-100 text-[12px] font-semibold text-danger-dark bg-danger-bg hover:bg-danger-light px-2.5 py-1 rounded cursor-pointer border-none transition-all"
                           >
                             Revoke
                           </button>

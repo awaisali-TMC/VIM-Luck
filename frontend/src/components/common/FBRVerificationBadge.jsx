@@ -56,7 +56,7 @@ export default function FBRVerificationBadge({
     <div className="inline-flex flex-col items-start">
       <span
         className={`inline-flex items-center gap-1.5 border rounded-full font-semibold ${config.bg} ${config.border} ${config.text} ${
-          isSmall ? "px-1.5 py-0.5 text-[9px]" : "px-2.5 py-1 text-2xs"
+          isSmall ? "px-1.5 py-0.5 text-[11px]" : "px-2.5 py-1 text-2xs"
         }`}
         title={
           taxpayerName
@@ -71,7 +71,7 @@ export default function FBRVerificationBadge({
       </span>
 
       {showDetails && taxpayerName && status !== "not_verified" && (
-        <span className="text-[10px] text-neutral-500 mt-0.5 pl-1 truncate max-w-[200px]">
+        <span className="text-[11px] text-neutral-500 mt-0.5 pl-1 truncate max-w-[200px]">
           FBR: {taxpayerName}
           {source && (
             <span className="text-neutral-400 ml-1">

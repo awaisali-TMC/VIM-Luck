@@ -106,7 +106,7 @@ function ProcessingView({ file, fileCount = 1 }) {
               className="w-1.5 h-1.5 rounded-full bg-brand-400"
               style={{ animation: `pulse 1.5s ease-in-out infinite ${i * 0.3}s` }}
             />
-            <span className="text-[10px] font-medium text-neutral-500 uppercase tracking-wider">
+            <span className="text-[11px] font-medium text-neutral-500 uppercase tracking-wider">
               {step}
             </span>
           </div>

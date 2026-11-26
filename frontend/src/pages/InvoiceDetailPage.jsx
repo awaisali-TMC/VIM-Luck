@@ -1236,7 +1236,7 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
                       source={fbrInfo?.source}
                     />
                     {fbrInfo && fbrInfo.status !== "not_found" && (
-                      <span className="text-neutral-400 text-[10px]">{fbrExpanded ? "▲" : "▼"}</span>
+                      <span className="text-neutral-400 text-[11px]">{fbrExpanded ? "▲" : "▼"}</span>
                     )}
                   </button>
                   {!fbrLoading && (
@@ -1257,7 +1257,7 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
                       <span className="text-neutral-400">Registered:</span>
                       {(fbrInfo.registrations || []).length ? (
                         fbrInfo.registrations.map((r) => (
-                          <span key={r} className="inline-flex items-center gap-1 text-[10px] font-semibold text-success-dark bg-success-bg border border-success-base px-1.5 py-0.5 rounded">
+                          <span key={r} className="inline-flex items-center gap-1 text-[11px] font-semibold text-success-dark bg-success-bg border border-success-base px-1.5 py-0.5 rounded">
                             {r === "IT" ? "Income Tax" : r === "ST" ? "Sales Tax" : r}
                           </span>
                         ))
@@ -1285,7 +1285,7 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
                       return (
                         <div key={label} className="flex items-center gap-1.5">
                           <span className="text-neutral-500 w-[68px]">{label}:</span>
-                          <span className={`inline-flex items-center text-[10px] font-semibold px-1.5 py-0.5 rounded border ${tone}`}>{text}</span>
+                          <span className={`inline-flex items-center text-[11px] font-semibold px-1.5 py-0.5 rounded border ${tone}`}>{text}</span>
                           {s?.source && <span className="text-neutral-400">{s.source === "live_api" ? "FBR live" : "FBR ATL"}{s.note ? ` · ${s.note}` : ""}</span>}
                         </div>
                       );

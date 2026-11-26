@@ -110,19 +110,19 @@ function ProductPickerModal({ open, onClose, onSelect, currentCode }) {
                         {p.name}
                       </span>
                       {isSelected && (
-                        <span className="text-[10px] font-semibold text-brand-600 bg-brand-100 px-1.5 py-0.5 rounded">
+                        <span className="text-[11px] font-semibold text-brand-600 bg-brand-100 px-1.5 py-0.5 rounded">
                           Current
                         </span>
                       )}
                     </div>
                     <div className="flex items-center gap-2 mt-0.5">
-                      <span className="text-[10px] font-mono text-neutral-500">
+                      <span className="text-[11px] font-mono text-neutral-500">
                         {p.code}
                       </span>
-                      <span className="text-[10px] text-neutral-400">
+                      <span className="text-[11px] text-neutral-400">
                         &middot;
                       </span>
-                      <span className="text-[10px] text-neutral-400">
+                      <span className="text-[11px] text-neutral-400">
                         {p.category}
                       </span>
                     </div>
@@ -172,7 +172,7 @@ function ErpMatchCell({ geminiMatch, overrideProduct, onOverride }) {
               >
                 {product.name}
               </span>
-              <span className="text-[10px] text-neutral-400 font-mono">
+              <span className="text-[11px] text-neutral-400 font-mono">
                 {product.code}
                 {confidence > 0 && (
                   <span className="ml-1">
@@ -341,7 +341,7 @@ function MatchBadge({ status, blocked }) {
   if (status === "unmatched") {
     return (
       <span
-        className={`ml-2 inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded border ${
+        className={`ml-2 inline-block text-[11px] font-semibold px-1.5 py-0.5 rounded border ${
           blocked
             ? "text-danger-dark bg-danger-bg border-danger-base"
             : "text-amber-700 bg-amber-50 border-amber-200"
@@ -354,7 +354,7 @@ function MatchBadge({ status, blocked }) {
   }
   if (status === "matched") {
     return (
-      <span className="ml-2 inline-block text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
+      <span className="ml-2 inline-block text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
         on PO
       </span>
     );
@@ -469,7 +469,7 @@ function ControlledLineItems({
                     )}
                     {showMatch && <div className="mt-0.5"><MatchBadge status={matchStatusById[id]} blocked={isBlocked} /></div>}
                     {li.matched_product_name && (
-                      <div className="text-[10px] text-neutral-400 mt-0.5 font-normal">
+                      <div className="text-[11px] text-neutral-400 mt-0.5 font-normal">
                         &rarr; {li.matched_product_name}
                         {li.matched_product_code && <span className="font-mono ml-1">{li.matched_product_code}</span>}
                       </div>
@@ -647,7 +647,7 @@ export default function LineItemsTable({
         <div className="flex items-center gap-2">
           <span>Line Items</span>
           {geminiExtracted && (
-            <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-brand-700 bg-brand-50 border border-brand-200 px-2 py-0.5 rounded-full">
+            <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-brand-700 bg-brand-50 border border-brand-200 px-2 py-0.5 rounded-full">
               &#128270; Gemini Extracted
             </span>
           )}

@@ -50,7 +50,7 @@ export default function ConfidenceIcon({ confidence }) {
       </span>
       {/* Tooltip */}
       <span
-        className={`absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-2 py-1 rounded text-[10px] font-medium text-white whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity duration-150 ${tooltipBg}`}
+        className={`absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-2 py-1 rounded text-[11px] font-medium text-white whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity duration-150 ${tooltipBg}`}
       >
         {tooltipText}
       </span>

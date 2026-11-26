@@ -47,7 +47,7 @@ function StatusTimeline({ status }) {
           <div key={step.key} className="flex items-center">
             <div className="flex flex-col items-center">
               <div
-                className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold transition-colors ${
+                className={`w-5 h-5 rounded-full flex items-center justify-center text-[11px] font-bold transition-colors ${
                   isDone
                     ? isCurrent
                       ? "bg-brand-500 text-white"
@@ -57,7 +57,7 @@ function StatusTimeline({ status }) {
               >
                 {isDone && !isCurrent ? "✓" : i + 1}
               </div>
-              <span className={`text-[9px] mt-1 whitespace-nowrap font-medium ${isDone ? "text-neutral-700" : "text-neutral-400"}`}>
+              <span className={`text-[11px] mt-1 whitespace-nowrap font-medium ${isDone ? "text-neutral-700" : "text-neutral-400"}`}>
                 {step.label}
               </span>
             </div>
@@ -69,8 +69,8 @@ function StatusTimeline({ status }) {
       })}
       {isException && (
         <div className="ml-3 flex flex-col items-center">
-          <div className="w-5 h-5 rounded-full bg-danger-base flex items-center justify-center text-white text-[10px] font-bold">!</div>
-          <span className="text-[9px] mt-1 text-danger-dark font-medium">Action Needed</span>
+          <div className="w-5 h-5 rounded-full bg-danger-base flex items-center justify-center text-white text-[11px] font-bold">!</div>
+          <span className="text-[11px] mt-1 text-danger-dark font-medium">Action Needed</span>
         </div>
       )}
     </div>

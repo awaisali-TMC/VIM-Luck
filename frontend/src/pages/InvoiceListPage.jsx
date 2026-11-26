@@ -508,7 +508,7 @@ export default function InvoiceListPage({ onViewInvoice, onUpload, isAdmin = fal
               <button
                 key={p}
                 onClick={() => setPage(p)}
-                className={`w-7 h-7 rounded-base border text-[11px] font-semibold cursor-pointer transition-colors ${
+                className={`w-7 h-7 rounded-base border text-[12px] font-semibold cursor-pointer transition-colors ${
                   p === page
                     ? "border-brand-600 bg-brand-600 text-white"
                     : "border-neutral-200 bg-neutral-0 text-neutral-600 hover:bg-neutral-50"

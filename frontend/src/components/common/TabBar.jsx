@@ -16,7 +16,7 @@ export default function TabBar({ tabs, active, onChange }) {
             {tab.label}
             {tab.count != null && (
               <span
-                className={`text-[10px] font-semibold px-1.5 py-px rounded-full ${
+                className={`text-[11px] font-semibold px-1.5 py-px rounded-full ${
                   isActive
                     ? "bg-brand-50 text-brand-600"
                     : "bg-neutral-100 text-neutral-500"

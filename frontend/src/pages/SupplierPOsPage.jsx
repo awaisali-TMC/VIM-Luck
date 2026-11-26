@@ -338,7 +338,7 @@ export default function SupplierPOsPage({ onInvoiceCreated }) {
                 }`}
               >
                 {f.label}
-                <span className="ml-1.5 text-[10px] font-bold px-1.5 py-px rounded-full bg-neutral-100 text-neutral-500">
+                <span className="ml-1.5 text-[11px] font-bold px-1.5 py-px rounded-full bg-neutral-100 text-neutral-500">
                   {countFor(f.key)}
                 </span>
               </button>

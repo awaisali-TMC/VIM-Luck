@@ -380,7 +380,7 @@ export default function SupplierPortal({ user, onLogout }) {
             {!sidebarCollapsed && (
               <div className="flex flex-col leading-tight min-w-0">
                 <span className="text-sm font-bold text-white tracking-wide">TMC</span>
-                <span className="text-[10px] text-emerald-400 font-medium">eInvoice Supplier</span>
+                <span className="text-[11px] text-emerald-400 font-medium">eInvoice Supplier</span>
               </div>
             )}
           </div>
@@ -396,14 +396,14 @@ export default function SupplierPortal({ user, onLogout }) {
         {!sidebarCollapsed && (
           <div className="mx-3 mt-3 mb-1 px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center gap-2">
             <span className="text-emerald-400 text-xs">📦</span>
-            <span className="text-emerald-300 text-[11px] font-semibold">Supplier Portal</span>
+            <span className="text-emerald-300 text-[12px] font-semibold">Supplier Portal</span>
           </div>
         )}
 
         {/* Nav */}
         <div className="flex-1 py-3 overflow-y-auto">
           {!sidebarCollapsed && (
-            <div className="px-4 mb-2 text-[10px] font-semibold text-white/30 uppercase tracking-widest">
+            <div className="px-4 mb-2 text-[11px] font-semibold text-white/30 uppercase tracking-widest">
               Navigation
             </div>
           )}
@@ -464,7 +464,7 @@ export default function SupplierPortal({ user, onLogout }) {
           <header className="sticky top-0 z-40 bg-white border-b border-neutral-100 h-14 flex items-center justify-between px-6 shadow-xs">
             <div className="flex items-center gap-3">
               <h1 className="text-lg font-semibold text-neutral-900">{pageTitle}</h1>
-              <span className="hidden sm:inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-600 bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded-full">
+              <span className="hidden sm:inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-600 bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded-full">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
                 Supplier Portal
               </span>

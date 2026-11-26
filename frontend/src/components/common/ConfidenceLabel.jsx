@@ -43,7 +43,7 @@ export default function ConfidenceLabel({ label, confidence }) {
       </span>
       {/* Tooltip */}
       <span
-        className={`absolute bottom-full left-0 mb-1.5 px-2 py-1 rounded text-[10px] font-medium text-white whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity duration-150 z-10 ${tooltipBg}`}
+        className={`absolute bottom-full left-0 mb-1.5 px-2 py-1 rounded text-[11px] font-medium text-white whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity duration-150 z-10 ${tooltipBg}`}
       >
         {tooltipText}
       </span>

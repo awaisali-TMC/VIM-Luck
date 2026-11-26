@@ -124,7 +124,7 @@ export default function AttentionFlagsPanel({ flags }) {
                     <span className="text-xs font-semibold text-neutral-800">
                       {f.title}
                     </span>
-                    <span className="text-[10px] uppercase tracking-wide text-neutral-400 font-medium">
+                    <span className="text-[11px] uppercase tracking-wide text-neutral-400 font-medium">
                       {CATEGORY_LABELS[f.category] || f.category}
                     </span>
                   </div>

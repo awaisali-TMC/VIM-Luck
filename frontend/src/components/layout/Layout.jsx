@@ -121,7 +121,7 @@ export default function Layout({ currentUser, pendingCount, onLogout, permission
             {!sidebarCollapsed && (
               <div className="flex flex-col leading-tight min-w-0">
                 <span className="text-sm font-bold text-white tracking-wide">TMC</span>
-                <span className="text-[10px] text-neutral-400 font-medium">eInvoice</span>
+                <span className="text-[11px] text-neutral-400 font-medium">eInvoice</span>
               </div>
             )}
           </div>
@@ -138,7 +138,7 @@ export default function Layout({ currentUser, pendingCount, onLogout, permission
           {NAV_SECTIONS.map((section) => (
             <div key={section.section} className="py-3">
               {!sidebarCollapsed && (
-                <div className="px-5 mb-2 text-[10px] font-semibold text-neutral-600 uppercase tracking-widest">
+                <div className="px-5 mb-2 text-[11px] font-semibold text-neutral-500 uppercase tracking-widest">
                   {section.section}
                 </div>
               )}
@@ -153,7 +153,7 @@ export default function Layout({ currentUser, pendingCount, onLogout, permission
                       sidebarCollapsed ? "justify-center px-0" : "px-5"
                     } ${
                       active
-                        ? "bg-[rgba(79,98,242,0.12)] text-brand-400 border-l-[3px] border-l-brand-500 font-semibold"
+                        ? "bg-[rgba(79,98,242,0.18)] text-white border-l-[3px] border-l-brand-400 font-semibold"
                         : "bg-transparent text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200 border-l-[3px] border-l-transparent"
                     }`;
                   }}
@@ -161,7 +161,7 @@ export default function Layout({ currentUser, pendingCount, onLogout, permission
                   <span className="text-[15px]">{item.icon}</span>
                   {!sidebarCollapsed && <span>{item.label}</span>}
                   {!sidebarCollapsed && item.badge && (
-                    <span className="ml-auto bg-danger-base text-white text-[10px] font-bold px-1.5 py-px rounded-full">
+                    <span className="ml-auto bg-danger-base text-white text-[11px] font-bold px-1.5 py-px rounded-full">
                       {item.badge}
                     </span>
                   )}
@@ -206,8 +206,8 @@ export default function Layout({ currentUser, pendingCount, onLogout, permission
       >
         {/* Top Bar */}
         {!hideTopBar && (
-          <header className="sticky top-0 z-40 bg-neutral-0 border-b border-neutral-100 h-14 flex items-center justify-between px-6 shadow-xs">
-            <h1 className="text-lg font-semibold text-neutral-900">{pageTitle}</h1>
+          <header className="sticky top-0 z-40 bg-neutral-0/95 backdrop-blur border-b border-neutral-100 h-14 flex items-center justify-between px-6 shadow-xs">
+            <h1 className="text-lg font-semibold text-neutral-900 tracking-tight">{pageTitle}</h1>
             <NotificationBell />
           </header>
         )}

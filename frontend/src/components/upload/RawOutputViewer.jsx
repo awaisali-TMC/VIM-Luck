@@ -34,7 +34,7 @@ function ConfPill({ value }) {
   const c = CONF_COLORS[tier];
   return (
     <span
-      className="inline-block text-[10px] font-mono font-medium px-1.5 py-0.5 rounded"
+      className="inline-block text-[11px] font-mono font-medium px-1.5 py-0.5 rounded"
       style={{ color: c.fg, backgroundColor: c.bg }}
     >
       {pct.toFixed(1)}%
@@ -104,7 +104,7 @@ export default function RawOutputViewer({ open, onClose, data }) {
             <h1 className="text-sm font-semibold text-neutral-900 leading-none">
               Document AI — Raw Output
             </h1>
-            <p className="text-[11px] text-neutral-400 mt-0.5 flex items-center gap-1.5 flex-wrap">
+            <p className="text-[12px] text-neutral-400 mt-0.5 flex items-center gap-1.5 flex-wrap">
               <span>{data.original_filename}</span>
               <span className="text-neutral-300">|</span>
               <span>{data.processing_time_ms} ms</span>
@@ -141,14 +141,14 @@ export default function RawOutputViewer({ open, onClose, data }) {
             <button
               key={t.key}
               onClick={() => setActiveTab(t.key)}
-              className="relative px-4 pb-2.5 pt-3 text-[11px] font-semibold tracking-wider border-none
+              className="relative px-4 pb-2.5 pt-3 text-[12px] font-semibold tracking-wider border-none
                          cursor-pointer transition-colors bg-transparent flex items-center gap-1.5"
               style={{ color: active ? "#4F62F2" : "#9ca3af" }}
             >
               {t.label}
               {badge != null && (
                 <span
-                  className="text-[9px] font-semibold px-1.5 py-px rounded-full"
+                  className="text-[11px] font-semibold px-1.5 py-px rounded-full"
                   style={{
                     backgroundColor: active ? "#EEF0FF" : "#f3f4f6",
                     color: active ? "#4F62F2" : "#9ca3af",
@@ -232,7 +232,7 @@ function FieldsPanel({ entities, data }) {
               <Fragment key={i}>
                 <tr className="bg-neutral-100/60 border-t border-neutral-200">
                   <Td mono bold>line_item #{i + 1}</Td>
-                  <Td className="text-neutral-500 text-[11px] italic">{(e.mention_text || "").slice(0, 80)}{(e.mention_text || "").length > 80 ? "…" : ""}</Td>
+                  <Td className="text-neutral-500 text-[12px] italic">{(e.mention_text || "").slice(0, 80)}{(e.mention_text || "").length > 80 ? "…" : ""}</Td>
                   <Td muted>{e.normalized_value || "—"}</Td>
                   <TdRight><ConfPill value={e.confidence} /></TdRight>
                 </tr>
@@ -303,7 +303,7 @@ function OcrPanel({ fullText, stats, pages }) {
             {allLines.length > 0 && (
               <button
                 onClick={() => setShowLines(!showLines)}
-                className="h-7 px-2.5 text-[11px] font-medium rounded border cursor-pointer transition-colors
+                className="h-7 px-2.5 text-[12px] font-medium rounded border cursor-pointer transition-colors
                            bg-white border-neutral-200 text-neutral-500 hover:bg-neutral-50"
               >
                 {showLines ? "Show raw text" : "Show by lines"}
@@ -311,7 +311,7 @@ function OcrPanel({ fullText, stats, pages }) {
             )}
             <button
               onClick={copy}
-              className="h-7 px-2.5 text-[11px] font-medium rounded border cursor-pointer transition-colors
+              className="h-7 px-2.5 text-[12px] font-medium rounded border cursor-pointer transition-colors
                          bg-white border-neutral-200 text-neutral-600 hover:bg-neutral-50"
             >
               {copied ? "✓ Copied" : "Copy"}
@@ -359,7 +359,7 @@ function OcrPanel({ fullText, stats, pages }) {
                     {pg.barcodes.map((bc, bi) => (
                       <div key={bi} className="bg-white border border-neutral-200 rounded px-3 py-2 text-xs">
                         <div className="font-mono text-neutral-800">{bc.raw_value}</div>
-                        <div className="text-[10px] text-neutral-400 mt-0.5">{bc.format} · {bc.value_format}</div>
+                        <div className="text-[11px] text-neutral-400 mt-0.5">{bc.format} · {bc.value_format}</div>
                       </div>
                     ))}
                   </div>
@@ -406,7 +406,7 @@ function Metric({ label, value }) {
   return (
     <div className="bg-white border border-neutral-200 rounded-lg px-4 py-3 text-center">
       <div className="text-base font-semibold text-neutral-800 leading-tight">{value}</div>
-      <div className="text-[10px] font-medium text-neutral-400 uppercase tracking-wider mt-1">{label}</div>
+      <div className="text-[11px] font-medium text-neutral-400 uppercase tracking-wider mt-1">{label}</div>
     </div>
   );
 }
@@ -414,9 +414,9 @@ function Metric({ label, value }) {
 function SectionLabel({ text, count }) {
   return (
     <div className="flex items-center gap-2 mb-0">
-      <span className="text-[11px] font-bold text-neutral-500 uppercase tracking-wider">{text}</span>
+      <span className="text-[12px] font-bold text-neutral-500 uppercase tracking-wider">{text}</span>
       {count != null && (
-        <span className="text-[9px] font-semibold text-neutral-400 bg-neutral-100 px-1.5 py-0.5 rounded">{count}</span>
+        <span className="text-[11px] font-semibold text-neutral-400 bg-neutral-100 px-1.5 py-0.5 rounded">{count}</span>
       )}
     </div>
   );
@@ -439,7 +439,7 @@ function Thead({ cells }) {
       {cells.map((c, i) => (
         <th
           key={i}
-          className={`px-4 py-2.5 font-semibold text-neutral-500 uppercase text-[10px] tracking-wider ${
+          className={`px-4 py-2.5 font-semibold text-neutral-500 uppercase text-[11px] tracking-wider ${
             i === cells.length - 1 && cells.length > 2 ? "text-right" : ""
           }`}
         >
@@ -452,7 +452,7 @@ function Thead({ cells }) {
 
 function Td({ children, mono, bold, muted, className = "" }) {
   return (
-    <td className={`px-4 py-2 ${mono ? "font-mono text-[11px]" : ""} ${bold ? "font-medium" : ""} ${muted ? "text-neutral-400" : "text-neutral-800"} max-w-xs break-words ${className}`}>
+    <td className={`px-4 py-2 ${mono ? "font-mono text-[12px]" : ""} ${bold ? "font-medium" : ""} ${muted ? "text-neutral-400" : "text-neutral-800"} max-w-xs break-words ${className}`}>
       {children}
     </td>
   );

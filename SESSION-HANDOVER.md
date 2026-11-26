@@ -78,7 +78,16 @@ freight invoices with the same number, vendor and PO are duplicates; a quantity 
 order unit and OPU differ; the big ATL badge still says "NTN Not Found" when FBR does not answer; match
 reasoning shows `424.94000000000005`.
 
-## 2026-11-26 (later): Vendor NTN can be a CNIC — dev-shahzaib, not yet on LAN
+## 2026-11-26 (latest): bigger text and a lighter UI polish — dev-shahzaib, not yet on LAN
+
+The user: text too small to read; nicer UI without leaving the theme. Theme sizes in `frontend/src/index.css` raised
+one step (2xs 11→12, xs 12→13, sm 13→14, base 14→15, lg 16→17 px; html 14→15); hard-coded `text-[9px]`/`[10px]` →
+`[11px]` and `[11px]` → `[12px]` across 20 files (size swaps only). Card: rounded-lg, soft header band, brand-blue
+accent bar before every title. Buttons: rounded-md, small shadow, focus ring, press feedback. Sidebar: active item
+white text, section labels lighter. Top bar slightly translucent. Checked locally (fake SAP, scratch DB, 1600px):
+invoice page, Inbox, Upload; layout intact. Build OK, eslint no errors on the changed components.
+
+## 2026-11-26 (later): Vendor NTN can be a CNIC — `88b1d5b`, not yet on LAN
 
 The user: the vendor's tax ID can be an NTN or a CNIC (individuals), and extraction already picks a CNIC up.
 Changed: label "Vendor NTN / CNIC" (review screen and invoice page); the prompt now says NTN, or CNIC (13 digits)

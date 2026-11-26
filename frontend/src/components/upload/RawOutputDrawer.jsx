@@ -18,7 +18,7 @@ function ConfPill({ value }) {
   const pct = value <= 1 ? value * 100 : value;
   return (
     <span
-      className="inline-block text-[10px] font-mono px-1.5 py-0.5 rounded-full"
+      className="inline-block text-[11px] font-mono px-1.5 py-0.5 rounded-full"
       style={{ color: confColor(value <= 1 ? value : value / 100), background: `${confColor(value <= 1 ? value : value / 100)}12` }}
     >
       {pct.toFixed(1)}%
@@ -134,7 +134,7 @@ export default function RawOutputDrawer({ open, onClose, data }) {
               <span className="text-[13px] opacity-60">{t.icon}</span>
               {t.label}
               {count != null && count > 0 && (
-                <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+                <span className={`text-[11px] px-1.5 py-0.5 rounded-full ${
                   active ? "bg-brand-100 text-brand-700" : "bg-neutral-200 text-neutral-500"
                 }`}>
                   {count}
@@ -191,17 +191,17 @@ function FieldsTab({ data, raw }) {
         <table className="w-full text-xs">
           <thead>
             <tr className="bg-neutral-50 text-left">
-              <th className="px-4 py-2.5 font-semibold text-neutral-500 uppercase text-[10px] tracking-wider">Type</th>
-              <th className="px-4 py-2.5 font-semibold text-neutral-500 uppercase text-[10px] tracking-wider">Mention Text</th>
-              <th className="px-4 py-2.5 font-semibold text-neutral-500 uppercase text-[10px] tracking-wider">Normalized</th>
-              <th className="px-4 py-2.5 font-semibold text-neutral-500 uppercase text-[10px] tracking-wider text-right">Confidence</th>
+              <th className="px-4 py-2.5 font-semibold text-neutral-500 uppercase text-[11px] tracking-wider">Type</th>
+              <th className="px-4 py-2.5 font-semibold text-neutral-500 uppercase text-[11px] tracking-wider">Mention Text</th>
+              <th className="px-4 py-2.5 font-semibold text-neutral-500 uppercase text-[11px] tracking-wider">Normalized</th>
+              <th className="px-4 py-2.5 font-semibold text-neutral-500 uppercase text-[11px] tracking-wider text-right">Confidence</th>
             </tr>
           </thead>
           <tbody>
             {entities.map((e, i) => (
               <>
                 <tr key={i} className={`${i % 2 === 0 ? "bg-white" : "bg-neutral-25"} ${e.properties ? "font-medium" : ""}`}>
-                  <td className="px-4 py-2 font-mono text-[11px] text-neutral-600">{e.type}</td>
+                  <td className="px-4 py-2 font-mono text-[12px] text-neutral-600">{e.type}</td>
                   <td className="px-4 py-2 text-neutral-800 max-w-xs break-words">{e.mention_text || "—"}</td>
                   <td className="px-4 py-2 text-neutral-600">{e.normalized_value || "—"}</td>
                   <td className="px-4 py-2 text-right"><ConfPill value={e.confidence} /></td>
@@ -209,9 +209,9 @@ function FieldsTab({ data, raw }) {
                 {/* Nested properties (e.g. line_item sub-fields) */}
                 {e.properties?.map((p, j) => (
                   <tr key={`${i}-${j}`} className="bg-neutral-50/50">
-                    <td className="px-4 py-1.5 pl-8 font-mono text-[10px] text-neutral-400">↳ {p.type}</td>
-                    <td className="px-4 py-1.5 text-[11px] text-neutral-700">{p.mention_text || "—"}</td>
-                    <td className="px-4 py-1.5 text-[11px] text-neutral-500">{p.normalized_value || "—"}</td>
+                    <td className="px-4 py-1.5 pl-8 font-mono text-[11px] text-neutral-400">↳ {p.type}</td>
+                    <td className="px-4 py-1.5 text-[12px] text-neutral-700">{p.mention_text || "—"}</td>
+                    <td className="px-4 py-1.5 text-[12px] text-neutral-500">{p.normalized_value || "—"}</td>
                     <td className="px-4 py-1.5 text-right"><ConfPill value={p.confidence} /></td>
                   </tr>
                 ))}
@@ -261,12 +261,12 @@ function KeyValueTab({ formFields }) {
         <table className="w-full text-xs">
           <thead>
             <tr className="bg-neutral-50 text-left">
-              <th className="px-4 py-2.5 font-semibold text-neutral-500 uppercase text-[10px] tracking-wider w-[40px]">#</th>
-              <th className="px-4 py-2.5 font-semibold text-neutral-500 uppercase text-[10px] tracking-wider">Key</th>
-              <th className="px-4 py-2.5 font-semibold text-neutral-500 uppercase text-[10px] tracking-wider">Value</th>
-              <th className="px-4 py-2.5 font-semibold text-neutral-500 uppercase text-[10px] tracking-wider text-right">Key Conf.</th>
-              <th className="px-4 py-2.5 font-semibold text-neutral-500 uppercase text-[10px] tracking-wider text-right">Value Conf.</th>
-              <th className="px-4 py-2.5 font-semibold text-neutral-500 uppercase text-[10px] tracking-wider text-center w-[60px]">Page</th>
+              <th className="px-4 py-2.5 font-semibold text-neutral-500 uppercase text-[11px] tracking-wider w-[40px]">#</th>
+              <th className="px-4 py-2.5 font-semibold text-neutral-500 uppercase text-[11px] tracking-wider">Key</th>
+              <th className="px-4 py-2.5 font-semibold text-neutral-500 uppercase text-[11px] tracking-wider">Value</th>
+              <th className="px-4 py-2.5 font-semibold text-neutral-500 uppercase text-[11px] tracking-wider text-right">Key Conf.</th>
+              <th className="px-4 py-2.5 font-semibold text-neutral-500 uppercase text-[11px] tracking-wider text-right">Value Conf.</th>
+              <th className="px-4 py-2.5 font-semibold text-neutral-500 uppercase text-[11px] tracking-wider text-center w-[60px]">Page</th>
             </tr>
           </thead>
           <tbody>
@@ -311,10 +311,10 @@ function TablesTab({ tables }) {
         <div key={i} className={i > 0 ? "mt-8" : ""}>
           <div className="flex items-center gap-2 mb-3">
             <span className="text-xs font-semibold text-neutral-700">Table {index + 1}</span>
-            <span className="text-[10px] text-neutral-400 bg-neutral-100 px-2 py-0.5 rounded">
+            <span className="text-[11px] text-neutral-400 bg-neutral-100 px-2 py-0.5 rounded">
               Page {page}
             </span>
-            <span className="text-[10px] text-neutral-400">
+            <span className="text-[11px] text-neutral-400">
               {table.header_rows?.length || 0} header row{(table.header_rows?.length || 0) !== 1 ? "s" : ""},
               {" "}{table.body_rows?.length || 0} body row{(table.body_rows?.length || 0) !== 1 ? "s" : ""}
             </span>
@@ -329,7 +329,7 @@ function TablesTab({ tables }) {
                       {row.map((cell, ci) => (
                         <th
                           key={ci}
-                          className="text-left text-[11px] font-semibold text-neutral-700 bg-neutral-100
+                          className="text-left text-[12px] font-semibold text-neutral-700 bg-neutral-100
                                      px-3 py-2.5 border border-neutral-200"
                           colSpan={cell.col_span || 1}
                           rowSpan={cell.row_span || 1}
@@ -427,7 +427,7 @@ function StatCard({ label, value }) {
   return (
     <div className="bg-neutral-50 border border-neutral-200 rounded-lg px-4 py-3 text-center">
       <div className="text-lg font-semibold text-neutral-800">{value}</div>
-      <div className="text-[10px] font-medium text-neutral-400 uppercase tracking-wider mt-0.5">{label}</div>
+      <div className="text-[11px] font-medium text-neutral-400 uppercase tracking-wider mt-0.5">{label}</div>
     </div>
   );
 }
@@ -437,7 +437,7 @@ function SectionHeading({ title, count }) {
     <div className="flex items-center gap-2 mb-3">
       <h3 className="text-xs font-semibold text-neutral-700 uppercase tracking-wider">{title}</h3>
       {count != null && (
-        <span className="text-[10px] font-medium text-neutral-400 bg-neutral-100 px-1.5 py-0.5 rounded">
+        <span className="text-[11px] font-medium text-neutral-400 bg-neutral-100 px-1.5 py-0.5 rounded">
           {count}
         </span>
       )}

@@ -41,7 +41,7 @@ function Field({ label, valueNode, active, open, onToggle, children, width = "mi
             : "border-neutral-200 bg-neutral-0 text-neutral-800 hover:border-neutral-300"}`}
       >
         <span className="truncate">{valueNode}</span>
-        <span className="ml-auto pl-1.5 text-[9px] text-neutral-400 leading-none">{open ? "▲" : "▼"}</span>
+        <span className="ml-auto pl-1.5 text-[11px] text-neutral-400 leading-none">{open ? "▲" : "▼"}</span>
       </button>
       {open && (
         <div className={`absolute z-30 top-full ${align === "right" ? "right-0" : "left-0"} mt-1 bg-neutral-0 border border-neutral-100 rounded-md shadow-lg p-1.5 min-w-full`}>
@@ -55,7 +55,7 @@ function Field({ label, valueNode, active, open, onToggle, children, width = "mi
 function CheckBox({ checked }) {
   return (
     <span
-      className={`w-[15px] h-[15px] rounded-[4px] border flex items-center justify-center flex-none text-white text-[10px] leading-none
+      className={`w-[15px] h-[15px] rounded-[4px] border flex items-center justify-center flex-none text-white text-[11px] leading-none
         ${checked ? "bg-brand-600 border-brand-600" : "border-neutral-300 bg-neutral-0"}`}
     >
       {checked ? "✓" : ""}
