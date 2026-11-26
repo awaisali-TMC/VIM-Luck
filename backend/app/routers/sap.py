@@ -535,7 +535,7 @@ async def sync_single_po(po_number: str, db: AsyncSession = Depends(get_db)):
             vendor_name=po_data["vendor_name"],
             sap_vendor_number=(sap_po.get("vendor_number") or "").strip() or None,
             company_code=po_data["company_code"],
-            vendor_ntn=po_data["vendor_ntn"],
+            vendor_ntn=po_data["vendor_ntn"], vendor_tax_numbers=po_data["vendor_tax_numbers"],
             po_date=po_data["po_date"],
             po_type=po_data["po_type"],
             total_amount=po_data["total_amount"],
@@ -623,7 +623,7 @@ async def sync_all_pos(
                     vendor_name=po_data["vendor_name"],
                     sap_vendor_number=(detail.get("vendor_number") or "").strip() or None,
                     company_code=po_data["company_code"],
-                    vendor_ntn=po_data["vendor_ntn"],
+                    vendor_ntn=po_data["vendor_ntn"], vendor_tax_numbers=po_data["vendor_tax_numbers"],
                     po_date=po_data["po_date"],
                     po_type=po_data["po_type"],
                     total_amount=po_data["total_amount"],
@@ -930,8 +930,9 @@ async def sync_sap_grn(po_number: str, db: AsyncSession = Depends(get_db)):
         po_data = sync_po_to_db(sap_po, None)
         po = PurchaseOrder(
             po_number=po_data["po_number"], vendor_name=po_data["vendor_name"],
+            sap_vendor_number=(sap_po.get("vendor_number") or "").strip() or None,
             company_code=po_data["company_code"],
-            vendor_ntn=po_data["vendor_ntn"], po_date=po_data["po_date"],
+            vendor_ntn=po_data["vendor_ntn"], vendor_tax_numbers=po_data["vendor_tax_numbers"], po_date=po_data["po_date"],
             po_type=po_data["po_type"], total_amount=po_data["total_amount"],
             currency=po_data["currency"], status=po_data["status"],
             notes=po_data["notes"], source_type="sap",

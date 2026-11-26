@@ -142,7 +142,7 @@ async def _refresh_pos_from_sap(db: AsyncSession, vendor_number: str, force: boo
                 vendor_name=po_data["vendor_name"],
                 sap_vendor_number=vendor_number,
                 company_code=po_data["company_code"],
-                vendor_ntn=po_data["vendor_ntn"],
+                vendor_ntn=po_data["vendor_ntn"], vendor_tax_numbers=po_data["vendor_tax_numbers"],
                 po_date=po_data["po_date"],
                 po_type=po_data["po_type"],
                 total_amount=po_data["total_amount"],

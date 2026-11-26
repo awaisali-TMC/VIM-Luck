@@ -339,6 +339,9 @@ class InvoiceDetailResponse(BaseModel):
     sap_wf_objkey: Optional[str] = None
     sap_wf_status: Optional[str] = None       # INIT | BLK | APP | REJ
     sap_transaction: str = "MIR7"             # MIR7 | FV60
+    # Invoice vendor NTN vs the SAP PO vendor's tax numbers (services/ntn_check.py);
+    # None when not matched to a PO. Internal users only.
+    vendor_ntn_check: Optional[dict] = None
     sap_wf_posted_doc: Optional[str] = None
     sap_wf_message: Optional[str] = None
     sap_wf_checked_at: Optional[datetime] = None

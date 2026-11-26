@@ -78,7 +78,20 @@ freight invoices with the same number, vendor and PO are duplicates; a quantity 
 order unit and OPU differ; the big ATL badge still says "NTN Not Found" when FBR does not answer; match
 reasoning shows `424.94000000000005`.
 
-## 2026-11-26 (latest): bigger text and a lighter UI polish — dev-shahzaib, not yet on LAN
+## 2026-11-26 (newest): invoice vendor NTN checked against the SAP PO vendor — dev-shahzaib, not yet on LAN
+
+Client asked to match the NTN with the SAP PO. The user chose: **an error message only, never blocking**.
+Built: PO sync reads the vendor's LFA1 STCD1, STCD2, STCD3 (STCD1 was the only one before) and stores them as
+`purchase_orders.vendor_tax_numbers`; older POs are read once when a matched invoice is opened. The invoice detail
+returns `vendor_ntn_check`; the page shows a red "Vendor NTN does not match SAP" banner with both numbers, or a grey
+note when the SAP vendor has no NTN/CNIC. The GRN-sync path now also stores the PO's SAP vendor number. Offline
+`backend/test_vendor_ntn_check.py` passes; build OK.
+**No new SAP access needed** for LFA1 (TMC_VIM already reads it; table-level access). **LAN check:** open an invoice
+matched to a live PO (e.g. 1010027880, vendor 0053001321, whose PO card showed no NTN in STCD1): does the PO's
+vendor have the NTN in STCD2/STCD3, or nowhere in LFA1? If nowhere, it is in the BP tax numbers (`DFKKBPTAXNUM`)
+and reading that table needs Basis read access for TMC_VIM.
+
+## 2026-11-26 (latest): bigger text and a lighter UI polish — `8326b62`, not yet on LAN
 
 The user: text too small to read; nicer UI without leaving the theme. Theme sizes in `frontend/src/index.css` raised
 one step (2xs 11→12, xs 12→13, sm 13→14, base 14→15, lg 16→17 px; html 14→15); hard-coded `text-[9px]`/`[10px]` →

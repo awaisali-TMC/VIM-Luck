@@ -1022,6 +1022,14 @@ async def get_invoice(
             li.unit = units[li.id]
     if principal.kind == "supplier":
         resp.sap_messages = None        # internal
+    else:
+        # Client request: the invoice's vendor NTN must match the SAP PO's vendor.
+        # Shown as an error on the page, never blocking. Best effort.
+        try:
+            from app.services.ntn_check import vendor_ntn_check
+            resp.vendor_ntn_check = await vendor_ntn_check(db, invoice)
+        except Exception:
+            logger.warning("Vendor NTN check failed for invoice %s", invoice_id, exc_info=True)
     return resp
 
 

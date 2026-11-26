@@ -227,6 +227,7 @@ def fetch_po_detail(po_number: str) -> dict | None:
         vendor = vendors.get(vendor_num) or {}
         vendor_name = vendor.get("name", "")
         vendor_ntn = vendor.get("ntn", "")
+        vendor_tax_numbers = vendor.get("tax_numbers", [])
 
         # Build result
         line_items = []
@@ -260,7 +261,8 @@ def fetch_po_detail(po_number: str) -> dict | None:
             "doc_type": h.get("BSART", ""),
             "vendor_number": vendor_num,
             "vendor_name": vendor_name,
-            "vendor_ntn": vendor_ntn,   # LFA1-STCD1
+            "vendor_ntn": vendor_ntn,   # LFA1-STCD1 (STCD3 = CNIC when there is no NTN)
+            "vendor_tax_numbers": vendor_tax_numbers,   # LFA1 STCD1..3, for the NTN check
             "po_date": _sap_date(h.get("BEDAT", "")),
             "currency": h.get("WAERS", ""),
             "total_value": header_total,
@@ -310,7 +312,9 @@ def _fetch_vendor_master(sap: SAPConnector, vendor_numbers: list[str]) -> dict[s
                 "FIELDS": [
                     {"FIELDNAME": "LIFNR"},
                     {"FIELDNAME": "NAME1"},
-                    {"FIELDNAME": "STCD1"},  # Tax number (NTN)
+                    {"FIELDNAME": "STCD1"},  # Tax number 1 (NTN)
+                    {"FIELDNAME": "STCD2"},  # Tax number 2 (STRN)
+                    {"FIELDNAME": "STCD3"},  # Tax number 3 (CNIC for individuals)
                 ],
             },
             tables=["DATA", "FIELDS"],
@@ -321,13 +325,16 @@ def _fetch_vendor_master(sap: SAPConnector, vendor_numbers: list[str]) -> dict[s
         )
 
         parsed = _parse_delimited_rows(result.get("DATA", []), result.get("FIELDS", []))
-        return {
-            r["LIFNR"]: {
+        out = {}
+        for r in parsed:
+            stcd = [(r.get(f) or "").strip() for f in ("STCD1", "STCD2", "STCD3")]
+            out[r["LIFNR"]] = {
                 "name": (r.get("NAME1") or "").strip(),
-                "ntn": (r.get("STCD1") or "").strip(),
+                # NTN, or the CNIC (STCD3) for an individual without one.
+                "ntn": stcd[0] or stcd[2],
+                "tax_numbers": [v for v in stcd if v],
             }
-            for r in parsed
-        }
+        return out
 
     except Exception as e:
         logger.warning(f"Vendor master lookup failed: {e}")
@@ -1169,6 +1176,9 @@ def fetch_currencies(language: str = "E") -> list[dict]:
         sap.disconnect()
 
 
+from app.services.ntn_check import tax_numbers_json  # noqa: E402
+
+
 def sync_po_to_db(po_data: dict, db_session) -> dict:
     """
     Convert SAP PO data dict into the einv PurchaseOrder format
@@ -1178,6 +1188,7 @@ def sync_po_to_db(po_data: dict, db_session) -> dict:
         "po_number": po_data["po_number"],
         "vendor_name": po_data.get("vendor_name", ""),
         "vendor_ntn": po_data.get("vendor_ntn", ""),
+        "vendor_tax_numbers": tax_numbers_json(po_data.get("vendor_tax_numbers")),
         "company_code": (po_data.get("company_code") or "").strip() or None,
         "po_date": po_data.get("po_date", ""),
         "po_type": "local",

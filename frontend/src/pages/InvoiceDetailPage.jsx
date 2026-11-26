@@ -1074,6 +1074,25 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
         refreshKey={`${invoice.matched_po_id}|${invoice.invoice_number}|${invoice.supplier_ntn}|${invoice.po_reference}`}
       />
 
+      {/* ── Vendor NTN vs the SAP PO's vendor (client request): an error, never blocking ── */}
+      {invoice.vendor_ntn_check?.status === "mismatch" && (
+        <div role="alert" className="bg-danger-bg border border-danger-base rounded-md px-4 py-3 text-xs text-danger-dark">
+          <strong>Vendor NTN does not match SAP.</strong>{" "}
+          The invoice shows <span className="font-mono font-semibold">{invoice.vendor_ntn_check.invoice_ntn}</span>,
+          but PO {invoice.vendor_ntn_check.po_number}&apos;s vendor
+          {invoice.vendor_ntn_check.vendor_name ? ` ${invoice.vendor_ntn_check.vendor_name}` : ""}
+          {invoice.vendor_ntn_check.vendor_number ? ` (${invoice.vendor_ntn_check.vendor_number})` : ""} has{" "}
+          <span className="font-mono font-semibold">{invoice.vendor_ntn_check.sap_tax_numbers.join(" / ")}</span> in SAP.
+          Check the NTN on the invoice, and that it is matched to the right PO.
+        </div>
+      )}
+      {invoice.vendor_ntn_check?.status === "unknown" && invoice.vendor_ntn_check.invoice_ntn
+        && invoice.vendor_ntn_check.sap_tax_numbers.length === 0 && (
+        <div className="bg-neutral-25 border border-neutral-200 rounded-md px-4 py-2.5 text-2xs text-neutral-600">
+          Vendor NTN not checked: PO {invoice.vendor_ntn_check.po_number}&apos;s vendor has no NTN / CNIC maintained in SAP.
+        </div>
+      )}
+
       {/* ── Workflow Stepper ── */}
       <WorkflowStepper currentStatus={invoice.status} />
 

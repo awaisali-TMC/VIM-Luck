@@ -44,6 +44,9 @@ class PurchaseOrder(Base):
     # Part of the duplicate-invoice key (services/duplicate_detection.py).
     company_code = Column(String(10), nullable=True)
     vendor_ntn = Column(String(50))
+    # The SAP vendor's tax numbers (LFA1 STCD1..3) as a JSON list, for the
+    # invoice-vs-PO NTN check (services/ntn_check.py). NULL = not read yet.
+    vendor_tax_numbers = Column(Text, nullable=True)
     po_date = Column(String(50))
     po_type = Column(String(20), default=POType.LOCAL.value)
     total_amount = Column(Float)
