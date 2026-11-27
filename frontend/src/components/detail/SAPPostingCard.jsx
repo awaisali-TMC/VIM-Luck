@@ -3,12 +3,13 @@ import Card from "../common/Card";
 import { todayIso } from "../../utils/dateRange";
 
 const LAYOUT_OPTIONS = [
-  { value: "goods", label: "Goods/service items" },
-  { value: "delivery", label: "Planned delivery costs" },
-  { value: "both", label: "Goods/service items + planned delivery costs" },
+  // Same wording and numbers as MIR7's "Layout" dropdown.
+  { value: "goods", label: "1 Goods/service items" },
+  { value: "delivery", label: "2 Planned delivery costs" },
+  { value: "both", label: "3 Goods/service items + planned delivery costs" },
 ];
 
-const layoutLabel = (v) => LAYOUT_OPTIONS.find((o) => o.value === v)?.label || "Goods/service items";
+const layoutLabel = (v) => LAYOUT_OPTIONS.find((o) => o.value === v)?.label || "1 Goods/service items";
 
 /**
  * SAP Parking parameters — all the inputs we ready for parking to SAP. Editable
@@ -232,7 +233,7 @@ export default function SAPPostingCard({
         <div className="grid grid-cols-2 gap-x-8 gap-y-4 pt-2">
           {/* Items to Park (SAP MIR7 "layout") */}
           <div>
-            <span className={labelCls}>Items to Park {req}</span>
+            <span className={labelCls}>Layout (items to park) {req}</span>
             {editable ? (
               <select
                 value={layout}

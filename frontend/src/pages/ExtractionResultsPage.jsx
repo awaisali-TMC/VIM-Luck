@@ -34,7 +34,7 @@ function extractSupplierInfo(result) {
   return {
     fields: [
       { label: "Supplier Name", value: fieldMap.supplier_name, confidence: confMap.supplier_name },
-      { label: "NTN / Tax ID", value: fieldMap.supplier_tax_id, confidence: confMap.supplier_tax_id },
+      { label: "Vendor NTN / CNIC", value: fieldMap.supplier_tax_id, confidence: confMap.supplier_tax_id },
       { label: "Address", value: fieldMap.supplier_address, confidence: confMap.supplier_address },
       { label: "Phone", value: fieldMap.supplier_phone, confidence: confMap.supplier_phone },
     ].filter((f) => f.value),
