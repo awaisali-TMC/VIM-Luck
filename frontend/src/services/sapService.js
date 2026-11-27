@@ -115,6 +115,13 @@ export async function lookupSAPVendor({ ntn = "", name = "" } = {}) {
   return response.data;
 }
 
+export async function lookupSAPReference(category, number) {
+  // MIR7 reference document category 2 (delivery_note) / 4 (service_entry_sheet):
+  // the PO (synced into VIM) and goods receipts behind that number.
+  const response = await api.get(`${BASE}/reference-lookup`, { params: { category, number } });
+  return response.data;
+}
+
 export async function validateInvoiceForSAP(invoiceId, lineItemIds = null) {
   const response = await api.post(`${BASE}/invoices/${invoiceId}/post`, {
     mode: "validate",

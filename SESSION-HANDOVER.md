@@ -78,6 +78,18 @@ freight invoices with the same number, vendor and PO are duplicates; a quantity 
 order unit and OPU differ; the big ATL badge still says "NTN Not Found" when FBR does not answer; match
 reasoning shows `424.94000000000005`.
 
+## 2026-11-27 (later): MIR7 reference document category in PO Matching
+
+Client: MIR7's "Reference document category" (1 PO, 2 Delivery Note, 3 Bill of Lading, 4 SES, 5 Supplier, ...)
+and "Layout" are pillars. **Layout already exists** as "Items to Park" on the SAP Parking card (goods / planned
+delivery costs / both). User chose: categories **1, 2, 4 working**, the rest shown but disabled. Built: dropdown on
+the PO Matching card; 2/4 → number → Find & Match → lookup in EKBE (XBLNR / LFBNR) → PO synced and matched → its
+GRs ticked, only for PO items the invoice bills. The Goods Receipts card now reloads when the saved selection changes.
+Checked locally in the browser (fake SAP): DN-2026-00417 matched PO 4500009001 and ticked item 10's GR only;
+DN-2026-00418 ticked 5000009006. New `backend/test_reference_lookup.py`; regression set passes; build OK.
+**LAN check:** on AUP, verify `EKBE-XBLNR` exists (`backend/.venv/bin/python backend/sap_dd03l.py EKBE`), then try a
+real delivery note number and an SES number of a Lucky PO.
+
 ## 2026-11-27: client email (8 observations) — built what needs nobody else
 
 Client email of 2026-11-27, points and status:

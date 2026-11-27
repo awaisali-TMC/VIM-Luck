@@ -62,7 +62,8 @@ CREATE TABLE EKBE (
     SHKZG TEXT,   -- debit/credit: S = debit, H = credit
     LFBNR TEXT,   -- reference document (the GR a service line came from)
     LFGJA TEXT,   -- reference document year (the GR an invoice / reversal points at)
-    LFPOS TEXT    -- reference document item
+    LFPOS TEXT,   -- reference document item
+    XBLNR TEXT    -- reference document number: the delivery note on a goods receipt
 );
 
 -- Einkaufsbeleg Bezugsnebenkosten — delivery costs

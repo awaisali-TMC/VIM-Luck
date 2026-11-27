@@ -5,7 +5,21 @@ import {
   autoSuggestPO,
   deleteMatchResult,
 } from "../../services/purchaseOrderService";
-import { syncSAPGRN } from "../../services/sapService";
+import { syncSAPGRN, lookupSAPReference, getOpenGRs } from "../../services/sapService";
+import { setParkingGRs } from "../../services/invoiceService";
+
+// MIR7 "Reference document category". 1, 2 and 4 work in VIM; the rest are shown
+// as in SAP but not available yet.
+const REFERENCE_CATEGORIES = [
+  { value: "po", label: "1 Purchase Order/Scheduling Agreement" },
+  { value: "delivery_note", label: "2 Delivery Note", placeholder: "Delivery note number (e.g. DN-2026-00417)" },
+  { value: "bill_of_lading", label: "3 Bill of Lading", disabled: true },
+  { value: "service_entry_sheet", label: "4 Service Entry Sheet", placeholder: "Entry sheet number (e.g. 1000009001)" },
+  { value: "supplier", label: "5 Supplier", disabled: true },
+  { value: "ses_lean", label: "6 Service Entry Sheet - Lean Services", disabled: true },
+  { value: "tsa", label: "7 Transportation Service Agent", disabled: true },
+  { value: "exchange", label: "9 Exchange Agreement (IS-Oil Only)", disabled: true },
+];
 import POSearchBox from "./POSearchBox";
 import SAPGRNFetch from "./SAPGRNFetch";
 import Card from "../common/Card";
@@ -25,6 +39,10 @@ export default function POMatchSection({ invoiceId, poReference, onMatched, read
   const [expandedResult, setExpandedResult] = useState(null);
   const [grnQuery, setGrnQuery] = useState("");   // text in the GRN field (for enabling Run)
   const grnRef = useRef(null);                      // imperative handle on SAPGRNFetch
+  const [refCategory, setRefCategory] = useState("po");
+  const [refNumber, setRefNumber] = useState("");
+  const [refBusy, setRefBusy] = useState(false);
+  const [refInfo, setRefInfo] = useState(null);
 
   // Load existing match results
   const loadMatches = useCallback(async () => {
@@ -88,8 +106,10 @@ export default function POMatchSection({ invoiceId, poReference, onMatched, read
       await triggerPOMatch(invoiceId, po.id, matchType);
       await loadMatches();
       onMatched?.();  // tell the page to refetch the invoice (matched_po_id is now set)
+      return true;
     } catch (err) {
       setError(err.response?.data?.detail || err.message || "Matching failed");
+      return false;
     } finally {
       setMatching(false);
     }
@@ -111,6 +131,56 @@ export default function POMatchSection({ invoiceId, poReference, onMatched, read
     }
     await handleRunMatch(po);
   }, [selectedPO, matchType, handleRunMatch]);
+
+  // MIR7 reference category 2 / 4: find the PO and GRs behind a delivery note or
+  // entry sheet, match the invoice to that PO and tick those GRs for parking.
+  const handleFindByReference = useCallback(async () => {
+    const num = refNumber.trim();
+    if (!num) { setError("Enter the reference number."); return; }
+    setRefBusy(true);
+    setError(null);
+    setWarning(null);
+    setRefInfo(null);
+    try {
+      const found = await lookupSAPReference(refCategory, num);
+      const po = { id: found.po_id, po_number: found.po_number, vendor_name: found.vendor_name,
+                   total_amount: found.total_amount, currency: found.currency || "PKR" };
+      setSelectedPO(po);
+      const matched = await handleRunMatch(po);
+      if (!matched) return;
+      // Tick only the GR lines of PO items this invoice bills: one delivery note
+      // can cover PO items that another invoice bills.
+      let keys = found.gr_keys || [];
+      let skipped = 0;
+      try {
+        const og = await getOpenGRs(invoiceId);
+        const billed = new Set(Object.keys(og?.billed || {}).map(Number));
+        if (billed.size) {
+          const kept = (found.grs || []).filter((g) => billed.has(g.po_item)).map((g) => g.gr_key);
+          skipped = keys.length - kept.length;
+          keys = kept;
+        }
+      } catch { /* keep every GR of the reference */ }
+      if (keys.length) {
+        try {
+          await setParkingGRs(invoiceId, keys);
+        } catch (err) {
+          const d = err.response?.data?.detail;
+          setWarning(`Matched to PO ${found.po_number}, but its GRs could not be ticked: ${typeof d === "string" ? d : "see the Goods Receipts card."}`);
+        }
+      }
+      setRefInfo(`PO ${found.po_number} · ${keys.length} goods receipt(s) of ${num} ticked for parking` +
+        (skipped ? ` (${skipped} for PO items this invoice does not bill left unticked).` : "."));
+      onMatched?.();
+    } catch (err) {
+      const d = err.response?.data?.detail;
+      setError(typeof d === "string" ? d : "Reference lookup failed.");
+    } finally {
+      setRefBusy(false);
+    }
+  }, [refCategory, refNumber, invoiceId, handleRunMatch, onMatched]);
+
+  const refOption = REFERENCE_CATEGORIES.find((c) => c.value === refCategory);
 
   const handleDeleteResult = useCallback(async (matchId) => {
     try {
@@ -172,7 +242,42 @@ export default function POMatchSection({ invoiceId, poReference, onMatched, read
             </div>
           )}
 
+          {/* MIR7 reference document category (client: "a pillar of MIR7") */}
+          <div>
+            <div className="text-2xs font-semibold text-neutral-500 uppercase mb-1">Reference document</div>
+            <select
+              value={refCategory}
+              onChange={(e) => { setRefCategory(e.target.value); setRefInfo(null); }}
+              className="w-full max-w-md bg-neutral-0 border border-neutral-200 rounded-base px-2.5 py-1.5 text-xs outline-none focus:border-brand-400"
+            >
+              {REFERENCE_CATEGORIES.map((c) => (
+                <option key={c.value} value={c.value} disabled={c.disabled}>
+                  {c.label}{c.disabled ? " — not available yet" : ""}
+                </option>
+              ))}
+            </select>
+            {refCategory !== "po" && (
+              <div className="mt-2 flex items-center gap-2 max-w-xl">
+                <input
+                  type="text"
+                  value={refNumber}
+                  onChange={(e) => setRefNumber(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") handleFindByReference(); }}
+                  placeholder={refOption?.placeholder || "Reference number"}
+                  className="flex-1 bg-neutral-0 border border-neutral-200 rounded-base px-2.5 py-1.5 text-xs outline-none focus:border-brand-400"
+                />
+                <Button size="sm" onClick={handleFindByReference} disabled={refBusy || matching || !refNumber.trim()}>
+                  {refBusy ? "Finding…" : "Find & Match"}
+                </Button>
+              </div>
+            )}
+            {refInfo && (
+              <div className="mt-2 text-2xs text-success-dark bg-success-bg border border-success-base rounded-base px-3 py-1.5">{refInfo}</div>
+            )}
+          </div>
+
           {/* Manual PO Search */}
+          {refCategory === "po" && (
           <div>
             <div className="text-2xs font-semibold text-neutral-500 uppercase mb-1">
               {suggestions.length > 0 ? "Or search manually" : "Select Purchase Order"}
@@ -192,6 +297,7 @@ export default function POMatchSection({ invoiceId, poReference, onMatched, read
               </div>
             )}
           </div>
+          )}
 
           {/* Match Type Toggle */}
           <div className="flex items-center gap-4">

@@ -1210,3 +1210,74 @@ def sync_po_to_db(po_data: dict, db_session) -> dict:
             for li in po_data.get("line_items", [])
         ],
     }
+
+
+REFERENCE_CATEGORIES = {
+    # MIR7 "Reference document category" -> how VIM finds the goods receipts.
+    "delivery_note": "2 Delivery Note",            # EKBE-XBLNR on the goods receipt
+    "service_entry_sheet": "4 Service Entry Sheet",  # EKBE-LFBNR on the service GR
+}
+
+
+def find_grs_by_reference(category: str, number: str) -> dict:
+    """The goods receipts behind a delivery note or a service entry sheet, read
+    from EKBE (VGABE 1) like MIR7's reference document category 2 / 4.
+
+    Returns {category, number, po_numbers: [...], gr_keys: [...], grs: [{gr_key,
+    po_item}]}; gr_keys use the
+    Goods Receipts card's key (YYYY/BELNR/BUZEI of the 101/103 line; a 105 release
+    points at its 103 through LFGJA/LFBNR/LFPOS). Reversals (SHKZG H) are skipped.
+
+    Note: EKBE is read without its PO key here, so on a large production system
+    this select can be slow; AUP DEV answers quickly. EKBE-XBLNR must exist on the
+    target system (verify with backend/sap_dd03l.py EKBE)."""
+    if category not in REFERENCE_CATEGORIES:
+        raise ValueError(f"Unknown reference category {category!r}")
+    num = (number or "").strip().replace("'", "")
+    if not num:
+        raise ValueError("Enter the reference number.")
+    if category == "service_entry_sheet":
+        where = [f"LFBNR = '{num.zfill(10) if num.isdigit() else num}' ", "AND VGABE = '1' "]
+    else:
+        where = [f"XBLNR = '{num.upper()[:16]}' ", "AND VGABE = '1' "]
+    sap = _get_connector()
+    sap.connect()
+    try:
+        res = sap.call(
+            "RFC_READ_TABLE", QUERY_TABLE="EKBE", ROWCOUNT="500", DELIMITER="|",
+            input_tables={
+                "OPTIONS": [{"TEXT": w} for w in where],
+                "FIELDS": [{"FIELDNAME": f} for f in (
+                    "EBELN", "EBELP", "GJAHR", "BELNR", "BUZEI", "BWART", "SHKZG",
+                    "LFGJA", "LFBNR", "LFPOS")],
+            },
+            tables=["DATA", "FIELDS"],
+            table_fields={"DATA": ["WA"], "FIELDS": ["FIELDNAME", "OFFSET", "LENGTH"]},
+        )
+        rows = _parse_delimited_rows(res.get("DATA", []), res.get("FIELDS", []))
+    finally:
+        sap.disconnect()
+
+    def key(year, doc, item):
+        return f"{(year or '').strip()}/{(doc or '').strip().zfill(10)}/{(item or '').strip().zfill(4)}"
+
+    pos, keys, items = [], [], {}
+    for r in rows:
+        if (r.get("SHKZG") or "").strip() == "H":
+            continue
+        bwart = (r.get("BWART") or "").strip()
+        if bwart in ("101", "103"):
+            k = key(r.get("GJAHR"), r.get("BELNR"), r.get("BUZEI") or "1")
+        elif bwart == "105" and (r.get("LFBNR") or "").strip():
+            k = key(r.get("LFGJA"), r.get("LFBNR"), r.get("LFPOS") or "1")
+        else:
+            continue
+        ebeln = (r.get("EBELN") or "").strip()
+        if ebeln and ebeln not in pos:
+            pos.append(ebeln)
+        if k not in keys:
+            keys.append(k)
+            items[k] = int((r.get("EBELP") or "0").strip() or 0)
+    logger.info("Reference %s %s: %d EKBE rows -> POs %s, GRs %s", category, num, len(rows), pos, keys)
+    return {"category": category, "number": num, "po_numbers": pos, "gr_keys": keys,
+            "grs": [{"gr_key": k, "po_item": items[k]} for k in keys]}

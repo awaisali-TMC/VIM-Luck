@@ -41,7 +41,10 @@ export default function GoodsReceiptsCard({ invoice, editable = false, onChanged
   }, [invoice?.id, invoice?.matched_po_id]);
 
   const srnKey = (invoice?.srn_list || []).map((r) => r.number).join(",");
-  useEffect(() => { load(); }, [load, srnKey]);
+  // Also reload when the saved selection changes elsewhere (e.g. PO Matching's
+  // "Find & Match" by delivery note / entry sheet ticks GRs for this invoice).
+  const refsKey = invoice?.parking_gr_refs == null ? "-" : invoice.parking_gr_refs.join(",");
+  useEffect(() => { load(); }, [load, srnKey, refsKey]);
 
   // Nothing chosen yet and the backend has a suggestion: tick and save it once.
   useEffect(() => {

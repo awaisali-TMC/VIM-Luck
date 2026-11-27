@@ -31,7 +31,7 @@ from app.security import get_current_internal_user, require_admin
 from app.routers.role_permissions import role_labels, humanize_role
 from app.services.duplicate_detection import duplicate_block_message, find_key_duplicates
 from app.services.gr_suggest import (
-    choose_grs, freight_on_other_invoices, sibling_choices, suggest_freight, suggest_grs, why_not_suggested,
+    billed_by_po_item, choose_grs, freight_on_other_invoices, sibling_choices, suggest_freight, suggest_grs, why_not_suggested,
 )
 from app.services import sap_messages
 from app.services.sap_credentials import decrypt_sap_password
@@ -504,6 +504,43 @@ async def get_sap_po_detail(po_number: str):
         raise HTTPException(status_code=500, detail="SAP PO detail fetch failed — see server logs.")
 
 
+@router.get("/reference-lookup")
+async def reference_lookup(category: str, number: str, db: AsyncSession = Depends(get_db)):
+    """MIR7 reference document category 2 (Delivery Note) / 4 (Service Entry Sheet):
+    the PO and goods receipts behind that number, with the PO synced into VIM so
+    the invoice can be matched to it. One PO only (several POs on one invoice is
+    not built yet)."""
+    _ensure_dll()
+    from app.services.sap_po_service import find_grs_by_reference
+    try:
+        found = await asyncio.to_thread(find_grs_by_reference, category, number)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception:
+        logger.exception("Reference lookup failed: %s %s", category, number)
+        raise HTTPException(status_code=502, detail="Could not read goods receipts from SAP — see server logs.")
+    label = "delivery note" if category == "delivery_note" else "service entry sheet"
+    if not found["po_numbers"]:
+        raise HTTPException(status_code=404, detail=f"No goods receipt in SAP refers to {label} {found['number']}.")
+    if len(found["po_numbers"]) > 1:
+        raise HTTPException(status_code=409, detail=(
+            f"{label.capitalize()} {found['number']} is on several POs ({', '.join(found['po_numbers'])}). "
+            "An invoice is matched to one PO: select the PO instead."))
+    po_number = found["po_numbers"][0]
+    po = (await db.execute(select(PurchaseOrder).where(PurchaseOrder.po_number == po_number))).scalar_one_or_none()
+    if po is None:
+        try:
+            await sync_single_po(po_number, db)
+        except HTTPException as e:
+            if e.status_code != 409:
+                raise
+        po = (await db.execute(select(PurchaseOrder).where(PurchaseOrder.po_number == po_number))).scalar_one_or_none()
+    if po is None:
+        raise HTTPException(status_code=502, detail=f"PO {po_number} could not be loaded from SAP.")
+    return {**found, "po_id": po.id, "po_number": po.po_number, "vendor_name": po.vendor_name,
+            "total_amount": po.total_amount, "currency": po.currency}
+
+
 @router.post("/pos/{po_number}/sync")
 async def sync_single_po(po_number: str, db: AsyncSession = Depends(get_db)):
     """Fetch a PO from SAP and save/update it in the local database."""
@@ -734,6 +771,8 @@ async def get_invoice_open_grs(invoice_id: int, db: AsyncSession = Depends(get_d
             "chosen": inv.parking_gr_refs is not None,
             "suggested": (suggested := await suggest_grs(db, inv, po, ov["open"])),
             "why_not": None if suggested else await why_not_suggested(db, inv, po, ov["open"]),
+            # Quantity the invoice bills per PO item (its lines paired to the PO).
+            "billed": {str(k): v for k, v in (await billed_by_po_item(db, inv, po)).items()},
             # The attached GRN summary: how many SRNs it lists, and what SAP disagrees with.
             "srn_count": len(receipts), "srn_problems": check_receipts(receipts, ov["open"], ov["closed"])}
 
