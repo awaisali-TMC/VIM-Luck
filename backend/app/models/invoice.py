@@ -1,7 +1,7 @@
 import enum
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Text
+from sqlalchemy import Boolean, Column, Integer, String, Float, DateTime, ForeignKey, Text
 from sqlalchemy.orm import relationship, DeclarativeBase
 
 
@@ -116,6 +116,10 @@ class Invoice(Base):
     sap_posted_at = Column(DateTime(timezone=True), nullable=True)
     sap_doc_status = Column(String(20), nullable=True)  # "parked" | "posted"
     sap_tax_code = Column(String(10), nullable=True)    # SAP tax code chosen for this invoice (AI-suggested, user-editable)
+    # MIR7's "Calculate Tax": park with CALC_TAX_IND = X and no TAXDATA, so SAP
+    # works the tax out from each item's tax code (client 2026-11-27). Off = the
+    # invoice's own tax amount is sent, as before.
+    sap_calc_tax = Column(Boolean, nullable=True, default=False)
     # SAP parking parameters — set during review (before approval), then locked.
     sap_layout = Column(String(20), nullable=True, default="goods")  # "goods" | "delivery" | "both"
     sap_posting_date = Column(String(50), nullable=True)             # SAP posting date (ISO)

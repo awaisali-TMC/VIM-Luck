@@ -276,6 +276,7 @@ def _build_detail_response(invoice: Invoice) -> InvoiceDetailResponse:
         sap_posted_at=invoice.sap_posted_at,
         sap_doc_status=invoice.sap_doc_status,
         sap_tax_code=invoice.sap_tax_code,
+        sap_calc_tax=bool(invoice.sap_calc_tax),
         sap_layout=invoice.sap_layout,
         sap_posting_date=invoice.sap_posting_date,
         sap_baseline_date=invoice.sap_baseline_date,

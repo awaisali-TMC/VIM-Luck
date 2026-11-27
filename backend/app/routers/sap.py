@@ -1808,6 +1808,13 @@ async def post_invoice_to_sap_endpoint(
 
     tax_by_code[eff_tax_code] = round(tax_by_code.get(eff_tax_code, 0.0) + (tax_amount_used or 0), 2)
     tax_amount_used = round((tax_amount_used or 0) + delivery_tax, 2)
+    # MIR7 "Calculate Tax" (client 2026-11-27): SAP works the tax out from each
+    # item's tax code (CALC_TAX_IND = X, no TAXDATA). The gross is sent with the
+    # same rates, so the document balances.
+    calc_tax = bool(invoice.sap_calc_tax)
+    if calc_tax:
+        goods_tax = round(goods_net * (code_rate / 100.0), 2) if (code_rate and eff_layout != "delivery") else 0.0
+        tax_amount_used = round(goods_tax + delivery_tax, 2)
     gross_amount = round(sent_net + tax_amount_used, 2)
 
     # Delivery costs come from the PO, not from the paper: never park more than
@@ -1890,6 +1897,7 @@ async def post_invoice_to_sap_endpoint(
             withtax_rows=[{"WI_TAX_TYPE": w["wht_type"], "WI_TAX_CODE": w["wht_code"]}
                           for w in (json.loads(invoice.sap_wht) if invoice.sap_wht else [])],
             tax_rows=sorted(tax_by_code.items()) if delivery_items else None,
+            calc_tax=calc_tax,
             diff_inv=diff_inv,
             change_doc_number=(invoice.sap_document_number or "") if req.mode == "change" else "",
             change_fiscal_year=(invoice.sap_fiscal_year or "") if req.mode == "change" else "",

@@ -128,6 +128,8 @@ async def run_migrations():
         "ALTER TABLE invoices ADD COLUMN sap_transaction VARCHAR(10)",
         # PO vendor tax numbers (LFA1 STCD1..3, JSON) for the invoice NTN check.
         "ALTER TABLE purchase_orders ADD COLUMN vendor_tax_numbers TEXT",
+        # MIR7 "Calculate Tax" on the invoice (CALC_TAX_IND).
+        "ALTER TABLE invoices ADD COLUMN sap_calc_tax BOOLEAN",
         # Repair POs synced while the header total read EKKO RLWRT (0 for POs
         # without a release strategy): recompute from line values. Idempotent —
         # only touches rows whose stored total is still 0.

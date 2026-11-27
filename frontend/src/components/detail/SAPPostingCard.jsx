@@ -84,6 +84,16 @@ export default function SAPPostingCard({
   const selectedTaxMeta = inputTaxCodes.find((c) => c.code === taxCode);
   const aiSuggestedMeta = inputTaxCodes.find((c) => c.code === aiSuggestedTaxCode);
 
+  // MIR7's "Calculate Tax": SAP works the tax out from the tax code (CALC_TAX_IND).
+  // Preview the same sum here, next to the tax printed on the invoice.
+  const [calcTax, setCalcTax] = useState(!!invoice?.sap_calc_tax);
+  const netForTax = (invoice?.line_items || []).reduce((s, li) => s + (Number(li.amount) || 0), 0)
+    || Number(invoice?.subtotal_amount) || 0;
+  const taxRate = selectedTaxMeta?.rate;
+  const calculatedTax = taxRate != null ? Math.round(netForTax * taxRate) / 100 : null;
+  const invoiceTax = Number(invoice?.tax_amount ?? invoice?.gst_amount ?? 0);
+  const fmtMoney = (n) => Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
   const save = (patch) => onSave?.(patch);
   const req = <span className="text-danger-base">*</span>;
   const labelCls = "text-2xs font-semibold text-neutral-500 uppercase tracking-wider mb-1 block";
@@ -144,6 +154,41 @@ export default function SAPPostingCard({
           ) : (
             <div className="text-xs text-neutral-800 font-medium">
               {selectedTaxMeta ? `${selectedTaxMeta.code} — ${selectedTaxMeta.description}` : taxCode || "—"}
+            </div>
+          )}
+
+          {/* MIR7 "Calculate Tax" (client 2026-11-27) */}
+          <label className={`mt-2.5 inline-flex items-center gap-2 text-xs font-medium text-neutral-800 ${editable ? "cursor-pointer" : ""}`}>
+            <input
+              type="checkbox"
+              checked={calcTax}
+              disabled={!editable}
+              onChange={(e) => { setCalcTax(e.target.checked); save({ sap_calc_tax: e.target.checked }); }}
+            />
+            Calculate Tax
+            <span className="text-2xs font-normal text-neutral-500">— SAP calculates the tax from the tax code, as in MIR7</span>
+          </label>
+          {calcTax && (
+            <div className="mt-1.5 text-2xs rounded-md border border-neutral-100 bg-neutral-25 px-3 py-2 max-w-md">
+              {calculatedTax == null ? (
+                <span className="text-warning-dark">No rate known for tax code {taxCode || "—"}: SAP still calculates it when parking.</span>
+              ) : (
+                <>
+                  <div className="flex justify-between">
+                    <span className="text-neutral-600">Tax ({taxCode} · {taxRate}% of {fmtMoney(netForTax)})</span>
+                    <span className="font-mono font-semibold text-neutral-900">{fmtMoney(calculatedTax)}</span>
+                  </div>
+                  <div className="flex justify-between text-neutral-500">
+                    <span>Tax on the invoice</span>
+                    <span className="font-mono">{fmtMoney(invoiceTax)}</span>
+                  </div>
+                  {invoiceTax > 0 && Math.abs(calculatedTax - invoiceTax) > 1 && (
+                    <div className="mt-1 text-warning-dark">
+                      Differs from the invoice by {fmtMoney(calculatedTax - invoiceTax)}: check the tax code.
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           )}
         </div>

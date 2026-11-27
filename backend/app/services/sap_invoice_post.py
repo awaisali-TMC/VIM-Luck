@@ -166,6 +166,7 @@ def post_invoice_to_sap(
     withtax_rows: list | None = None,
     tax_rows: list | None = None,
     diff_inv: str = "",
+    calc_tax: bool = False,
 ) -> dict:
     """
     Post a vendor invoice to SAP via BAPI_INCOMINGINVOICE_CREATE1.
@@ -226,12 +227,12 @@ def post_invoice_to_sap(
             "COMP_CODE": company_code,
             "CURRENCY": currency,
             "GROSS_AMOUNT": str(gross_amount),
-            # Manual tax: we always supply the exact tax amount in TAXDATA, so
-            # CALC_TAX_IND must be blank. Setting "X" tells SAP to CALCULATE the
-            # tax itself, which then conflicts with the supplied amount and is
-            # rejected with M8 738 ("enter value in either CALC_TAX_IND or
-            # TAX_AMOUNT").
-            "CALC_TAX_IND": "",
+            # Manual tax (default): the exact tax amount goes in TAXDATA, so
+            # CALC_TAX_IND stays blank — sending both is refused with M8 738
+            # ("enter value in either CALC_TAX_IND or TAX_AMOUNT"). With
+            # calc_tax (MIR7's "Calculate Tax") it is "X" and no TAXDATA is sent:
+            # SAP calculates the tax from each item's tax code.
+            "CALC_TAX_IND": "X" if calc_tax else "",
             "REF_DOC_NO": invoice_number[:16] if invoice_number else "",
             # Basic Data "Text" (BKTXT); Lucky Cement: PERNR in chars 1-8
             # A dry run sends the marker instead, so SAP raises no workflow for
@@ -288,7 +289,9 @@ def post_invoice_to_sap(
 
         # ── TAXDATA — aggregate tax line (if tax present) ────────
         tax_data_rows = []
-        if tax_rows is not None:      # one row per tax code (goods + delivery costs)
+        if calc_tax:
+            pass                       # SAP calculates; TAXDATA must stay empty (M8 738)
+        elif tax_rows is not None:      # one row per tax code (goods + delivery costs)
             tax_data_rows = [{"TAX_CODE": c, "TAX_AMOUNT": str(a)} for c, a in tax_rows if a and a > 0]
         elif tax_amount and tax_amount > 0:
             tax_data_rows.append({

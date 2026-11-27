@@ -186,6 +186,7 @@ class InvoiceUpdateRequest(BaseModel):
     bank_iban: Optional[str] = None
     document_type: Optional[str] = None
     sap_tax_code: Optional[str] = None
+    sap_calc_tax: Optional[bool] = None
     sap_layout: Optional[str] = None
     sap_posting_date: Optional[str] = None
     sap_baseline_date: Optional[str] = None
@@ -328,6 +329,7 @@ class InvoiceDetailResponse(BaseModel):
     sap_posted_at: Optional[datetime] = None
     sap_doc_status: Optional[str] = None  # "parked" | "posted"
     sap_tax_code: Optional[str] = None    # AI-suggested / user-chosen SAP tax code
+    sap_calc_tax: bool = False            # MIR7 "Calculate Tax" (CALC_TAX_IND)
     sap_layout: Optional[str] = None      # "goods" | "delivery" | "both"
     sap_posting_date: Optional[str] = None
     sap_baseline_date: Optional[str] = None

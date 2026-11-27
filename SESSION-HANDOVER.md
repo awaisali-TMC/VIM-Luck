@@ -78,6 +78,14 @@ freight invoices with the same number, vendor and PO are duplicates; a quantity 
 order unit and OPU differ; the big ATL badge still says "NTN Not Found" when FBR does not answer; match
 reasoning shows `424.94000000000005`.
 
+## 2026-11-27 (latest): MIR7 "Calculate Tax" checkbox — dev-shahzaib, not yet on LAN/AUP
+
+Client wants MIR7's Calculate Tax in VIM: click it and the tax is calculated. Built: checkbox under the tax code
+on the SAP Parking card (`invoices.sap_calc_tax`, off by default) with a preview (rate × net vs the invoice's tax,
+warning when they differ). On → park/resubmit send `CALC_TAX_IND = X`, no TAXDATA, gross = net + the same rate.
+Checked locally (fake SAP): I0 → 0.00, 2I → 10,800 on 60,000. New `backend/test_calc_tax.py`; regression set passes.
+**AUP test:** tick it on an invoice with 2I, park, and compare MIR4's tax and balance with the preview.
+
 ## 2026-11-27 (later): MIR7 reference document category in PO Matching
 
 Client: MIR7's "Reference document category" (1 PO, 2 Delivery Note, 3 Bill of Lading, 4 SES, 5 Supplier, ...)
