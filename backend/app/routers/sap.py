@@ -1316,6 +1316,25 @@ async def post_invoice_to_sap_endpoint(
     if duplicates:
         raise HTTPException(status_code=409, detail=duplicate_block_message(duplicates))
 
+    # Client (2026-11-27): an invoice whose vendor NTN does not match the SAP
+    # vendor's is never parked, in any mode, and goes to the Exception queue with
+    # the reason. Only a real mismatch blocks: no tax number on either side does not.
+    from app.services.ntn_check import ntn_block_message, vendor_ntn_check
+    ntn = await vendor_ntn_check(db, invoice)
+    if ntn and ntn["status"] == "mismatch":
+        msg = ntn_block_message(ntn)
+        if invoice.status in ("validated", "approved"):
+            invoice.status = "exception"
+            try:
+                warns = json.loads(invoice.warnings) if invoice.warnings else []
+            except (TypeError, ValueError):
+                warns = []
+            if msg not in warns:
+                warns.append(msg)
+            invoice.warnings = json.dumps(warns)
+            await db.commit()
+        raise HTTPException(status_code=422, detail=msg)
+
     # ── No-SAP instance (e.g. Martin Dow demo): assume the SAP process ──
     # Skip PO-in-SAP lookup and the live BAPI call entirely.
     if not settings.SAP_ENABLED:

@@ -108,7 +108,9 @@ async def _seed():
                            invoice_date="2026-11-20", currency="PKR", status="pending_processing",
                            matched_po_id=po.id if po else None, supplier_id=None)
         rows = [inv("N-OK", "0912345", new_po), inv("N-BAD", "7654321-0", new_po),
-                inv("N-OLD", "0912345-6", old_po), inv("N-NONE", "0912345-6", None)]
+                inv("N-OLD", "0912345-6", old_po), inv("N-NONE", "0912345-6", None),
+                inv("N-FREIGHT", "7654321-0", new_po)]
+        rows[-1].sap_layout = "delivery"   # a transporter's own freight invoice
         db.add_all(rows)
         await db.commit()
         return {r.invoice_number: r.id for r in rows}, old_po.id
@@ -140,9 +142,31 @@ def test_api(client):
     expect("older PO: read from SAP -> match", old and old["status"] == "match", old)
     expect("older PO: tax numbers stored", asyncio.run(_old_po_numbers(old_po_id)) == json.dumps(["0912345-6"]))
     expect("not matched -> no check", check("N-NONE") is None)
+    expect("freight-only invoice (transporter) -> PO vendor not compared",
+           check("N-FREIGHT") is None)
 
     r = client.patch(f"/api/invoices/{ids['N-BAD']}/status", json={"status": "validated"})
     expect(f"a mismatch does not block Validate (got {r.status_code})", r.status_code == 200, r.text[:200])
+
+    # Client 2026-11-27: a mismatch is never parked and goes to Exception.
+    from types import SimpleNamespace
+    from app.security import get_current_internal_user
+    main.app.dependency_overrides[get_current_internal_user] = lambda: SimpleNamespace(
+        id=1, role="admin", email="admin@example.com", name="Admin", sap_username=None, sap_password_enc=None)
+    r = client.post(f"/api/sap/invoices/{ids['N-BAD']}/post", json={"mode": "validate"})
+    expect(f"mismatch: SAP park/dry run refused with 422 (got {r.status_code})",
+           r.status_code == 422 and "does not match SAP" in r.text, r.text[:200])
+    d = client.get(f"/api/invoices/{ids['N-BAD']}").json()
+    expect("... and the invoice is moved to Exception", d["status"] == "exception", d["status"])
+    expect("... with the reason in its warnings", any("does not match SAP" in w for w in (d.get("warnings") or [])),
+           d.get("warnings"))
+    r = client.post(f"/api/sap/invoices/{ids['N-OK']}/post", json={"mode": "validate"})
+    expect(f"a matching NTN is not refused for its NTN (got {r.status_code})", "does not match SAP" not in r.text,
+           r.text[:200])
+
+    ok = client.get(f"/api/invoices/{ids['N-OK']}").json()
+    expect("Vendor Code = the matched PO's SAP vendor", ok.get("vendor_code") == "0002000101", ok.get("vendor_code"))
+    expect("not matched -> no Vendor Code", client.get(f"/api/invoices/{ids['N-NONE']}").json().get("vendor_code") is None)
 
     main.app.dependency_overrides[get_current_principal] = lambda: SUPPLIER
     r = client.get(f"/api/invoices/{ids['N-BAD']}")

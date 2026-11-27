@@ -342,6 +342,8 @@ class InvoiceDetailResponse(BaseModel):
     # Invoice vendor NTN vs the SAP PO vendor's tax numbers (services/ntn_check.py);
     # None when not matched to a PO. Internal users only.
     vendor_ntn_check: Optional[dict] = None
+    # The SAP vendor number (LIFNR): the invoice's own, else the matched PO's.
+    vendor_code: Optional[str] = None
     sap_wf_posted_doc: Optional[str] = None
     sap_wf_message: Optional[str] = None
     sap_wf_checked_at: Optional[datetime] = None

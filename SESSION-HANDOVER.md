@@ -78,6 +78,26 @@ freight invoices with the same number, vendor and PO are duplicates; a quantity 
 order unit and OPU differ; the big ATL badge still says "NTN Not Found" when FBR does not answer; match
 reasoning shows `424.94000000000005`.
 
+## 2026-11-27: client email (8 observations) — built what needs nobody else
+
+Client email of 2026-11-27, points and status:
+1. **NTN vs SAP vendor master, block + Exception:** BUILT. Mismatch → park refused (422, all modes) and a
+   validated/approved invoice goes to `exception` with the reason in its warnings. Still depends on the open
+   question of where Lucky keeps the NTN (LFA1/LFBW empty for HAMZA TRADING), so in practice it only fires for
+   vendors with STCD1-3 filled. STRN (STCD2) is compared too.
+2. **Duplicates:** (a) same vendor + same invoice number: BUILT (whatever the PO; falls back to Reference + PO
+   when neither invoice identifies its vendor). `test_duplicate_check.py` updated: "different PO" is now a
+   duplicate when the vendor matches. (b) same GR + same amount, and checking SAP parked/posted documents: NOT
+   built, needs RBKP/RSEG read access.
+3. **WHT by nature + filer/exemption:** waiting for the client's codes (see 2026-11-26 WHT note).
+4. **Simulation:** not built; needs ABAP (CREATE1 + rollback safe? or a custom RFC).
+5. **Scanned invoice in SAP:** not built; needs an ABAP RFC for a GOS attachment (MIR7 document and/or PO).
+6. **Vendor ledger after park/post:** not built; needs read access to BSIK/BSAK/BSEG/WITH_ITEM, RBKP/RSEG.
+7. **One invoice, two POs:** not built; design work (one matched PO per invoice today).
+8. **Vendor Code:** BUILT as a read-only "Vendor Code (SAP)" row under Vendor Information (matched PO's LIFNR).
+
+Offline tests pass (`test_vendor_ntn_check`, `test_duplicate_check` and the regression set); build OK.
+
 ## 2026-11-26: Goods Receipts card — total of the ticked GRs
 
 User request: under the GR table, a "Selected total (N GRs)" row (`tfoot` in `GoodsReceiptsCard.jsx`) sums

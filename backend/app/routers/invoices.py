@@ -1028,6 +1028,8 @@ async def get_invoice(
         try:
             from app.services.ntn_check import vendor_ntn_check
             resp.vendor_ntn_check = await vendor_ntn_check(db, invoice)
+            resp.vendor_code = ((invoice.sap_vendor_number or "").strip()
+                                or (resp.vendor_ntn_check or {}).get("vendor_number") or None)
         except Exception:
             logger.warning("Vendor NTN check failed for invoice %s", invoice_id, exc_info=True)
     return resp

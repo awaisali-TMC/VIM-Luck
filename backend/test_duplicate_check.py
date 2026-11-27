@@ -71,13 +71,20 @@ def test_rule_unit():
     expect("all five equal -> duplicate",
            compare_keys(_key(), _key()) == ["reference", "po", "ntn", "vendor", "company_code"])
     expect("different reference -> not a duplicate", compare_keys(_key(), _key(reference="inv-2")) is None)
-    expect("different PO -> not a duplicate", compare_keys(_key(), _key(po="4500009002")) is None)
+    # Client 2026-11-27: same vendor + same invoice number is a duplicate, whatever the PO.
+    expect("different PO, same vendor -> duplicate",
+           compare_keys(_key(), _key(po="4500009002")) == ["reference", "ntn", "vendor", "company_code"])
+    expect("different PO, vendor unknown on both -> not a duplicate",
+           compare_keys(_key(ntn="", vendor=""), _key(po="4500009002", ntn="", vendor="")) is None)
     expect("different NTN -> not a duplicate", compare_keys(_key(), _key(ntn="1111111")) is None)
     expect("different vendor -> not a duplicate", compare_keys(_key(), _key(vendor="2000102")) is None)
     expect("different company code -> not a duplicate", compare_keys(_key(), _key(company_code="1200")) is None)
     expect("NTN missing on one side -> compared on the rest",
            compare_keys(_key(), _key(ntn="")) == ["reference", "po", "vendor", "company_code"])
-    expect("no PO on this invoice -> cannot be judged", compare_keys(_key(po=""), _key(po="")) is None)
+    expect("no PO, same vendor -> duplicate",
+           compare_keys(_key(po=""), _key(po="")) == ["reference", "ntn", "vendor", "company_code"])
+    expect("no PO and no vendor known -> cannot be judged",
+           compare_keys(_key(po="", ntn="", vendor=""), _key(po="", ntn="", vendor="")) is None)
     expect("NTN with and without check digit are the same NTN", _norm_ntn("5433744-3") == _norm_ntn("5433744"))
     expect("short NTN is zero-padded", _norm_ntn("912345") == _norm_ntn("0912345-6"))
     expect("13-digit CNIC compares in full",
@@ -168,10 +175,8 @@ def test_api(client):
     expect(f"... but not validated from there either (got {r.status_code})", _is_dup_block(r), r.text[:200])
     n = _save(client, ref, po_reference=None, status="pending_processing")
     r = client.patch(f"/api/invoices/{n}/status", json={"status": "validated"})
-    expect(f"no PO known: cannot be judged, Validate passes (got {r.status_code})", r.status_code == 200, r.text[:200])
-    _match(client, n, po_id)
-    r = client.post(f"/api/sap/invoices/{n}/post", json={"mode": "park"})
-    expect(f"... and it is caught once matched (got {r.status_code})", _is_dup_block(r), r.text[:200])
+    expect(f"no PO known, same vendor (NTN) + number: Validate -> 409 (got {r.status_code})",
+           _is_dup_block(r), r.text[:200])
     ok = _save(client, f"{ref}-OK", status="pending_processing")
     r = client.patch(f"/api/invoices/{ok}/status", json={"status": "validated"})
     expect(f"not a duplicate: Validate -> 200 (got {r.status_code})", r.status_code == 200, r.text[:200])
@@ -191,7 +196,8 @@ def test_api(client):
     expect("different reference -> not a duplicate", _dups(client, e).get("is_duplicate") is False)
     g = _save(client, ref, po_reference=OTHER_PO)
     _match(client, g, other_po_id)
-    expect("different PO -> not a duplicate", _dups(client, g).get("is_duplicate") is False)
+    expect("different PO, same vendor + number -> duplicate (client rule)",
+           _dups(client, g).get("is_duplicate") is True)
     r = client.post(f"/api/approvals/invoice/{c}/initiate")
     expect(f"non-duplicate submit is not refused as a duplicate (got {r.status_code})",
            not _is_dup_block(r), r.text[:200])

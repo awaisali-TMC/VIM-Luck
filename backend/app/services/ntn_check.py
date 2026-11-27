@@ -1,6 +1,7 @@
 """Client request (2026-11-26): the vendor NTN on the invoice must match the SAP PO's
-vendor. A mismatch is shown as an error on the invoice page; it does not block
-Submit or Park.
+vendor. A mismatch is shown as an error on the invoice page. Since the client's
+email of 2026-11-27 it also BLOCKS parking (every mode of the SAP post route) and
+moves the invoice to Exception; 'unknown' (no tax number on one side) never blocks.
 
 SAP side: the PO vendor's tax numbers from LFA1 (STCD1 = NTN, STCD2 = STRN,
 STCD3 = CNIC on Lucky's system), stored on the PO at sync as
@@ -94,6 +95,11 @@ async def vendor_ntn_check(db: AsyncSession, invoice) -> dict | None:
     {status, invoice_ntn, sap_tax_numbers, vendor_number, vendor_name, po_number}."""
     if not invoice.matched_po_id:
         return None
+    # A freight-only invoice ("Planned delivery costs") may come from a transporter,
+    # not the PO's vendor; its NTN is checked against SAP by freight_party() at park
+    # (no SAP vendor with that NTN -> refused), so the PO vendor is not compared.
+    if (invoice.sap_layout or "goods") == "delivery":
+        return None
     po = (await db.execute(select(PurchaseOrder).where(PurchaseOrder.id == invoice.matched_po_id))).scalar_one_or_none()
     if po is None:
         return None
@@ -115,3 +121,14 @@ async def vendor_ntn_check(db: AsyncSession, invoice) -> dict | None:
         "vendor_name": po.vendor_name,
         "po_number": po.po_number,
     }
+
+
+def ntn_block_message(check: dict) -> str:
+    vendor = " ".join(x for x in (check.get("vendor_name") or "",
+                                  f"({check['vendor_number']})" if check.get("vendor_number") else "") if x)
+    return (
+        f"Vendor NTN does not match SAP: the invoice shows {check.get('invoice_ntn')}, but PO "
+        f"{check.get('po_number')}'s vendor {vendor} has {' / '.join(check.get('sap_tax_numbers') or [])} "
+        "in SAP. The invoice was not parked and is moved to Exception. Correct the NTN or the PO "
+        "match, then send it back for processing."
+    ).replace("  ", " ")

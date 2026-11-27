@@ -451,6 +451,8 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
         setSapValidationError(
           typeof detail === "string" ? detail : detail?.message || "SAP validation failed — see server logs."
         );
+        // A refusal can change the invoice (an NTN mismatch moves it to Exception).
+        refetch();
       } finally {
         setValidatingSap(false);
       }
@@ -1083,7 +1085,7 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
           {invoice.vendor_ntn_check.vendor_name ? ` ${invoice.vendor_ntn_check.vendor_name}` : ""}
           {invoice.vendor_ntn_check.vendor_number ? ` (${invoice.vendor_ntn_check.vendor_number})` : ""} has{" "}
           <span className="font-mono font-semibold">{invoice.vendor_ntn_check.sap_tax_numbers.join(" / ")}</span> in SAP.
-          Check the NTN on the invoice, and that it is matched to the right PO.
+          It cannot be parked until they match: correct the NTN on the invoice, or check it is matched to the right PO.
         </div>
       )}
       {invoice.vendor_ntn_check?.status === "unknown" && invoice.vendor_ntn_check.invoice_ntn

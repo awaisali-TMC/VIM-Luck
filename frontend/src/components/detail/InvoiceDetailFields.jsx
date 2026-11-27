@@ -18,6 +18,9 @@ const FIELD_GROUPS = [
       { key: "supplier_name", label: "Vendor Name" },
       { key: "supplier_address", label: "Vendor Address" },
       { key: "supplier_ntn", label: "Vendor NTN / CNIC" },
+      // SAP vendor number (LIFNR) from the matched PO — read-only (client #8).
+      { key: "vendor_code", label: "Vendor Code (SAP)", readOnly: true,
+        empty: "Match the PO to see it" },
     ],
   },
   {
@@ -103,7 +106,11 @@ export default function InvoiceDetailFields({
 
                       {/* Value or Input */}
                       <td className="px-3.5 py-2 border-b border-neutral-50 text-neutral-900 font-medium">
-                        {editing ? (
+                        {field.readOnly ? (
+                          rawValue
+                            ? <span className="font-mono">{rawValue}</span>
+                            : <span className="text-neutral-400 font-normal">{field.empty || "—"}</span>
+                        ) : editing ? (
                           <input
                             type={field.type === "number" ? "number" : "text"}
                             step={field.type === "number" ? "0.01" : undefined}

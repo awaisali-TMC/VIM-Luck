@@ -2,8 +2,10 @@
 Duplicate invoice detection service.
 
 The BLOCKING rule (Lucky Cement): an invoice is a duplicate of an EARLIER live
-invoice with the same key — Reference (invoice number), PO, supplier NTN, SAP
-vendor and company code. See find_key_duplicates(). A duplicate cannot be
+invoice with the same Reference (invoice number) from the same vendor (SAP vendor
+number or NTN), whatever the PO (client, 2026-11-27); when neither invoice
+identifies its vendor, the same Reference and PO. NTN, SAP vendor and company
+code must agree wherever both carry them. See find_key_duplicates(). A duplicate cannot be
 submitted for approval, moved forward by a status change, or sent to SAP.
 
 Advisory warnings, shown on the invoice but never blocking:
@@ -83,22 +85,23 @@ def invoice_key(invoice: Invoice, po: PurchaseOrder | None) -> dict:
 def compare_keys(mine: dict, theirs: dict) -> list[str] | None:
     """Fields both keys matched on, or None when they are not the same invoice.
 
-    Reference and PO must be present and equal. NTN, vendor and company code must
-    be equal wherever both invoices carry them: a value missing on one side (NTN
-    not extracted, PO synced before company codes were stored) is skipped rather
-    than letting a duplicate through.
+    Reference must be present and equal. Then either the vendor is the same (SAP
+    vendor number or NTN, carried by both) — whatever the PO (client 2026-11-27:
+    same vendor + same invoice number) — or, when the vendor is not known on both
+    sides, the PO is the same. NTN, vendor and company code must be equal
+    wherever both invoices carry them: a value missing on one side is skipped
+    rather than letting a duplicate through.
     """
-    if not mine["reference"] or not mine["po"]:
+    if not mine["reference"] or mine["reference"] != theirs["reference"]:
         return None
-    if mine["reference"] != theirs["reference"] or mine["po"] != theirs["po"]:
+    both = [f for f in ("ntn", "vendor", "company_code") if mine[f] and theirs[f]]
+    if any(mine[f] != theirs[f] for f in both):
         return None
-    matched = ["reference", "po"]
-    for field in ("ntn", "vendor", "company_code"):
-        if mine[field] and theirs[field]:
-            if mine[field] != theirs[field]:
-                return None
-            matched.append(field)
-    return matched
+    same_vendor = any(f in both for f in ("vendor", "ntn"))
+    same_po = bool(mine["po"]) and mine["po"] == theirs["po"]
+    if not (same_vendor or same_po):
+        return None
+    return ["reference"] + (["po"] if same_po else []) + both
 
 
 async def find_key_duplicates(db: AsyncSession, invoice: Invoice) -> list[dict]:
@@ -146,9 +149,11 @@ async def find_key_duplicates(db: AsyncSession, invoice: Invoice) -> list[dict]:
 def duplicate_block_message(duplicates: list[dict]) -> str:
     first = duplicates[0]
     more = f" (and {len(duplicates) - 1} more)" if len(duplicates) > 1 else ""
+    against = (f"against PO {first['po_number']}" if "PO" in first["matched_on"]
+               else "from the same vendor")
     return (
-        f"Duplicate invoice: reference '{first['invoice_number']}' against PO "
-        f"{first['po_number']} already exists as invoice #{first['id']} "
+        f"Duplicate invoice: reference '{first['invoice_number']}' {against} "
+        f"already exists as invoice #{first['id']} "
         f"({first['status']}){more}. Matched on {', '.join(first['matched_on'])}. "
         "Delete this copy, or mark the earlier invoice as exception, before continuing."
     )
