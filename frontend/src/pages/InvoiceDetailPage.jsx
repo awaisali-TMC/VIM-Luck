@@ -1578,7 +1578,7 @@ export default function InvoiceDetailPage({ invoiceId, onBack, currentUser }) {
             </div>
             <div className="bg-neutral-25 border border-neutral-100 rounded-md p-4 text-2xs space-y-2">
               <div className="flex justify-between">
-                <span className="text-neutral-500">Layout</span>
+                <span className="text-neutral-500">Items to Park</span>
                 <span className="font-medium text-neutral-800">
                   {{ goods: "1 Goods/service items", delivery: "2 Planned delivery costs", both: "3 Goods/service items + planned delivery costs" }[invoice.sap_layout || "goods"]}
                 </span>

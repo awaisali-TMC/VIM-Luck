@@ -3,7 +3,8 @@ import Card from "../common/Card";
 import { todayIso } from "../../utils/dateRange";
 
 const LAYOUT_OPTIONS = [
-  // Same wording and numbers as MIR7's "Layout" dropdown.
+  // Same wording and numbers as MIR7's item filter on the PO Reference tab (which
+  // items of the PO are proposed). Not MIR7's "Layout", which is the column variant.
   { value: "goods", label: "1 Goods/service items" },
   { value: "delivery", label: "2 Planned delivery costs" },
   { value: "both", label: "3 Goods/service items + planned delivery costs" },
@@ -231,9 +232,9 @@ export default function SAPPostingCard({
 
         {/* Items to Park + posting/baseline dates */}
         <div className="grid grid-cols-2 gap-x-8 gap-y-4 pt-2">
-          {/* Items to Park (SAP MIR7 "layout") */}
+          {/* Items to Park (MIR7 item filter: goods / planned delivery costs / both) */}
           <div>
-            <span className={labelCls}>Layout (items to park) {req}</span>
+            <span className={labelCls}>Items to Park {req}</span>
             {editable ? (
               <select
                 value={layout}
