@@ -169,25 +169,60 @@ export default function SAPPostingCard({
             <span className="text-2xs font-normal text-neutral-500">— SAP calculates the tax from the tax code, as in MIR7</span>
           </label>
           {calcTax && (
-            <div className="mt-1.5 text-2xs rounded-md border border-neutral-100 bg-neutral-25 px-3 py-2 max-w-md">
+            <div className="mt-1.5 text-2xs rounded-md border border-neutral-100 bg-neutral-25 px-3 py-2 max-w-xl">
               {calculatedTax == null ? (
                 <span className="text-warning-dark">No rate known for tax code {taxCode || "—"}: SAP still calculates it when parking.</span>
               ) : (
-                <>
-                  <div className="flex justify-between">
-                    <span className="text-neutral-600">Tax ({taxCode} · {taxRate}% of {fmtMoney(netForTax)})</span>
-                    <span className="font-mono font-semibold text-neutral-900">{fmtMoney(calculatedTax)}</span>
-                  </div>
-                  <div className="flex justify-between text-neutral-500">
-                    <span>Tax on the invoice</span>
-                    <span className="font-mono">{fmtMoney(invoiceTax)}</span>
-                  </div>
+                <table className="w-full border-collapse">
+                  <tbody>
+                    <tr>
+                      <td className="py-0.5 text-neutral-500">Tax code</td>
+                      <td className="py-0.5 text-right text-neutral-800">
+                        <span className="font-mono font-semibold">{taxCode}</span>
+                        {selectedTaxMeta?.description ? ` — ${selectedTaxMeta.description}` : ""}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="py-0.5 text-neutral-500">Base amount (net of the lines)</td>
+                      <td className="py-0.5 text-right font-mono text-neutral-800">{fmtMoney(netForTax)}</td>
+                    </tr>
+                    <tr>
+                      <td className="py-0.5 text-neutral-500">Tax rate</td>
+                      <td className="py-0.5 text-right font-mono text-neutral-800">{taxRate}%</td>
+                    </tr>
+                    <tr>
+                      <td className="py-0.5 text-neutral-500">Formula</td>
+                      <td className="py-0.5 text-right font-mono text-neutral-800">
+                        {fmtMoney(netForTax)} × {taxRate}% = {fmtMoney(calculatedTax)}
+                      </td>
+                    </tr>
+                    <tr className="border-t border-neutral-200">
+                      <td className="pt-1 font-semibold text-neutral-900">Tax amount (SAP calculates)</td>
+                      <td className="pt-1 text-right font-mono font-semibold text-neutral-900">{fmtMoney(calculatedTax)}</td>
+                    </tr>
+                    <tr>
+                      <td className="py-0.5 text-neutral-500">Gross amount = Base + Tax</td>
+                      <td className="py-0.5 text-right font-mono text-neutral-800">
+                        {fmtMoney(netForTax)} + {fmtMoney(calculatedTax)} = {fmtMoney(netForTax + calculatedTax)}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="py-0.5 text-neutral-500">Tax on the invoice</td>
+                      <td className="py-0.5 text-right font-mono text-neutral-800">{fmtMoney(invoiceTax)}</td>
+                    </tr>
+                    <tr>
+                      <td className="py-0.5 text-neutral-500">Difference (SAP − invoice)</td>
+                      <td className={`py-0.5 text-right font-mono ${invoiceTax > 0 && Math.abs(calculatedTax - invoiceTax) > 1 ? "text-warning-dark font-semibold" : "text-neutral-800"}`}>
+                        {fmtMoney(calculatedTax - invoiceTax)}
+                      </td>
+                    </tr>
+                  </tbody>
                   {invoiceTax > 0 && Math.abs(calculatedTax - invoiceTax) > 1 && (
-                    <div className="mt-1 text-warning-dark">
-                      Differs from the invoice by {fmtMoney(calculatedTax - invoiceTax)}: check the tax code.
-                    </div>
+                    <caption className="caption-bottom pt-1 text-left text-warning-dark">
+                      SAP's tax differs from the invoice by {fmtMoney(calculatedTax - invoiceTax)}: check the tax code.
+                    </caption>
                   )}
-                </>
+                </table>
               )}
             </div>
           )}
